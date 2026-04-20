@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT ri.ingrediente_id, ri.quantidade, i.nome, i.unidade, i.preco_atual\n         FROM receita_ingredientes ri\n         JOIN ingredientes i ON i.id = ri.ingrediente_id\n         WHERE ri.receita_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "ingrediente_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "quantidade",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "nome",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "unidade",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "preco_atual",
+        "ordinal": 4,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "cd7f56ecedd764fbd16de631c0742ea5b7504f00b956d79235dd4765a1e84467"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT porcoes_base FROM receitas WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "porcoes_base",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bc263d2b14db8eca6106f57455516527bc3903bd650c4264a043e3d56dc7c398"
+}

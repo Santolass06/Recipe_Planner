@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO receitas (nome, categoria, tags, porcoes_base, instrucoes, imagem_path)\n         VALUES (?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "f5efdc76f9200809577ade9089c1afb6e47c9c79712541888f1d172d1b621549"
+}

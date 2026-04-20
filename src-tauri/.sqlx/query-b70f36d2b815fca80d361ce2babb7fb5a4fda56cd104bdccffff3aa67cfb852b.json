@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM receita_ingredientes WHERE receita_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "b70f36d2b815fca80d361ce2babb7fb5a4fda56cd104bdccffff3aa67cfb852b"
+}

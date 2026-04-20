@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO historico_precos (ingrediente_id, preco) VALUES (?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "ca72e79865b282d45d88f8b9105f2d2412925ddb63bd96423a2ba4e96f972cac"
+}

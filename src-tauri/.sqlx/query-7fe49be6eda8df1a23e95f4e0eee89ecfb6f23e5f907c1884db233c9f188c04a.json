@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE ingredientes\n         SET nome = ?, unidade = ?, preco_atual = ?, imagem_path = ?\n         WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "7fe49be6eda8df1a23e95f4e0eee89ecfb6f23e5f907c1884db233c9f188c04a"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO ingredientes (nome, unidade, preco_atual, imagem_path)\n         VALUES (?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "279c2d543fc55ac19d761105aa7f2972c00881d9ed128e16fe3677800266b1a3"
+}

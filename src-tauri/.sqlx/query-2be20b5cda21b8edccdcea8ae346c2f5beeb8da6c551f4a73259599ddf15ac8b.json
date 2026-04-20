@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, nome, unidade, preco_atual, imagem_path, created_at, updated_at\n         FROM ingredientes\n         ORDER BY nome ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "nome",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "unidade",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "preco_atual",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "imagem_path",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 6,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "2be20b5cda21b8edccdcea8ae346c2f5beeb8da6c551f4a73259599ddf15ac8b"
+}

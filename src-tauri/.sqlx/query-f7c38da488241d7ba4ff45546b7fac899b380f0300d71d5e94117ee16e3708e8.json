@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE receitas\n         SET nome = ?, categoria = ?, tags = ?, porcoes_base = ?, instrucoes = ?, imagem_path = ?\n         WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "f7c38da488241d7ba4ff45546b7fac899b380f0300d71d5e94117ee16e3708e8"
+}

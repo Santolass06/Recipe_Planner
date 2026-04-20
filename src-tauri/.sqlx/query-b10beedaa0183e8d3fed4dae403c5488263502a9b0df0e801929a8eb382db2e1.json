@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, nome, categoria, tags, porcoes_base, instrucoes, imagem_path, created_at, updated_at\n         FROM receitas\n         ORDER BY nome ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "nome",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "categoria",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "tags",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "porcoes_base",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "instrucoes",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "imagem_path",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 8,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "b10beedaa0183e8d3fed4dae403c5488263502a9b0df0e801929a8eb382db2e1"
+}
