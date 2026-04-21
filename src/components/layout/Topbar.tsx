@@ -1,10 +1,11 @@
+import type { ReactNode } from "react";
 import { Search, Bell, Settings } from "lucide-react";
 
 interface TopbarProps {
   placeholder?: string;
   search?: string;
   onSearch?: (v: string) => void;
-  right?: React.ReactNode;
+  right?: ReactNode;
 }
 
 export default function Topbar({
@@ -30,11 +31,7 @@ export default function Topbar({
         </div>
 
         <div style={{ flex: 1 }} />
-        {right && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-            {right}
-          </div>
-        )}
+        {right && <div className="topbar-actions">{right}</div>}
       </div>
 
       <div className="topbar-divider" />

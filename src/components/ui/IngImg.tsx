@@ -1,4 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { isBundledIngredientImage } from "../../utils/ingredientDefaults";
 
 interface IngImgProps {
   path: string | null;
@@ -24,7 +25,12 @@ export default function IngImg({ path, alt = "", className, style }: IngImgProps
     return <div className={`${stripe} ${className ?? ""}`} style={style} />;
   }
   let src = path;
-  if (!path.startsWith("data:") && !path.startsWith("blob:") && !path.startsWith("http")) {
+  if (
+    !isBundledIngredientImage(path) &&
+    !path.startsWith("data:") &&
+    !path.startsWith("blob:") &&
+    !path.startsWith("http")
+  ) {
     try { src = convertFileSrc(path); } catch { src = path; }
   }
   return (

@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { copyFile, mkdir } from "@tauri-apps/plugin-fs";
 import { appDataDir } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { isBundledIngredientImage } from "../../utils/ingredientDefaults";
 
 interface ImageUploadProps {
   value: string | null;
@@ -33,6 +34,7 @@ export default function ImageUpload({ value, onChange, aspectRatio = "4/3" }: Im
   }
 
   function getDisplaySrc(path: string) {
+    if (isBundledIngredientImage(path)) return path;
     if (path.startsWith("data:") || path.startsWith("blob:")) return path;
     try {
       return convertFileSrc(path);

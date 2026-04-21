@@ -8,6 +8,7 @@ import ImageUpload from "../components/ui/ImageUpload";
 import IngImg from "../components/ui/IngImg";
 import { useToast } from "../components/ui/Toast";
 import { api } from "../utils/api";
+import { defaultIngredientImageFor } from "../utils/ingredientDefaults";
 import type { Ingrediente, Unidade } from "../types";
 
 const UNIDADES: { value: Unidade; label: string }[] = [
@@ -38,8 +39,10 @@ export default function Ingredientes() {
   const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [imagePath, setImagePath] = useState<string | null>(null);
+  const [imageManuallyChosen, setImageManuallyChosen] = useState(false);
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<FormData>();
+  const { register, handleSubmit, reset, watch, formState: { errors } } = useForm<FormData>();
+  const watchedName = watch("nome", "");
 
   async function load() {
     try {
@@ -54,9 +57,15 @@ export default function Ingredientes() {
 
   useEffect(() => { load(); }, []);
 
+  useEffect(() => {
+    if (!modalOpen || imageManuallyChosen) return;
+    setImagePath(defaultIngredientImageFor(watchedName));
+  }, [imageManuallyChosen, modalOpen, watchedName]);
+
   function openCreate() {
     setEditing(null);
     setImagePath(null);
+    setImageManuallyChosen(false);
     reset({ nome: "", unidade: "kg", preco_atual: "" });
     setModalOpen(true);
   }
@@ -64,6 +73,7 @@ export default function Ingredientes() {
   function openEdit(ing: Ingrediente) {
     setEditing(ing);
     setImagePath(ing.imagem_path);
+    setImageManuallyChosen(!!ing.imagem_path);
     reset({ nome: ing.nome, unidade: ing.unidade, preco_atual: String(ing.preco_atual) });
     setModalOpen(true);
   }
@@ -179,7 +189,14 @@ export default function Ingredientes() {
         >
           <div className="form-group">
             <label className="form-label">Imagem</label>
-            <ImageUpload value={imagePath} onChange={setImagePath} aspectRatio="16/7" />
+            <ImageUpload
+              value={imagePath}
+              onChange={(path) => {
+                setImageManuallyChosen(true);
+                setImagePath(path);
+              }}
+              aspectRatio="16/7"
+            />
           </div>
 
           <div className="form-group">
