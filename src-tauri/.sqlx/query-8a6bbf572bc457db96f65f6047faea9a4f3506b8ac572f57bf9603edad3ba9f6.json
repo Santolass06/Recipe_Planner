@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT i.nome as ingrediente_nome, hp.preco, hp.data\n         FROM historico_precos hp\n         JOIN ingredientes i ON i.id = hp.ingrediente_id\n         ORDER BY hp.data DESC\n         LIMIT 10",
+  "describe": {
+    "columns": [
+      {
+        "name": "ingrediente_nome",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "preco",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "data",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8a6bbf572bc457db96f65f6047faea9a4f3506b8ac572f57bf9603edad3ba9f6"
+}

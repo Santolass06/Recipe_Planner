@@ -42,6 +42,13 @@ pub fn run() {
             commands::receitas::eliminar_receita,
             // Cálculo de custos
             commands::custos::calcular_custo_receita,
+            // Stock
+            commands::stock::listar_stock,
+            commands::stock::atualizar_stock,
+            // Sugestor
+            commands::sugestor::receitas_possiveis,
+            // Relatórios
+            commands::relatorios::relatorio_resumo,
         ])
         .run(tauri::generate_context!())
         .expect("Erro ao iniciar a aplicação");

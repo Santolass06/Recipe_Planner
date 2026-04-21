@@ -63,3 +63,25 @@ export interface CustoIngrediente {
   e_promocao: boolean;
   custo_parcial: number;
 }
+
+export interface StockItem {
+  ingrediente_id: number;
+  nome: string;
+  unidade: string;
+  quantidade_disponivel: number;
+  updated_at: string;
+}
+
+export interface HistoricoPrecoItem {
+  ingrediente_nome: string;
+  preco: number;
+  data: string;
+}
+
+export interface RelatorioResumo {
+  total_ingredientes: number;
+  total_receitas: number;
+  ingrediente_mais_caro: string | null;
+  receita_mais_cara: string | null;
+  historico_precos_recentes: HistoricoPrecoItem[];
+}

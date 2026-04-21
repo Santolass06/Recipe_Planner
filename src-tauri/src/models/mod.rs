@@ -103,3 +103,38 @@ pub struct CustoIngrediente {
     pub e_promocao: bool,
     pub custo_parcial: f64,
 }
+
+// ─── Stock ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct StockItem {
+    pub ingrediente_id: i64,
+    pub nome: String,
+    pub unidade: String,
+    pub quantidade_disponivel: f64,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StockPayload {
+    pub ingrediente_id: i64,
+    pub quantidade_disponivel: f64,
+}
+
+// ─── Relatórios ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RelatorioResumo {
+    pub total_ingredientes: i64,
+    pub total_receitas: i64,
+    pub ingrediente_mais_caro: Option<String>,
+    pub receita_mais_cara: Option<String>,
+    pub historico_precos_recentes: Vec<HistoricoPrecoItem>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct HistoricoPrecoItem {
+    pub ingrediente_nome: String,
+    pub preco: f64,
+    pub data: String,
+}

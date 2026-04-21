@@ -50,7 +50,7 @@ export default function ReceitaDetalhe() {
       });
       setCusto(result);
     } catch {
-      addToast("Erro ao calcular custos", "error");
+      setCusto(null);
     } finally {
       setCalculando(false);
     }
@@ -76,6 +76,8 @@ export default function ReceitaDetalhe() {
   if (!receita) return null;
 
   const precoSugerido = custo ? custo.preco_venda_sugerido : 0;
+  const custoPorcao = custo ? custo.custo_por_porcao : 0;
+  const costBarPct = precoSugerido > 0 ? Math.min(100, (custoPorcao / precoSugerido) * 100) : 0;
   const [whole, decimal] = precoSugerido.toFixed(2).split(".");
 
   return (
@@ -163,7 +165,13 @@ export default function ReceitaDetalhe() {
             </div>
 
             {/* Ingredients card */}
-            {custo && (
+            {custo && custo.breakdown.length === 0 && (
+              <div className="card section-gap" style={{ padding: "18px 22px", display: "flex", gap: 12, alignItems: "center", color: "var(--text-muted)", fontSize: 13.5 }}>
+                <span style={{ fontSize: 18 }}>⚠️</span>
+                <span>Os ingredientes desta receita já não existem. Edite a receita para actualizar a lista de ingredientes.</span>
+              </div>
+            )}
+            {custo && custo.breakdown.length > 0 && (
               <div className="card section-gap">
                 <div className="card-head">
                   <div>
@@ -275,15 +283,15 @@ export default function ReceitaDetalhe() {
                 <div className="breakdown-zone">
                   <div className="breakdown-row">
                     <span>Custo por porção</span>
-                    <span className="v">€{custo.custo_por_porcao.toFixed(2)}</span>
+                    <span className="v">€{custoPorcao.toFixed(2)}</span>
                   </div>
                   <div className="breakdown-row profit">
                     <span>Lucro por porção</span>
-                    <span className="v">+€{(precoSugerido - custo.custo_por_porcao).toFixed(2)}</span>
+                    <span className="v">+€{Math.max(0, precoSugerido - custoPorcao).toFixed(2)}</span>
                   </div>
                   <div className="breakdown-row">
                     <span>Lucro total ({porcoes} porções)</span>
-                    <span className="v">€{((precoSugerido - custo.custo_por_porcao) * porcoes).toFixed(2)}</span>
+                    <span className="v">€{(Math.max(0, precoSugerido - custoPorcao) * porcoes).toFixed(2)}</span>
                   </div>
                   <div className="breakdown-row strong">
                     <span>Receita total</span>
@@ -292,7 +300,7 @@ export default function ReceitaDetalhe() {
                 </div>
                 <div className="compare-bar">
                   <div className="bar">
-                    <span style={{ width: `${Math.min(100, (custo.custo_por_porcao / precoSugerido) * 100)}%` }} />
+                    <span style={{ width: `${costBarPct}%` }} />
                   </div>
                   <div className="bar alt"><span style={{ width: "100%" }} /></div>
                 </div>

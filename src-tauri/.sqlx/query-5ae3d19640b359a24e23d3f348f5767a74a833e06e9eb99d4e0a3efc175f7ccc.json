@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT i.id as ingrediente_id, i.nome, i.unidade,\n                COALESCE(s.quantidade_disponivel, 0.0) as quantidade_disponivel,\n                COALESCE(s.updated_at, datetime('now')) as updated_at\n         FROM ingredientes i\n         LEFT JOIN stock s ON s.ingrediente_id = i.id\n         ORDER BY i.nome ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "ingrediente_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "nome",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "unidade",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "quantidade_disponivel",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "5ae3d19640b359a24e23d3f348f5767a74a833e06e9eb99d4e0a3efc175f7ccc"
+}

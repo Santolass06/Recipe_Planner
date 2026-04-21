@@ -15,21 +15,27 @@ export default function Topbar({
 }: TopbarProps) {
   return (
     <div className="topbar">
-      <div className="search-wrap">
-        <span className="search-icon">
-          <Search size={15} />
-        </span>
-        <input
-          type="text"
-          placeholder={placeholder}
-          value={search ?? ""}
-          onChange={(e) => onSearch?.(e.target.value)}
-        />
-        <span className="search-kbd">⌘K</span>
-      </div>
+      <div className="topbar-center">
+        <div className="search-wrap">
+          <span className="search-icon">
+            <Search size={15} />
+          </span>
+          <input
+            type="text"
+            placeholder={placeholder}
+            value={search ?? ""}
+            onChange={(e) => onSearch?.(e.target.value)}
+          />
+          <span className="search-kbd">⌘K</span>
+        </div>
 
-      <div style={{ flex: 1 }} />
-      {right}
+        <div style={{ flex: 1 }} />
+        {right && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            {right}
+          </div>
+        )}
+      </div>
 
       <div className="topbar-divider" />
       <button className="icon-btn" title="Notificações">

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT nome FROM ingredientes ORDER BY preco_atual DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "nome",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "37b4ef1c65a7f2cffe1c950acd0b57f89e64b7cc8028f2ddc3a980e43bdbccb7"
+}

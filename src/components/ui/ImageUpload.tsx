@@ -1,5 +1,7 @@
-import { useRef } from "react";
-import { ImagePlus, RefreshCw } from "lucide-react";
+import { RefreshCw, ImagePlus } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { copyFile, mkdir } from "@tauri-apps/plugin-fs";
+import { appDataDir } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 interface ImageUploadProps {
@@ -9,14 +11,25 @@ interface ImageUploadProps {
 }
 
 export default function ImageUpload({ value, onChange, aspectRatio = "4/3" }: ImageUploadProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  async function handleClick() {
+    try {
+      const selected = await open({
+        filters: [{ name: "Imagem", extensions: ["png", "jpg", "jpeg", "webp"] }],
+      });
+      if (!selected || typeof selected !== "string") return;
 
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const path = (file as unknown as { path?: string }).path ?? file.name;
-    onChange(path);
-    e.target.value = "";
+      const dataDir = await appDataDir();
+      const destDir = dataDir + "images/";
+      await mkdir(destDir, { recursive: true });
+
+      const fileName = Date.now() + "_" + selected.split("/").pop();
+      const destPath = destDir + fileName;
+      await copyFile(selected, destPath);
+
+      onChange(destPath);
+    } catch (e) {
+      console.error("Erro ao carregar imagem:", e);
+    }
   }
 
   function getDisplaySrc(path: string) {
@@ -33,13 +46,16 @@ export default function ImageUpload({ value, onChange, aspectRatio = "4/3" }: Im
   return (
     <div
       className={`img-upload-zone ${hasImage ? "has-image" : ""}`}
-      style={{ aspectRatio }}
-      onClick={() => inputRef.current?.click()}
+      style={{ aspectRatio, cursor: "pointer" }}
+      onClick={handleClick}
     >
       {hasImage ? (
         <>
           <img src={getDisplaySrc(value!)} alt="" />
-          <div className="img-upload-overlay" style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <div
+            className="img-upload-overlay"
+            style={{ display: "flex", flexDirection: "column", alignItems: "center" }}
+          >
             <RefreshCw size={18} />
             <span>Alterar imagem</span>
           </div>
@@ -50,7 +66,6 @@ export default function ImageUpload({ value, onChange, aspectRatio = "4/3" }: Im
           <span className="img-upload-hint">Clique para adicionar imagem</span>
         </>
       )}
-      <input ref={inputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFile} />
     </div>
   );
 }

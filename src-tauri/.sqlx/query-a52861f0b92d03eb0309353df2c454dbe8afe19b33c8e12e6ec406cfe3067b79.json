@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO stock (ingrediente_id, quantidade_disponivel, updated_at)\n         VALUES (?, ?, datetime('now'))\n         ON CONFLICT(ingrediente_id) DO UPDATE SET\n             quantidade_disponivel = excluded.quantidade_disponivel,\n             updated_at = datetime('now')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "a52861f0b92d03eb0309353df2c454dbe8afe19b33c8e12e6ec406cfe3067b79"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT r.nome\n         FROM receitas r\n         LEFT JOIN (\n             SELECT ri.receita_id, SUM(i.preco_atual * ri.quantidade) as custo_total\n             FROM receita_ingredientes ri\n             JOIN ingredientes i ON i.id = ri.ingrediente_id\n             GROUP BY ri.receita_id\n         ) costs ON costs.receita_id = r.id\n         ORDER BY COALESCE(costs.custo_total, 0.0) DESC\n         LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "nome",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a61a3acefde7de470a4ed20b30893485df4dd51a094fc58de04193c071317b86"
+}

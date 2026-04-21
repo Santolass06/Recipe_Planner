@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT i.id as ingrediente_id, i.nome, i.unidade,\n                s.quantidade_disponivel, s.updated_at\n         FROM stock s\n         JOIN ingredientes i ON i.id = s.ingrediente_id\n         WHERE s.ingrediente_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "ingrediente_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "nome",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "unidade",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "quantidade_disponivel",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b349aa046b457bf4e6e022673ae3faa7f42abd556eade58681afabadd974b408"
+}

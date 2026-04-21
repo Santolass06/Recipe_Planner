@@ -62,7 +62,7 @@ export default function Custos() {
       });
       setPromos(newPromos);
     } catch {
-      addToast("Erro ao calcular custos", "error");
+      setCusto(null);
     } finally {
       setCalculando(false);
     }
@@ -96,8 +96,10 @@ export default function Custos() {
   if (!receita) return null;
 
   const precoSugeridoBase = custo ? custo.preco_venda_sugerido : 0;
+  const custoPorcaoBase = custo ? custo.custo_por_porcao : 0;
   const [whole, decimal] = precoSugeridoBase.toFixed(2).split(".");
-  const lucroTotal = custo ? (precoSugeridoBase - custo.custo_por_porcao) * porcoes : 0;
+  const lucroTotal = custo ? Math.max(0, precoSugeridoBase - custoPorcaoBase) * porcoes : 0;
+  const costBarPctCustos = precoSugeridoBase > 0 ? Math.min(100, (custoPorcaoBase / precoSugeridoBase) * 100) : 0;
 
   return (
     <>
@@ -342,7 +344,7 @@ export default function Custos() {
                   <div style={{ marginTop: 14, padding: 12, background: "var(--sage-soft)", borderRadius: 8, fontSize: 12.5, color: "#3f5a34", lineHeight: 1.6 }}>
                     <strong>Margem efectiva</strong> com promoções activas:&nbsp;
                     <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>
-                      {((1 - custo.custo_por_porcao / precoSugeridoBase) * 100).toFixed(1)}%
+                      {precoSugeridoBase > 0 ? ((1 - custoPorcaoBase / precoSugeridoBase) * 100).toFixed(1) : "—"}%
                     </span>
                   </div>
                 )}
@@ -382,7 +384,7 @@ export default function Custos() {
                   </div>
                   <div className="breakdown-row profit">
                     <span>Lucro por porção</span>
-                    <span className="v">+€{(precoSugeridoBase - custo.custo_por_porcao).toFixed(2)}</span>
+                    <span className="v">+€{Math.max(0, precoSugeridoBase - custoPorcaoBase).toFixed(2)}</span>
                   </div>
                   <div className="breakdown-row">
                     <span>Lucro total do lote</span>
@@ -395,7 +397,7 @@ export default function Custos() {
                 </div>
                 <div className="compare-bar">
                   <div className="bar">
-                    <span style={{ width: `${Math.min(100, (custo.custo_por_porcao / precoSugeridoBase) * 100)}%` }} />
+                    <span style={{ width: `${costBarPctCustos}%` }} />
                   </div>
                   <div className="bar alt"><span style={{ width: "100%" }} /></div>
                 </div>

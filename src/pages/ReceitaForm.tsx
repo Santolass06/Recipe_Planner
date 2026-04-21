@@ -5,6 +5,7 @@ import { Plus, Trash2, Save } from "lucide-react";
 import Topbar from "../components/layout/Topbar";
 import ImageUpload from "../components/ui/ImageUpload";
 import TagInput from "../components/ui/TagInput";
+import SelectIngrediente from "../components/ui/SelectIngrediente";
 import { useToast } from "../components/ui/Toast";
 import { api } from "../utils/api";
 import type { Ingrediente } from "../types";
@@ -222,18 +223,11 @@ export default function ReceitaForm() {
                 </div>
                 {ingRows.map((row, idx) => (
                   <div key={idx} className="form-ing-row">
-                    <select
-                      className="form-select"
+                    <SelectIngrediente
+                      ingredientes={ingredientes}
                       value={row.ingrediente_id}
-                      onChange={(e) => updateRow(idx, "ingrediente_id", Number(e.target.value))}
-                    >
-                      <option value={0}>Seleccionar ingrediente…</option>
-                      {ingredientes.map((ing) => (
-                        <option key={ing.id} value={ing.id}>
-                          {ing.nome} ({ing.unidade})
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(id) => updateRow(idx, "ingrediente_id", id)}
+                    />
                     <input
                       className="form-input"
                       type="number"

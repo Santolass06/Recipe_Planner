@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, nome, categoria, tags, porcoes_base, instrucoes, imagem_path, created_at, updated_at\n         FROM receitas r\n         WHERE (SELECT COUNT(*) FROM receita_ingredientes ri WHERE ri.receita_id = r.id) > 0\n           AND NOT EXISTS (\n               SELECT 1 FROM receita_ingredientes ri\n               LEFT JOIN stock s ON s.ingrediente_id = ri.ingrediente_id\n               WHERE ri.receita_id = r.id\n                 AND (s.ingrediente_id IS NULL OR s.quantidade_disponivel < ri.quantidade)\n           )\n         ORDER BY nome ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "nome",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "categoria",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "tags",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "porcoes_base",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "instrucoes",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "imagem_path",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 8,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "eaf746b3fcae6a0d446488fa8bf861118f17698d96211c982c5d57927e991c10"
+}

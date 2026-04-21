@@ -2,6 +2,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   Carrot, BookOpen, Truck, BarChart2,
   ShoppingBag, Settings, HelpCircle, Sun, Moon,
+  Warehouse, Sparkles, Upload,
 } from "lucide-react";
 import { useThemeStore } from "../../store/themeStore";
 
@@ -40,11 +41,16 @@ export default function Sidebar() {
       <div className="nav-group-label">Cozinha</div>
       <NavItem to="/ingredientes" icon={Carrot} label="Ingredientes" />
       <NavItem to="/receitas" icon={BookOpen} label="Receitas" />
+      <NavItem to="/armazem" icon={Warehouse} label="Armazém" />
+      <NavItem to="/sugestor" icon={Sparkles} label="Sugestor" />
 
       <div className="nav-group-label">Negócio</div>
       <NavItem to="/fornecedores" icon={Truck} label="Fornecedores" />
       <NavItem to="/relatorios" icon={BarChart2} label="Relatórios" />
       <NavItem to="/menu" icon={ShoppingBag} label="Menu" />
+
+      <div className="nav-group-label">Ferramentas</div>
+      <NavItem to="/importador" icon={Upload} label="Importador" />
 
       <div className="spacer" />
 
