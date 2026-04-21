@@ -1,8 +1,9 @@
 import { NavLink, useLocation } from "react-router-dom";
 import {
   Carrot, BookOpen, Truck, BarChart2,
-  ShoppingBag, Settings, HelpCircle,
+  ShoppingBag, Settings, HelpCircle, Sun, Moon,
 } from "lucide-react";
+import { useThemeStore } from "../../store/themeStore";
 
 interface NavItemProps {
   to: string;
@@ -27,14 +28,13 @@ function NavItem({ to, icon: Icon, label, count }: NavItemProps) {
 }
 
 export default function Sidebar() {
+  const { theme, toggleTheme } = useThemeStore();
+
   return (
     <aside className="sidebar">
       <div className="brand">
         <div className="brand-mark">M</div>
-        <div>
-          <div className="brand-name">Mise</div>
-          <div className="brand-sub">Recipe Planner</div>
-        </div>
+        <div className="brand-name">Mise</div>
       </div>
 
       <div className="nav-group-label">Cozinha</div>
@@ -51,11 +51,21 @@ export default function Sidebar() {
       <NavItem to="/definicoes" icon={Settings} label="Definições" />
       <NavItem to="/ajuda" icon={HelpCircle} label="Ajuda & Docs" />
 
+      <button
+        className="nav-item"
+        onClick={toggleTheme}
+        title={theme === "light" ? "Modo escuro" : "Modo claro"}
+        style={{ width: "100%" }}
+      >
+        {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
+        <span>{theme === "light" ? "Modo escuro" : "Modo claro"}</span>
+      </button>
+
       <div className="user-section">
         <div className="avatar">MM</div>
         <div>
           <div className="user-name">Maison Moreau</div>
-          <div className="user-role">Proprietário</div>
+          <div className="user-role">HeadChef</div>
         </div>
       </div>
     </aside>
