@@ -1,8 +1,6 @@
 import { RefreshCw, ImagePlus } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { copyFile, mkdir } from "@tauri-apps/plugin-fs";
-import { appDataDir } from "@tauri-apps/api/path";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { isBundledIngredientImage } from "../../utils/ingredientDefaults";
 
 interface ImageUploadProps {
@@ -19,14 +17,7 @@ export default function ImageUpload({ value, onChange, aspectRatio = "4/3" }: Im
       });
       if (!selected || typeof selected !== "string") return;
 
-      const dataDir = await appDataDir();
-      const destDir = dataDir + "images/";
-      await mkdir(destDir, { recursive: true });
-
-      const fileName = Date.now() + "_" + selected.split("/").pop();
-      const destPath = destDir + fileName;
-      await copyFile(selected, destPath);
-
+      const destPath = await invoke<string>("importar_imagem", { sourcePath: selected });
       onChange(destPath);
     } catch (e) {
       console.error("Erro ao carregar imagem:", e);

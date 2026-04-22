@@ -1,8 +1,9 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { Minus, Plus, Percent, Sparkles, ArrowLeft, Users, Clock, Star, Flame } from "lucide-react";
 import Topbar from "../components/layout/Topbar";
 import IngImg from "../components/ui/IngImg";
+import ImagePlaceholder from "../components/ui/ImagePlaceholder";
 import { useToast } from "../components/ui/Toast";
 import { api } from "../utils/api";
 import type { Receita, CustoReceita, IngredienteComPromocao } from "../types";
@@ -90,7 +91,10 @@ export default function Custos() {
     calcular();
   }
 
-  const activCount = Object.values(promos).filter((p) => p.ativo && parseFloat(p.preco) > 0).length;
+  const activCount = useMemo(
+    () => Object.values(promos).reduce((count, p) => count + (p.ativo && parseFloat(p.preco) > 0 ? 1 : 0), 0),
+    [promos]
+  );
 
   if (loading) return <><Topbar /><div className="content"><div className="spinner" /></div></>;
   if (!receita) return null;
@@ -125,9 +129,9 @@ export default function Custos() {
             <div className="hero">
               <div className="hero-img">
                 {receita.imagem_path ? (
-                  <IngImg path={receita.imagem_path} alt={receita.nome} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  <IngImg path={receita.imagem_path} alt={receita.nome} style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center" }} />
                 ) : (
-                  <HeroPlaceholder nome={receita.nome} />
+                  <ImagePlaceholder seed={receita.nome} />
                 )}
               </div>
               <div className="hero-meta">
@@ -222,7 +226,7 @@ export default function Custos() {
                           <tr key={item.ingrediente_id}>
                             <td>
                               <div className="ing-row-name">
-                                <div className="ing-row-swatch"><IngImgPlaceholder nome={item.nome} /></div>
+                                <div className="ing-row-swatch"><ImagePlaceholder seed={item.nome} /></div>
                                 <div>
                                   <div className="ing-row-title">{item.nome}</div>
                                   <div className="ing-row-sub">{item.unidade}</div>
@@ -435,20 +439,4 @@ function SavingsBanner({ activCount, porcoes }: { custo: CustoReceita; activCoun
       </div>
     </div>
   );
-}
-
-const STRIPES = ["stripe-amber","stripe-rose","stripe-sage","stripe-sand","stripe-cocoa","stripe-stone","stripe-butter","stripe-terra"];
-
-function stripeFor(nome: string) {
-  let h = 0;
-  for (let i = 0; i < nome.length; i++) h = (h * 31 + nome.charCodeAt(i)) | 0;
-  return STRIPES[Math.abs(h) % STRIPES.length];
-}
-
-function HeroPlaceholder({ nome }: { nome: string }) {
-  return <div className={stripeFor(nome)} style={{ width: "100%", height: "100%" }} />;
-}
-
-function IngImgPlaceholder({ nome }: { nome: string }) {
-  return <div className={stripeFor(nome)} style={{ width: "100%", height: "100%" }} />;
 }

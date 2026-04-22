@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Sparkles, Users, Clock, Lock } from "lucide-react";
 import Topbar from "../components/layout/Topbar";
 import IngImg from "../components/ui/IngImg";
+import ImagePlaceholder from "../components/ui/ImagePlaceholder";
 import { useToast } from "../components/ui/Toast";
 import { api } from "../utils/api";
 import type { Receita } from "../types";
@@ -33,10 +34,13 @@ export default function Sugestor() {
       .finally(() => setLoading(false));
   }, []);
 
-  const sugestoesFiltradas =
-    catFiltro === "Todas"
-      ? SUGESTOES_ESTATICAS
-      : SUGESTOES_ESTATICAS.filter((s) => s.categoria === catFiltro);
+  const sugestoesFiltradas = useMemo(
+    () =>
+      catFiltro === "Todas"
+        ? SUGESTOES_ESTATICAS
+        : SUGESTOES_ESTATICAS.filter((s) => s.categoria === catFiltro),
+    [catFiltro]
+  );
 
   return (
     <>
@@ -161,10 +165,10 @@ function PossibleCard({ receita, onClick }: { receita: Receita; onClick: () => v
           <IngImg
             path={receita.imagem_path}
             alt={receita.nome}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center" }}
           />
         ) : (
-          <RecipePlaceholder nome={receita.nome} />
+          <ImagePlaceholder seed={receita.nome} />
         )}
       </div>
       <div className="recipe-card-body">
@@ -254,15 +258,4 @@ function SugestaoCard({
       </div>
     </div>
   );
-}
-
-const STRIPES = [
-  "stripe-amber", "stripe-rose", "stripe-sage", "stripe-sand",
-  "stripe-cocoa", "stripe-stone", "stripe-butter", "stripe-terra",
-];
-
-function RecipePlaceholder({ nome }: { nome: string }) {
-  let h = 0;
-  for (let i = 0; i < nome.length; i++) h = (h * 31 + nome.charCodeAt(i)) | 0;
-  return <div className={STRIPES[Math.abs(h) % STRIPES.length]} style={{ width: "100%", height: "100%" }} />;
 }

@@ -8,6 +8,8 @@ import type {
   Ingrediente,
   IngredienteComPromocao,
   Receita,
+  ReceitaCompleta,
+  ReceitaIngredientePayload,
   CustoReceita,
   StockItem,
   RelatorioResumo,
@@ -16,40 +18,73 @@ import type {
 // The Rust model stores `tags` as a raw JSON string in SQLite.
 // Tauri serializes it as a plain string, so we parse it here before it reaches components.
 type RawReceita = Omit<Receita, "tags"> & { tags: string };
+type RawReceitaCompleta = Omit<ReceitaCompleta, "tags"> & {
+  tags: string;
+  ingredientes: ReceitaIngredientePayload[];
+};
 
 function parseReceita(r: RawReceita): Receita {
   return { ...r, tags: JSON.parse(r.tags) as string[] };
+}
+
+function parseReceitaCompleta(r: RawReceitaCompleta): ReceitaCompleta {
+  return { ...r, tags: JSON.parse(r.tags) as string[] };
+}
+
+let ingredientesListCache: Promise<Ingrediente[]> | null = null;
+let receitasListCache: Promise<Receita[]> | null = null;
+let stockListCache: Promise<StockItem[]> | null = null;
+let sugestorCache: Promise<Receita[]> | null = null;
+
+function invalidateIngredientes() {
+  ingredientesListCache = null;
+  stockListCache = null;
+}
+
+function invalidateReceitas() {
+  receitasListCache = null;
+  sugestorCache = null;
 }
 
 // ─── Ingredientes ─────────────────────────────────────────────────────────────
 
 export const api = {
   ingredientes: {
-    listar: (): Promise<Ingrediente[]> =>
-      invoke("listar_ingredientes"),
+    listar: (): Promise<Ingrediente[]> => {
+      ingredientesListCache ??= invoke("listar_ingredientes");
+      return ingredientesListCache;
+    },
 
     obter: (id: number): Promise<Ingrediente | null> =>
       invoke("obter_ingrediente", { id }),
 
-    criar: (payload: Omit<Ingrediente, "id" | "created_at" | "updated_at">): Promise<Ingrediente> =>
-      invoke("criar_ingrediente", { payload }),
+    criar: async (payload: Omit<Ingrediente, "id" | "created_at" | "updated_at">): Promise<Ingrediente> => {
+      const row: Ingrediente = await invoke("criar_ingrediente", { payload });
+      invalidateIngredientes();
+      return row;
+    },
 
-    atualizar: (
+    atualizar: async (
       id: number,
       payload: Omit<Ingrediente, "id" | "created_at" | "updated_at">
-    ): Promise<Ingrediente> =>
-      invoke("atualizar_ingrediente", { id, payload }),
+    ): Promise<Ingrediente> => {
+      const row: Ingrediente = await invoke("atualizar_ingrediente", { id, payload });
+      invalidateIngredientes();
+      return row;
+    },
 
-    eliminar: (id: number): Promise<void> =>
-      invoke("eliminar_ingrediente", { id }),
+    eliminar: async (id: number): Promise<void> => {
+      await invoke("eliminar_ingrediente", { id });
+      invalidateIngredientes();
+    },
   },
 
   // ─── Receitas ──────────────────────────────────────────────────────────────
 
   receitas: {
     listar: async (): Promise<Receita[]> => {
-      const rows: RawReceita[] = await invoke("listar_receitas");
-      return rows.map(parseReceita);
+      receitasListCache ??= invoke<RawReceita[]>("listar_receitas").then((rows) => rows.map(parseReceita));
+      return receitasListCache;
     },
 
     obter: async (id: number): Promise<Receita | null> => {
@@ -57,10 +92,16 @@ export const api = {
       return row ? parseReceita(row) : null;
     },
 
+    obterCompleta: async (id: number): Promise<ReceitaCompleta | null> => {
+      const row: RawReceitaCompleta | null = await invoke("obter_receita_completa", { id });
+      return row ? parseReceitaCompleta(row) : null;
+    },
+
     criar: async (payload: Omit<Receita, "id" | "created_at" | "updated_at"> & {
       ingredientes: { ingrediente_id: number; quantidade: number }[];
     }): Promise<Receita> => {
       const row: RawReceita = await invoke("criar_receita", { payload });
+      invalidateReceitas();
       return parseReceita(row);
     },
 
@@ -71,11 +112,14 @@ export const api = {
       }
     ): Promise<Receita> => {
       const row: RawReceita = await invoke("atualizar_receita", { id, payload });
+      invalidateReceitas();
       return parseReceita(row);
     },
 
-    eliminar: (id: number): Promise<void> =>
-      invoke("eliminar_receita", { id }),
+    eliminar: async (id: number): Promise<void> => {
+      await invoke("eliminar_receita", { id });
+      invalidateReceitas();
+    },
   },
 
   // ─── Custos ────────────────────────────────────────────────────────────────
@@ -93,19 +137,25 @@ export const api = {
   // ─── Stock ─────────────────────────────────────────────────────────────────
 
   stock: {
-    listar: (): Promise<StockItem[]> =>
-      invoke("listar_stock"),
+    listar: (): Promise<StockItem[]> => {
+      stockListCache ??= invoke("listar_stock");
+      return stockListCache;
+    },
 
-    atualizar: (payload: { ingrediente_id: number; quantidade_disponivel: number }): Promise<StockItem> =>
-      invoke("atualizar_stock", { payload }),
+    atualizar: async (payload: { ingrediente_id: number; quantidade_disponivel: number }): Promise<StockItem> => {
+      const row: StockItem = await invoke("atualizar_stock", { payload });
+      stockListCache = null;
+      sugestorCache = null;
+      return row;
+    },
   },
 
   // ─── Sugestor ──────────────────────────────────────────────────────────────
 
   sugestor: {
     receitasPossiveis: async (): Promise<Receita[]> => {
-      const rows: RawReceita[] = await invoke("receitas_possiveis");
-      return rows.map(parseReceita);
+      sugestorCache ??= invoke<RawReceita[]>("receitas_possiveis").then((rows) => rows.map(parseReceita));
+      return sugestorCache;
     },
   },
 

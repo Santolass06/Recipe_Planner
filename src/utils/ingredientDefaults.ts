@@ -1,803 +1,1082 @@
 const DEFAULT_IMAGES = [
   {
-    path: "/ingredients/cebola.png",
+    path: "/ingredients/cebola.webp",
     aliases: ["cebola", "onion", "onions"],
   },
   {
-    path: "/ingredients/alho.png",
+    path: "/ingredients/alho.webp",
     aliases: ["alho", "garlic"],
   },
   {
-    path: "/ingredients/tomate.png",
+    path: "/ingredients/tomate.webp",
     aliases: ["tomate", "tomates", "tomato", "tomatoes"],
   },
   {
-    path: "/ingredients/cenoura.png",
+    path: "/ingredients/cenoura.webp",
     aliases: ["cenoura", "cenouras", "carrot", "carrots"],
   },
   {
-    path: "/ingredients/batata.png",
+    path: "/ingredients/batata.webp",
     aliases: ["batata", "batatas", "potato", "potatoes"],
   },
   {
-    path: "/ingredients/batata-doce.png",
+    path: "/ingredients/batata-doce.webp",
     aliases: ["batata doce", "batata-doce", "sweet potato", "sweet potatoes"],
   },
   {
-    path: "/ingredients/pimento.png",
+    path: "/ingredients/pimento.webp",
     aliases: ["pimento", "pimentos", "bell pepper", "pepper", "peppers", "capsicum"],
   },
   {
-    path: "/ingredients/curgete.png",
+    path: "/ingredients/curgete.webp",
     aliases: ["curgete", "curgetes", "courgette", "courgettes", "zucchini"],
   },
   {
-    path: "/ingredients/beringela.png",
+    path: "/ingredients/beringela.webp",
     aliases: ["beringela", "beringelas", "eggplant", "aubergine", "aubergines"],
   },
   {
-    path: "/ingredients/espinafres.png",
+    path: "/ingredients/espinafres.webp",
     aliases: ["espinafres", "espinafre", "spinach"],
   },
   {
-    path: "/ingredients/alface.png",
+    path: "/ingredients/alface.webp",
     aliases: ["alface", "lettuce", "lechuga", "laitue"],
   },
   {
-    path: "/ingredients/couve.png",
+    path: "/ingredients/couve.webp",
     aliases: ["couve", "cabbage", "kale"],
   },
   {
-    path: "/ingredients/brocolos.png",
+    path: "/ingredients/brocolos.webp",
     aliases: ["brocolos", "brócolos", "broccoli"],
   },
   {
-    path: "/ingredients/couve-flor.png",
+    path: "/ingredients/couve-flor.webp",
     aliases: ["couve flor", "couve-flor", "cauliflower"],
   },
   {
-    path: "/ingredients/ervilhas.png",
+    path: "/ingredients/ervilhas.webp",
     aliases: ["ervilhas", "ervilha", "peas", "pea"],
   },
   {
-    path: "/ingredients/milho.png",
+    path: "/ingredients/milho.webp",
     aliases: ["milho", "corn", "maize"],
   },
   {
-    path: "/ingredients/cogumelos.png",
+    path: "/ingredients/cogumelos.webp",
     aliases: ["cogumelos", "cogumelo", "mushroom", "mushrooms"],
   },
   {
-    path: "/ingredients/pepino.png",
+    path: "/ingredients/pepino.webp",
     aliases: ["pepino", "pepinos", "cucumber", "cucumbers"],
   },
   {
-    path: "/ingredients/abobora.png",
+    path: "/ingredients/abobora.webp",
     aliases: ["abobora", "abóbora", "pumpkin", "squash"],
   },
   {
-    path: "/ingredients/rucula.png",
+    path: "/ingredients/rucula.webp",
     aliases: ["rucula", "rúcula", "arugula", "rocket", "rucola"],
   },
   {
-    path: "/ingredients/alho-frances.png",
+    path: "/ingredients/alho-frances.webp",
     aliases: ["alho frances", "alho-francês", "alho francês", "leek", "leeks"],
   },
   {
-    path: "/ingredients/aipo.png",
+    path: "/ingredients/aipo.webp",
     aliases: ["aipo", "celery"],
   },
   {
-    path: "/ingredients/nabo.png",
+    path: "/ingredients/nabo.webp",
     aliases: ["nabo", "nabos", "turnip", "turnips"],
   },
   {
-    path: "/ingredients/beterraba.png",
+    path: "/ingredients/beterraba.webp",
     aliases: ["beterraba", "beetroot", "beet", "beets"],
   },
   {
-    path: "/ingredients/espargos.png",
+    path: "/ingredients/espargos.webp",
     aliases: ["espargos", "espargo", "asparagus"],
   },
   {
-    path: "/ingredients/maca.png",
+    path: "/ingredients/maca.webp",
     aliases: ["maca", "maçã", "macas", "maçãs", "apple", "apples"],
   },
   {
-    path: "/ingredients/banana.png",
+    path: "/ingredients/banana.webp",
     aliases: ["banana", "bananas"],
   },
   {
-    path: "/ingredients/laranja.png",
+    path: "/ingredients/laranja.webp",
     aliases: ["laranja", "laranjas", "orange", "oranges"],
   },
   {
-    path: "/ingredients/limao.png",
+    path: "/ingredients/limao.webp",
     aliases: ["limao", "limão", "limoes", "limões", "lemon", "lemons"],
   },
   {
-    path: "/ingredients/lima.png",
+    path: "/ingredients/lima.webp",
     aliases: ["lima", "limas", "lime", "limes"],
   },
   {
-    path: "/ingredients/pera.png",
+    path: "/ingredients/pera.webp",
     aliases: ["pera", "pêra", "peras", "pêras", "pear", "pears"],
   },
   {
-    path: "/ingredients/pessego.png",
+    path: "/ingredients/pessego.webp",
     aliases: ["pessego", "pêssego", "pessegos", "pêssegos", "peach", "peaches"],
   },
   {
-    path: "/ingredients/ameixa.png",
+    path: "/ingredients/ameixa.webp",
     aliases: ["ameixa", "ameixas", "plum", "plums"],
   },
   {
-    path: "/ingredients/cereja.png",
+    path: "/ingredients/cereja.webp",
     aliases: ["cereja", "cerejas", "cherry", "cherries"],
   },
   {
-    path: "/ingredients/morango.png",
+    path: "/ingredients/morango.webp",
     aliases: ["morango", "morangos", "strawberry", "strawberries"],
   },
   {
-    path: "/ingredients/framboesa.png",
+    path: "/ingredients/framboesa.webp",
     aliases: ["framboesa", "framboesas", "raspberry", "raspberries"],
   },
   {
-    path: "/ingredients/mirtilo.png",
+    path: "/ingredients/mirtilo.webp",
     aliases: ["mirtilo", "mirtilos", "blueberry", "blueberries"],
   },
   {
-    path: "/ingredients/ananas.png",
+    path: "/ingredients/ananas.webp",
     aliases: ["ananas", "ananás", "abacaxi", "pineapple"],
   },
   {
-    path: "/ingredients/manga.png",
+    path: "/ingredients/manga.webp",
     aliases: ["manga", "mangas", "mango", "mangoes"],
   },
   {
-    path: "/ingredients/papaia.png",
+    path: "/ingredients/papaia.webp",
     aliases: ["papaia", "papaya"],
   },
   {
-    path: "/ingredients/kiwi.png",
+    path: "/ingredients/kiwi.webp",
     aliases: ["kiwi", "kiwis"],
   },
   {
-    path: "/ingredients/uva.png",
+    path: "/ingredients/uva.webp",
     aliases: ["uva", "uvas", "grape", "grapes"],
   },
   {
-    path: "/ingredients/melao.png",
+    path: "/ingredients/melao.webp",
     aliases: ["melao", "melão", "meloes", "melões", "melon", "cantaloupe"],
   },
   {
-    path: "/ingredients/melancia.png",
+    path: "/ingredients/melancia.webp",
     aliases: ["melancia", "melancias", "watermelon"],
   },
   {
-    path: "/ingredients/coco.png",
+    path: "/ingredients/coco.webp",
     aliases: ["coco", "cocos", "coconut", "coconuts"],
   },
   {
-    path: "/ingredients/frango.png",
+    path: "/ingredients/frango.webp",
     aliases: ["frango", "chicken"],
   },
   {
-    path: "/ingredients/carne-de-vaca.png",
+    path: "/ingredients/carne-de-vaca.webp",
     aliases: ["carne de vaca", "vaca", "beef"],
   },
   {
-    path: "/ingredients/carne-de-porco.png",
+    path: "/ingredients/carne-de-porco.webp",
     aliases: ["carne de porco", "porco", "pork"],
   },
   {
-    path: "/ingredients/peru.png",
+    path: "/ingredients/peru.webp",
     aliases: ["peru", "turkey"],
   },
   {
-    path: "/ingredients/cordeiro.png",
+    path: "/ingredients/cordeiro.webp",
     aliases: ["cordeiro", "lamb", "mutton"],
   },
   {
-    path: "/ingredients/bacon.png",
+    path: "/ingredients/bacon.webp",
     aliases: ["bacon"],
   },
   {
-    path: "/ingredients/presunto.png",
+    path: "/ingredients/presunto.webp",
     aliases: ["presunto", "ham", "prosciutto"],
   },
   {
-    path: "/ingredients/salsichas.png",
+    path: "/ingredients/salsichas.webp",
     aliases: ["salsichas", "salsicha", "sausage", "sausages"],
   },
   {
-    path: "/ingredients/salmao.png",
+    path: "/ingredients/salmao.webp",
     aliases: ["salmao", "salmão", "salmon"],
   },
   {
-    path: "/ingredients/atum.png",
+    path: "/ingredients/atum.webp",
     aliases: ["atum", "tuna"],
   },
   {
-    path: "/ingredients/bacalhau.png",
+    path: "/ingredients/bacalhau.webp",
     aliases: ["bacalhau", "cod"],
   },
   {
-    path: "/ingredients/sardinha.png",
+    path: "/ingredients/sardinha.webp",
     aliases: ["sardinha", "sardinhas", "sardine", "sardines"],
   },
   {
-    path: "/ingredients/camarao.png",
+    path: "/ingredients/camarao.webp",
     aliases: ["camarao", "camarão", "camaroes", "camarões", "shrimp", "prawn", "prawns"],
   },
   {
-    path: "/ingredients/mexilhao.png",
+    path: "/ingredients/mexilhao.webp",
     aliases: ["mexilhao", "mexilhão", "mexilhoes", "mexilhões", "mussel", "mussels"],
   },
   {
-    path: "/ingredients/polvo.png",
+    path: "/ingredients/polvo.webp",
     aliases: ["polvo", "octopus"],
   },
   {
-    path: "/ingredients/lula.png",
+    path: "/ingredients/lula.webp",
     aliases: ["lula", "lulas", "squid", "calamari"],
   },
   {
-    path: "/ingredients/ovo.png",
+    path: "/ingredients/ovo.webp",
     aliases: ["ovo", "ovos", "egg", "eggs"],
   },
   {
-    path: "/ingredients/leite.png",
+    path: "/ingredients/leite.webp",
     aliases: ["leite", "milk"],
   },
   {
-    path: "/ingredients/natas.png",
+    path: "/ingredients/natas.webp",
     aliases: ["natas", "cream", "heavy cream"],
   },
   {
-    path: "/ingredients/manteiga.png",
+    path: "/ingredients/manteiga.webp",
     aliases: ["manteiga", "butter"],
   },
   {
-    path: "/ingredients/iogurte.png",
+    path: "/ingredients/iogurte.webp",
     aliases: ["iogurte", "yogurt", "yoghurt"],
   },
   {
-    path: "/ingredients/queijo-cheddar.png",
+    path: "/ingredients/queijo-cheddar.webp",
     aliases: ["queijo cheddar", "cheddar"],
   },
   {
-    path: "/ingredients/queijo-mozzarella.png",
+    path: "/ingredients/queijo-mozzarella.webp",
     aliases: ["queijo mozzarella", "mozarela", "mozzarella"],
   },
   {
-    path: "/ingredients/queijo-parmesao.png",
+    path: "/ingredients/queijo-parmesao.webp",
     aliases: ["queijo parmesao", "queijo parmesão", "parmesao", "parmesão", "parmesan"],
   },
   {
-    path: "/ingredients/queijo-feta.png",
+    path: "/ingredients/queijo-feta.webp",
     aliases: ["queijo feta", "feta"],
   },
   {
-    path: "/ingredients/queijo-creme.png",
+    path: "/ingredients/queijo-creme.webp",
     aliases: ["queijo creme", "cream cheese"],
   },
   {
-    path: "/ingredients/leite-condensado.png",
+    path: "/ingredients/leite-condensado.webp",
     aliases: ["leite condensado", "condensed milk"],
   },
   {
-    path: "/ingredients/arroz.png",
+    path: "/ingredients/arroz.webp",
     aliases: ["arroz", "rice"],
   },
   {
-    path: "/ingredients/massa.png",
+    path: "/ingredients/massa.webp",
     aliases: ["massa", "pasta"],
   },
   {
-    path: "/ingredients/espaguete.png",
+    path: "/ingredients/espaguete.webp",
     aliases: ["espaguete", "spaghetti"],
   },
   {
-    path: "/ingredients/macarrao.png",
+    path: "/ingredients/macarrao.webp",
     aliases: ["macarrao", "macarrão", "macaroni"],
   },
   {
-    path: "/ingredients/farinha-de-trigo.png",
+    path: "/ingredients/farinha-de-trigo.webp",
     aliases: ["farinha de trigo", "wheat flour", "flour"],
   },
   {
-    path: "/ingredients/farinha-integral.png",
+    path: "/ingredients/farinha-integral.webp",
     aliases: ["farinha integral", "whole wheat flour", "wholemeal flour"],
   },
   {
-    path: "/ingredients/aveia.png",
+    path: "/ingredients/aveia.webp",
     aliases: ["aveia", "oats", "oatmeal"],
   },
   {
-    path: "/ingredients/cevada.png",
+    path: "/ingredients/cevada.webp",
     aliases: ["cevada", "barley"],
   },
   {
-    path: "/ingredients/quinoa.png",
+    path: "/ingredients/quinoa.webp",
     aliases: ["quinoa"],
   },
   {
-    path: "/ingredients/cuscuz.png",
+    path: "/ingredients/cuscuz.webp",
     aliases: ["cuscuz", "couscous"],
   },
   {
-    path: "/ingredients/pao.png",
+    path: "/ingredients/pao.webp",
     aliases: ["pao", "pão", "bread"],
   },
   {
-    path: "/ingredients/tortilhas.png",
+    path: "/ingredients/tortilhas.webp",
     aliases: ["tortilhas", "tortilha", "tortilla", "tortillas"],
   },
   {
-    path: "/ingredients/massa-folhada.png",
+    path: "/ingredients/massa-folhada.webp",
     aliases: ["massa folhada", "puff pastry"],
   },
   {
-    path: "/ingredients/feijao-preto.png",
+    path: "/ingredients/feijao-preto.webp",
     aliases: ["feijao preto", "feijão preto", "black beans", "black bean"],
   },
   {
-    path: "/ingredients/feijao-branco.png",
+    path: "/ingredients/feijao-branco.webp",
     aliases: ["feijao branco", "feijão branco", "white beans", "white bean"],
   },
   {
-    path: "/ingredients/grao-de-bico.png",
+    path: "/ingredients/grao-de-bico.webp",
     aliases: ["grao de bico", "grão-de-bico", "grão de bico", "chickpea", "chickpeas", "garbanzo"],
   },
   {
-    path: "/ingredients/lentilhas.png",
+    path: "/ingredients/lentilhas.webp",
     aliases: ["lentilhas", "lentilha", "lentils", "lentil"],
   },
   {
-    path: "/ingredients/soja.png",
+    path: "/ingredients/soja.webp",
     aliases: ["soja", "soy", "soya", "soybean", "soybeans"],
   },
   {
-    path: "/ingredients/amendoas.png",
+    path: "/ingredients/amendoas.webp",
     aliases: ["amendoas", "amêndoas", "amendoa", "amêndoa", "almond", "almonds"],
   },
   {
-    path: "/ingredients/nozes.png",
+    path: "/ingredients/nozes.webp",
     aliases: ["nozes", "noz", "walnut", "walnuts", "nuts"],
   },
   {
-    path: "/ingredients/avelas.png",
+    path: "/ingredients/avelas.webp",
     aliases: ["avelas", "avelãs", "avela", "avelã", "hazelnut", "hazelnuts"],
   },
   {
-    path: "/ingredients/cajus.png",
+    path: "/ingredients/cajus.webp",
     aliases: ["cajus", "caju", "cashew", "cashews"],
   },
   {
-    path: "/ingredients/pistachios.png",
+    path: "/ingredients/pistachios.webp",
     aliases: ["pistachios", "pistáchios", "pistachio"],
   },
   {
-    path: "/ingredients/sal.png",
+    path: "/ingredients/sal.webp",
     aliases: ["sal", "salt"],
   },
   {
-    path: "/ingredients/pimenta-preta.png",
+    path: "/ingredients/pimenta-preta.webp",
     aliases: ["pimenta preta", "black pepper"],
   },
   {
-    path: "/ingredients/pimenta-branca.png",
+    path: "/ingredients/pimenta-branca.webp",
     aliases: ["pimenta branca", "white pepper"],
   },
   {
-    path: "/ingredients/paprika.png",
+    path: "/ingredients/paprika.webp",
     aliases: ["paprika", "pimentao doce", "pimentão doce"],
   },
   {
-    path: "/ingredients/cominhos.png",
+    path: "/ingredients/cominhos.webp",
     aliases: ["cominhos", "cumin"],
   },
   {
-    path: "/ingredients/curcuma.png",
+    path: "/ingredients/curcuma.webp",
     aliases: ["curcuma", "cúrcuma", "turmeric"],
   },
   {
-    path: "/ingredients/canela.png",
+    path: "/ingredients/canela.webp",
     aliases: ["canela", "cinnamon"],
   },
   {
-    path: "/ingredients/noz-moscada.png",
+    path: "/ingredients/noz-moscada.webp",
     aliases: ["noz moscada", "noz-moscada", "nutmeg"],
   },
   {
-    path: "/ingredients/cravinho.png",
+    path: "/ingredients/cravinho.webp",
     aliases: ["cravinho", "clove", "cloves"],
   },
   {
-    path: "/ingredients/gengibre.png",
+    path: "/ingredients/gengibre.webp",
     aliases: ["gengibre", "ginger"],
   },
   {
-    path: "/ingredients/oregaos.png",
+    path: "/ingredients/oregaos.webp",
     aliases: ["oregaos", "orégãos", "oregano"],
   },
   {
-    path: "/ingredients/manjericao.png",
+    path: "/ingredients/manjericao.webp",
     aliases: ["manjericao", "manjericão", "basil"],
   },
   {
-    path: "/ingredients/salsa.png",
+    path: "/ingredients/salsa.webp",
     aliases: ["salsa", "parsley"],
   },
   {
-    path: "/ingredients/coentros.png",
+    path: "/ingredients/coentros.webp",
     aliases: ["coentros", "coriander", "cilantro"],
   },
   {
-    path: "/ingredients/tomilho.png",
+    path: "/ingredients/tomilho.webp",
     aliases: ["tomilho", "thyme"],
   },
   {
-    path: "/ingredients/alecrim.png",
+    path: "/ingredients/alecrim.webp",
     aliases: ["alecrim", "rosemary"],
   },
   {
-    path: "/ingredients/louro.png",
+    path: "/ingredients/louro.webp",
     aliases: ["louro", "bay leaf", "bay leaves"],
   },
   {
-    path: "/ingredients/hortela.png",
+    path: "/ingredients/hortela.webp",
     aliases: ["hortela", "hortelã", "mint"],
   },
   {
-    path: "/ingredients/aneto.png",
+    path: "/ingredients/aneto.webp",
     aliases: ["aneto", "dill"],
   },
   {
-    path: "/ingredients/azeite.png",
+    path: "/ingredients/azeite.webp",
     aliases: ["azeite", "olive oil"],
   },
   {
-    path: "/ingredients/oleo-vegetal.png",
+    path: "/ingredients/oleo-vegetal.webp",
     aliases: ["oleo vegetal", "óleo vegetal", "vegetable oil", "oil"],
   },
   {
-    path: "/ingredients/vinagre.png",
+    path: "/ingredients/vinagre.webp",
     aliases: ["vinagre", "vinegar"],
   },
   {
-    path: "/ingredients/vinagre-balsamico.png",
+    path: "/ingredients/vinagre-balsamico.webp",
     aliases: ["vinagre balsamico", "vinagre balsâmico", "balsamic vinegar"],
   },
   {
-    path: "/ingredients/molho-de-soja.png",
+    path: "/ingredients/molho-de-soja.webp",
     aliases: ["molho de soja", "soy sauce"],
   },
   {
-    path: "/ingredients/mostarda.png",
+    path: "/ingredients/mostarda.webp",
     aliases: ["mostarda", "mustard"],
   },
   {
-    path: "/ingredients/ketchup.png",
+    path: "/ingredients/ketchup.webp",
     aliases: ["ketchup", "catsup"],
   },
   {
-    path: "/ingredients/maionese.png",
+    path: "/ingredients/maionese.webp",
     aliases: ["maionese", "mayonnaise", "mayo"],
   },
   {
-    path: "/ingredients/molho-de-tomate.png",
+    path: "/ingredients/molho-de-tomate.webp",
     aliases: ["molho de tomate", "tomato sauce"],
   },
   {
-    path: "/ingredients/molho-barbecue.png",
+    path: "/ingredients/molho-barbecue.webp",
     aliases: ["molho barbecue", "barbecue sauce", "bbq sauce"],
   },
   {
-    path: "/ingredients/molho-picante.png",
+    path: "/ingredients/molho-picante.webp",
     aliases: ["molho picante", "hot sauce"],
   },
   {
-    path: "/ingredients/molho-pesto.png",
+    path: "/ingredients/molho-pesto.webp",
     aliases: ["molho pesto", "pesto"],
   },
   {
-    path: "/ingredients/acucar-branco.png",
+    path: "/ingredients/acucar-branco.webp",
     aliases: ["acucar branco", "açúcar branco", "white sugar", "sugar"],
   },
   {
-    path: "/ingredients/acucar-mascavado.png",
+    path: "/ingredients/acucar-mascavado.webp",
     aliases: ["acucar mascavado", "açúcar mascavado", "brown sugar"],
   },
   {
-    path: "/ingredients/mel.png",
+    path: "/ingredients/mel.webp",
     aliases: ["mel", "honey"],
   },
   {
-    path: "/ingredients/xarope-de-acer.png",
+    path: "/ingredients/xarope-de-acer.webp",
     aliases: ["xarope de acer", "xarope de ácer", "maple syrup"],
   },
   {
-    path: "/ingredients/chocolate.png",
+    path: "/ingredients/chocolate.webp",
     aliases: ["chocolate"],
   },
   {
-    path: "/ingredients/chocolate-negro.png",
+    path: "/ingredients/chocolate-negro.webp",
     aliases: ["chocolate negro", "dark chocolate"],
   },
   {
-    path: "/ingredients/chocolate-de-leite.png",
+    path: "/ingredients/chocolate-de-leite.webp",
     aliases: ["chocolate de leite", "milk chocolate"],
   },
   {
-    path: "/ingredients/cacau-em-po.png",
+    path: "/ingredients/cacau-em-po.webp",
     aliases: ["cacau em po", "cacau em pó", "cocoa powder", "cacao powder"],
   },
   {
-    path: "/ingredients/baunilha.png",
+    path: "/ingredients/baunilha.webp",
     aliases: ["baunilha", "vanilla"],
   },
   {
-    path: "/ingredients/fermento.png",
+    path: "/ingredients/fermento.webp",
     aliases: ["fermento", "yeast", "baking powder"],
   },
   {
-    path: "/ingredients/bicarbonato-de-sodio.png",
+    path: "/ingredients/bicarbonato-de-sodio.webp",
     aliases: ["bicarbonato de sodio", "bicarbonato de sódio", "baking soda"],
   },
   {
-    path: "/ingredients/gelatina.png",
+    path: "/ingredients/gelatina.webp",
     aliases: ["gelatina", "gelatin", "jelly"],
   },
   {
-    path: "/ingredients/caldo-de-galinha.png",
+    path: "/ingredients/caldo-de-galinha.webp",
     aliases: ["caldo de galinha", "chicken stock", "chicken broth"],
   },
   {
-    path: "/ingredients/caldo-de-legumes.png",
+    path: "/ingredients/caldo-de-legumes.webp",
     aliases: ["caldo de legumes", "vegetable stock", "vegetable broth"],
   },
   {
-    path: "/ingredients/caldo-de-carne.png",
+    path: "/ingredients/caldo-de-carne.webp",
     aliases: ["caldo de carne", "beef stock", "beef broth"],
   },
   {
-    path: "/ingredients/leite-de-coco.png",
+    path: "/ingredients/leite-de-coco.webp",
     aliases: ["leite de coco", "coconut milk"],
   },
   {
-    path: "/ingredients/natas-vegetais.png",
+    path: "/ingredients/natas-vegetais.webp",
     aliases: ["natas vegetais", "plant cream", "vegetable cream"],
   },
   {
-    path: "/ingredients/agua.png",
+    path: "/ingredients/agua.webp",
     aliases: ["agua", "água", "water"],
   },
   {
-    path: "/ingredients/vinho-branco.png",
+    path: "/ingredients/vinho-branco.webp",
     aliases: ["vinho branco", "white wine"],
   },
   {
-    path: "/ingredients/vinho-tinto.png",
+    path: "/ingredients/vinho-tinto.webp",
     aliases: ["vinho tinto", "red wine"],
   },
   {
-    path: "/ingredients/cerveja.png",
+    path: "/ingredients/cerveja.webp",
     aliases: ["cerveja", "beer"],
   },
   {
-    path: "/ingredients/tofu.png",
+    path: "/ingredients/tofu.webp",
     aliases: ["tofu"],
   },
   {
-    path: "/ingredients/tempeh.png",
+    path: "/ingredients/tempeh.webp",
     aliases: ["tempeh"],
   },
   {
-    path: "/ingredients/leite-de-amendoa.png",
+    path: "/ingredients/leite-de-amendoa.webp",
     aliases: ["leite de amendoa", "leite de amêndoa", "almond milk"],
   },
   {
-    path: "/ingredients/leite-de-soja.png",
+    path: "/ingredients/leite-de-soja.webp",
     aliases: ["leite de soja", "soy milk", "soya milk"],
   },
   {
-    path: "/ingredients/abacate.png",
+    path: "/ingredients/abacate.webp",
     aliases: ["abacate", "avocado"],
   },
   {
-    path: "/ingredients/molho-teriyaki.png",
+    path: "/ingredients/molho-teriyaki.webp",
     aliases: ["molho teriyaki", "teriyaki sauce", "teriyaki"],
   },
   {
-    path: "/ingredients/wasabi.png",
+    path: "/ingredients/wasabi.webp",
     aliases: ["wasabi"],
   },
   {
-    path: "/ingredients/miso.png",
+    path: "/ingredients/miso.webp",
     aliases: ["miso"],
   },
   {
-    path: "/ingredients/algas.png",
+    path: "/ingredients/algas.webp",
     aliases: ["algas", "seaweed", "nori"],
   },
   {
-    path: "/ingredients/sriracha.png",
+    path: "/ingredients/sriracha.webp",
     aliases: ["sriracha"],
   },
   {
-    path: "/ingredients/tahini.png",
+    path: "/ingredients/tahini.webp",
     aliases: ["tahini"],
   },
   {
-    path: "/ingredients/harissa.png",
+    path: "/ingredients/harissa.webp",
     aliases: ["harissa"],
   },
   {
-    path: "/ingredients/curry-em-po.png",
+    path: "/ingredients/curry-em-po.webp",
     aliases: ["curry em po", "curry em pó", "curry powder"],
   },
   {
-    path: "/ingredients/pasta-de-curry.png",
+    path: "/ingredients/pasta-de-curry.webp",
     aliases: ["pasta de curry", "curry paste"],
   },
   {
-    path: "/ingredients/tamarindo.png",
+    path: "/ingredients/tamarindo.webp",
     aliases: ["tamarindo", "tamarind"],
   },
   {
-    path: "/ingredients/acucar-de-coco.png",
+    path: "/ingredients/acucar-de-coco.webp",
     aliases: ["acucar de coco", "açúcar de coco", "coconut sugar"],
   },
   {
-    path: "/ingredients/farinha-de-arroz.png",
+    path: "/ingredients/farinha-de-arroz.webp",
     aliases: ["farinha de arroz", "rice flour"],
   },
   {
-    path: "/ingredients/farinha-de-milho.png",
+    path: "/ingredients/farinha-de-milho.webp",
     aliases: ["farinha de milho", "corn flour", "cornmeal"],
   },
   {
-    path: "/ingredients/polenta.png",
+    path: "/ingredients/polenta.webp",
     aliases: ["polenta"],
   },
   {
-    path: "/ingredients/gnocchi.png",
+    path: "/ingredients/gnocchi.webp",
     aliases: ["gnocchi", "nhoque"],
   },
   {
-    path: "/ingredients/ricotta.png",
+    path: "/ingredients/ricotta.webp",
     aliases: ["ricotta", "ricota"],
   },
   {
-    path: "/ingredients/mascarpone.png",
+    path: "/ingredients/mascarpone.webp",
     aliases: ["mascarpone"],
   },
   {
-    path: "/ingredients/kefir.png",
+    path: "/ingredients/kefir.webp",
     aliases: ["kefir"],
   },
   {
-    path: "/ingredients/kombucha.png",
+    path: "/ingredients/kombucha.webp",
     aliases: ["kombucha"],
   },
   {
-    path: "/ingredients/pickles.png",
+    path: "/ingredients/pickles.webp",
     aliases: ["pickles", "pickle", "picles"],
   },
   {
-    path: "/ingredients/alcaparras.png",
+    path: "/ingredients/alcaparras.webp",
     aliases: ["alcaparras", "capers"],
   },
   {
-    path: "/ingredients/anchovas.png",
+    path: "/ingredients/anchovas.webp",
     aliases: ["anchovas", "anchova", "anchovies", "anchovy"],
   },
   {
-    path: "/ingredients/molho-worcestershire.png",
+    path: "/ingredients/molho-worcestershire.webp",
     aliases: ["molho worcestershire", "worcestershire sauce"],
   },
   {
-    path: "/ingredients/molho-hoisin.png",
+    path: "/ingredients/molho-hoisin.webp",
     aliases: ["molho hoisin", "hoisin sauce"],
   },
   {
-    path: "/ingredients/molho-oyster.png",
+    path: "/ingredients/molho-oyster.webp",
     aliases: ["molho oyster", "oyster sauce", "molho de ostra"],
   },
   {
-    path: "/ingredients/panko.png",
+    path: "/ingredients/panko.webp",
     aliases: ["panko"],
   },
   {
-    path: "/ingredients/molho-ranch.png",
+    path: "/ingredients/molho-ranch.webp",
     aliases: ["molho ranch", "ranch dressing", "ranch sauce"],
   },
   {
-    path: "/ingredients/molho-caesar.png",
+    path: "/ingredients/molho-caesar.webp",
     aliases: ["molho caesar", "caesar dressing", "caesar sauce"],
   },
   {
-    path: "/ingredients/chili-seco.png",
+    path: "/ingredients/chili-seco.webp",
     aliases: ["chili seco", "dried chili", "dried chilli"],
   },
   {
-    path: "/ingredients/jalapeno.png",
+    path: "/ingredients/jalapeno.webp",
     aliases: ["jalapeno", "jalapeño"],
   },
   {
-    path: "/ingredients/pimenta-malagueta.png",
+    path: "/ingredients/pimenta-malagueta.webp",
     aliases: ["pimenta malagueta", "malagueta", "chili pepper", "chilli pepper"],
   },
   {
-    path: "/ingredients/sementes-de-sesamo.png",
+    path: "/ingredients/sementes-de-sesamo.webp",
     aliases: ["sementes de sesamo", "sementes de sésamo", "sesame seeds", "sesame"],
   },
   {
-    path: "/ingredients/sementes-de-chia.png",
+    path: "/ingredients/sementes-de-chia.webp",
     aliases: ["sementes de chia", "chia seeds", "chia"],
   },
   {
-    path: "/ingredients/linhaca.png",
+    path: "/ingredients/linhaca.webp",
     aliases: ["linhaca", "linhaça", "flaxseed", "flax seeds"],
   },
   {
-    path: "/ingredients/farelo-de-trigo.png",
+    path: "/ingredients/farelo-de-trigo.webp",
     aliases: ["farelo de trigo", "wheat bran", "bran"],
   },
   {
-    path: "/ingredients/farinha-de-amendoa.png",
+    path: "/ingredients/farinha-de-amendoa.webp",
     aliases: ["farinha de amendoa", "farinha de amêndoa", "almond flour"],
   },
   {
-    path: "/ingredients/acucar-em-po.png",
+    path: "/ingredients/acucar-em-po.webp",
     aliases: ["acucar em po", "açúcar em pó", "powdered sugar", "icing sugar"],
   },
   {
-    path: "/ingredients/glucose.png",
+    path: "/ingredients/glucose.webp",
     aliases: ["glucose"],
   },
   {
-    path: "/ingredients/margarina.png",
+    path: "/ingredients/margarina.webp",
     aliases: ["margarina", "margarine"],
   },
   {
-    path: "/ingredients/banha.png",
+    path: "/ingredients/banha.webp",
     aliases: ["banha", "lard"],
   },
   {
-    path: "/ingredients/calda-de-acucar.png",
+    path: "/ingredients/calda-de-acucar.webp",
     aliases: ["calda de acucar", "calda de açúcar", "sugar syrup", "simple syrup"],
   },
   {
-    path: "/ingredients/essencia-de-baunilha.png",
+    path: "/ingredients/essencia-de-baunilha.webp",
     aliases: ["essencia de baunilha", "essência de baunilha", "vanilla extract", "vanilla essence"],
   },
   {
-    path: "/ingredients/rum.png",
+    path: "/ingredients/rum.webp",
     aliases: ["rum"],
   },
   {
-    path: "/ingredients/whisky.png",
+    path: "/ingredients/whisky.webp",
     aliases: ["whisky", "whiskey"],
   },
   {
-    path: "/ingredients/licor.png",
+    path: "/ingredients/licor.webp",
     aliases: ["licor", "liqueur"],
   },
   {
-    path: "/ingredients/cafe.png",
+    path: "/ingredients/cafe.webp",
     aliases: ["cafe", "café", "coffee"],
   },
   {
-    path: "/ingredients/cha.png",
+    path: "/ingredients/cha.webp",
     aliases: ["cha", "chá", "tea"],
   },
   {
-    path: "/ingredients/agua-com-gas.png",
+    path: "/ingredients/agua-com-gas.webp",
     aliases: ["agua com gas", "água com gás", "sparkling water", "soda water"],
+  },
+];
+
+const EXTRA_DEFAULT_IMAGES = [
+  {
+    path: "/ingredients/curgete.webp",
+    aliases: ["abobrinha"],
+  },
+  {
+    path: "/ingredients/beringela.webp",
+    aliases: ["berinjela"],
+  },
+  {
+    path: "/ingredients/pimento.webp",
+    aliases: ["pimentao", "pimentão", "pimentao vermelho", "pimentão vermelho", "pimentao amarelo", "pimentão amarelo", "pimentao verde", "pimentão verde"],
+  },
+  {
+    path: "/ingredients/alface.webp",
+    aliases: ["alface romana", "alface crespa"],
+  },
+  {
+    path: "/ingredients/brocolos.webp",
+    aliases: ["brocolis", "brócolis"],
+  },
+  {
+    path: "/ingredients/couve.webp",
+    aliases: ["repolho roxo", "repolho branco", "repolho"],
+  },
+  {
+    path: "/ingredients/nabo.webp",
+    aliases: ["rabanete", "mandioquinha", "mandioquinha salsa", "mandioquinha-salsa", "mandioca", "inhame", "cara", "cará"],
+  },
+  {
+    path: "/ingredients/curgete.webp",
+    aliases: ["chuchu", "vagem", "quiabo"],
+  },
+  {
+    path: "/ingredients/ervilhas.webp",
+    aliases: ["ervilha fresca"],
+  },
+  {
+    path: "/ingredients/milho.webp",
+    aliases: ["milho verde"],
+  },
+  {
+    path: "/ingredients/espargos.webp",
+    aliases: ["aspargo"],
+  },
+  {
+    path: "/ingredients/espargos.webp",
+    aliases: ["alcachofra"],
+  },
+  {
+    path: "/ingredients/aipo.webp",
+    aliases: ["salsao", "salsão"],
+  },
+  {
+    path: "/ingredients/alho-frances.webp",
+    aliases: ["alho poro", "alho-poró", "alho poró"],
+  },
+  {
+    path: "/ingredients/cogumelos.webp",
+    aliases: ["cogumelo paris", "cogumelo shiitake", "cogumelo shimeji", "shiitake", "shimeji"],
+  },
+  {
+    path: "/ingredients/abobora.webp",
+    aliases: ["abobora cabotia", "abóbora cabotiá", "abobora moranga", "abóbora moranga", "abobora paulista", "abóbora paulista"],
+  },
+  {
+    path: "/ingredients/pimenta-malagueta.webp",
+    aliases: ["pimenta dedo de moca", "pimenta dedo-de-moça", "pimenta biquinho"],
+  },
+  {
+    path: "/ingredients/jalapeno.webp",
+    aliases: ["pimenta jalapeno", "pimenta jalapeño"],
+  },
+  {
+    path: "/ingredients/coentros.webp",
+    aliases: ["coentro"],
+  },
+  {
+    path: "/ingredients/salsa.webp",
+    aliases: ["cebolinha"],
+  },
+  {
+    path: "/ingredients/oregaos.webp",
+    aliases: ["oregano fresco", "orégano fresco"],
+  },
+  {
+    path: "/ingredients/salsa.webp",
+    aliases: ["salvia", "sálvia"],
+  },
+  {
+    path: "/ingredients/aneto.webp",
+    aliases: ["endro", "erva doce", "erva-doce"],
+  },
+  {
+    path: "/ingredients/rucula.webp",
+    aliases: ["agriao", "agrião", "mostarda folha", "mostarda (folha)", "escarola", "chicoria", "chicória", "radicchio"],
+  },
+  {
+    path: "/ingredients/feijao-preto.webp",
+    aliases: ["feijao carioca", "feijão carioca", "feijao vermelho", "feijão vermelho", "feijao fradinho", "feijão-fradinho", "feijão fradinho", "fava"],
+  },
+  {
+    path: "/ingredients/soja.webp",
+    aliases: ["soja em grao", "soja em grão"],
+  },
+  {
+    path: "/ingredients/cevada.webp",
+    aliases: ["trigo em grao", "trigo em grão", "amaranto"],
+  },
+  {
+    path: "/ingredients/arroz.webp",
+    aliases: ["arroz branco", "arroz integral", "arroz arboreo", "arroz arbóreo", "arroz basmati", "arroz jasmim"],
+  },
+  {
+    path: "/ingredients/aveia.webp",
+    aliases: ["aveia em flocos", "farelo de aveia"],
+  },
+  {
+    path: "/ingredients/farinha-de-milho.webp",
+    aliases: ["fuba", "fubá", "semolina"],
+  },
+  {
+    path: "/ingredients/espaguete.webp",
+    aliases: ["macarrao espaguete", "macarrão espaguete"],
+  },
+  {
+    path: "/ingredients/macarrao.webp",
+    aliases: ["macarrao penne", "macarrão penne", "macarrao fusilli", "macarrão fusilli", "lasanha"],
+  },
+  {
+    path: "/ingredients/cuscuz.webp",
+    aliases: ["cuscuz marroquino"],
+  },
+  {
+    path: "/ingredients/farinha-de-arroz.webp",
+    aliases: ["tapioca"],
+  },
+  {
+    path: "/ingredients/pao.webp",
+    aliases: ["pao frances", "pão francês", "pao integral", "pão integral", "pao de centeio", "pão de centeio"],
+  },
+  {
+    path: "/ingredients/tortilhas.webp",
+    aliases: ["tortilha de trigo", "tortilha de milho"],
+  },
+  {
+    path: "/ingredients/queijo-mozzarella.webp",
+    aliases: ["queijo mucarela", "queijo muçarela", "mucarela", "muçarela"],
+  },
+  {
+    path: "/ingredients/queijo-feta.webp",
+    aliases: ["queijo minas", "queijo prato", "queijo coalho", "queijo brie", "queijo gorgonzola"],
+  },
+  {
+    path: "/ingredients/ricotta.webp",
+    aliases: ["ricota"],
+  },
+  {
+    path: "/ingredients/queijo-creme.webp",
+    aliases: ["requeijao", "requeijão", "cream cheese"],
+  },
+  {
+    path: "/ingredients/leite.webp",
+    aliases: ["leite integral", "leite desnatado"],
+  },
+  {
+    path: "/ingredients/iogurte.webp",
+    aliases: ["iogurte natural", "iogurte grego"],
+  },
+  {
+    path: "/ingredients/natas.webp",
+    aliases: ["creme de leite", "nata"],
+  },
+  {
+    path: "/ingredients/ovo.webp",
+    aliases: ["ovo de galinha", "ovo de codorna"],
+  },
+  {
+    path: "/ingredients/frango.webp",
+    aliases: ["peito de frango", "coxa de frango", "sobrecoxa de frango"],
+  },
+  {
+    path: "/ingredients/carne-de-vaca.webp",
+    aliases: ["carne moida bovina", "carne moída bovina", "acem", "acém", "patinho", "alcatra", "contrafile", "contrafilé", "file mignon", "filé mignon", "costela bovina"],
+  },
+  {
+    path: "/ingredients/carne-de-porco.webp",
+    aliases: ["lombo suino", "lombo suíno", "pernil suino", "pernil suíno", "linguica toscana", "linguiça toscana", "salame"],
+  },
+  {
+    path: "/ingredients/salmao.webp",
+    aliases: ["tilapia", "tilápia", "merluza"],
+  },
+  {
+    path: "/ingredients/laranja.webp",
+    aliases: ["tangerina"],
+  },
+  {
+    path: "/ingredients/ananas.webp",
+    aliases: ["abacaxi"],
+  },
+  {
+    path: "/ingredients/papaia.webp",
+    aliases: ["mamao", "mamão"],
+  },
+  {
+    path: "/ingredients/mirtilo.webp",
+    aliases: ["amora"],
+  },
+  {
+    path: "/ingredients/pessego.webp",
+    aliases: ["caqui"],
+  },
+  {
+    path: "/ingredients/ananas.webp",
+    aliases: ["maracuja", "maracujá", "goiaba", "figo", "roma", "romã"],
+  },
+  {
+    path: "/ingredients/azeite.webp",
+    aliases: ["azeitona verde", "azeitona preta"],
+  },
+  {
+    path: "/ingredients/nozes.webp",
+    aliases: ["noz", "castanha do para", "castanha-do-pará", "castanha de caju"],
+  },
+  {
+    path: "/ingredients/amendoas.webp",
+    aliases: ["amendoa", "amêndoa"],
+  },
+  {
+    path: "/ingredients/avelas.webp",
+    aliases: ["avela", "avelã"],
+  },
+  {
+    path: "/ingredients/pistachios.webp",
+    aliases: ["pistache"],
+  },
+  {
+    path: "/ingredients/cajus.webp",
+    aliases: ["amendoim"],
+  },
+  {
+    path: "/ingredients/sementes-de-chia.webp",
+    aliases: ["semente de girassol", "semente de abobora", "semente de abóbora", "chia"],
+  },
+  {
+    path: "/ingredients/linhaca.webp",
+    aliases: ["linhaca", "linhaça"],
+  },
+  {
+    path: "/ingredients/sementes-de-sesamo.webp",
+    aliases: ["gergelim"],
+  },
+  {
+    path: "/ingredients/chocolate-negro.webp",
+    aliases: ["chocolate meio amargo"],
+  },
+  {
+    path: "/ingredients/acucar-mascavado.webp",
+    aliases: ["acucar mascavo", "açúcar mascavo", "acucar demerara", "açúcar demerara"],
+  },
+  {
+    path: "/ingredients/sal.webp",
+    aliases: ["sal marinho"],
+  },
+  {
+    path: "/ingredients/pimenta-preta.webp",
+    aliases: ["pimenta do reino", "pimenta-do-reino"],
+  },
+  {
+    path: "/ingredients/paprika.webp",
+    aliases: ["paprica doce", "páprica doce"],
+  },
+  {
+    path: "/ingredients/curcuma.webp",
+    aliases: ["acafrao da terra", "açafrão-da-terra", "açafrão da terra"],
   },
 ];
 
@@ -810,22 +1089,25 @@ function normalizeIngredientName(value: string) {
     .trim();
 }
 
+const NORMALIZED_IMAGE_ALIASES = [...DEFAULT_IMAGES, ...EXTRA_DEFAULT_IMAGES]
+  .flatMap((item) =>
+    item.aliases.map((alias) => ({
+      alias: normalizeIngredientName(alias),
+      path: item.path,
+    }))
+  )
+  .filter((item) => item.alias.length > 0)
+  .sort((a, b) => b.alias.length - a.alias.length);
+
 export function defaultIngredientImageFor(name: string) {
   const normalized = ` ${normalizeIngredientName(name)} `;
   if (!normalized.trim()) return null;
 
-  let match: { path: string; score: number } | null = null;
-  for (const item of DEFAULT_IMAGES) {
-    for (const alias of item.aliases) {
-      const normalizedAlias = normalizeIngredientName(alias);
-      if (!normalizedAlias || !normalized.includes(` ${normalizedAlias} `)) continue;
-      if (!match || normalizedAlias.length > match.score) {
-        match = { path: item.path, score: normalizedAlias.length };
-      }
-    }
+  for (const item of NORMALIZED_IMAGE_ALIASES) {
+    if (normalized.includes(` ${item.alias} `)) return item.path;
   }
 
-  return match?.path ?? null;
+  return null;
 }
 
 export function isBundledIngredientImage(path: string) {

@@ -36,7 +36,9 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 anyhow = "1"
 
+# Imagens
+image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+
 # Logging
 log = "0.4"
 env_logger = "0.11"
-

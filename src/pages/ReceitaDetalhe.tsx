@@ -7,6 +7,7 @@ import {
 import Topbar from "../components/layout/Topbar";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import IngImg from "../components/ui/IngImg";
+import ImagePlaceholder from "../components/ui/ImagePlaceholder";
 import { useToast } from "../components/ui/Toast";
 import { api } from "../utils/api";
 import type { Receita, CustoReceita } from "../types";
@@ -113,9 +114,9 @@ export default function ReceitaDetalhe() {
             <div className="hero">
               <div className="hero-img">
                 {receita.imagem_path ? (
-                  <IngImg path={receita.imagem_path} alt={receita.nome} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  <IngImg path={receita.imagem_path} alt={receita.nome} style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center" }} />
                 ) : (
-                  <HeroPlaceholder nome={receita.nome} />
+                  <ImagePlaceholder seed={receita.nome} />
                 )}
               </div>
               <div className="hero-meta">
@@ -205,7 +206,7 @@ export default function ReceitaDetalhe() {
                           <td>
                             <div className="ing-row-name">
                               <div className="ing-row-swatch">
-                                <IngImgPlaceholder nome={item.nome} />
+                                <ImagePlaceholder seed={item.nome} />
                               </div>
                               <div>
                                 <div className="ing-row-title">{item.nome}</div>
@@ -332,20 +333,4 @@ export default function ReceitaDetalhe() {
       )}
     </>
   );
-}
-
-const STRIPES = ["stripe-amber","stripe-rose","stripe-sage","stripe-sand","stripe-cocoa","stripe-stone","stripe-butter","stripe-terra"];
-
-function stripeFor(nome: string) {
-  let h = 0;
-  for (let i = 0; i < nome.length; i++) h = (h * 31 + nome.charCodeAt(i)) | 0;
-  return STRIPES[Math.abs(h) % STRIPES.length];
-}
-
-function HeroPlaceholder({ nome }: { nome: string }) {
-  return <div className={stripeFor(nome)} style={{ width: "100%", height: "100%" }} />;
-}
-
-function IngImgPlaceholder({ nome }: { nome: string }) {
-  return <div className={stripeFor(nome)} style={{ width: "100%", height: "100%" }} />;
 }

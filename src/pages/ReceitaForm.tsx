@@ -45,9 +45,7 @@ export default function ReceitaForm() {
 
   useEffect(() => {
     if (!isEdit) return;
-    Promise.all([
-      api.receitas.obter(Number(id)),
-    ]).then(([receita]) => {
+    api.receitas.obterCompleta(Number(id)).then((receita) => {
       if (!receita) { navigate("/receitas"); return; }
       reset({
         nome: receita.nome,
@@ -57,9 +55,17 @@ export default function ReceitaForm() {
       });
       setTags(receita.tags);
       setImagePath(receita.imagem_path);
+      setIngRows(
+        receita.ingredientes.length > 0
+          ? receita.ingredientes.map((item) => ({
+              ingrediente_id: item.ingrediente_id,
+              quantidade: String(item.quantidade),
+            }))
+          : [{ ingrediente_id: 0, quantidade: "" }]
+      );
     }).catch(() => addToast("Erro ao carregar receita", "error"))
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [addToast, id, isEdit, navigate, reset]);
 
   function addRow() {
     setIngRows((r) => [...r, { ingrediente_id: 0, quantidade: "" }]);

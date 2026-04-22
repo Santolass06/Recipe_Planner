@@ -44,6 +44,40 @@ pub async fn obter_receita(
     .map_err(err)
 }
 
+#[tauri::command]
+pub async fn obter_receita_completa(
+    state: State<'_, AppState>,
+    id: i64,
+) -> CmdResult<Option<ReceitaCompleta>> {
+    let receita = match sqlx::query_as!(
+        Receita,
+        "SELECT id, nome, categoria, tags, porcoes_base, instrucoes, imagem_path, created_at, updated_at
+         FROM receitas
+         WHERE id = ?",
+        id
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(err)?
+    {
+        Some(receita) => receita,
+        None => return Ok(None),
+    };
+
+    let ingredientes = sqlx::query_as::<_, ReceitaIngredientePayload>(
+        "SELECT ingrediente_id, quantidade
+         FROM receita_ingredientes
+         WHERE receita_id = ?
+         ORDER BY rowid ASC"
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(err)?;
+
+    Ok(Some(ReceitaCompleta { receita, ingredientes }))
+}
+
 // ─── Criar ────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -52,6 +86,7 @@ pub async fn criar_receita(
     payload: ReceitaPayload,
 ) -> CmdResult<Receita> {
     let tags_json = serde_json::to_string(&payload.tags).map_err(err)?;
+    let mut tx = state.db.begin().await.map_err(err)?;
 
     let id = sqlx::query!(
         "INSERT INTO receitas (nome, categoria, tags, porcoes_base, instrucoes, imagem_path)
@@ -63,7 +98,7 @@ pub async fn criar_receita(
         payload.instrucoes,
         payload.imagem_path,
     )
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
     .map_err(err)?
     .last_insert_rowid();
@@ -77,10 +112,12 @@ pub async fn criar_receita(
             item.ingrediente_id,
             item.quantidade,
         )
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
         .map_err(err)?;
     }
+
+    tx.commit().await.map_err(err)?;
 
     obter_receita(state, id)
         .await?
@@ -96,6 +133,7 @@ pub async fn atualizar_receita(
     payload: ReceitaPayload,
 ) -> CmdResult<Receita> {
     let tags_json = serde_json::to_string(&payload.tags).map_err(err)?;
+    let mut tx = state.db.begin().await.map_err(err)?;
 
     sqlx::query!(
         "UPDATE receitas
@@ -109,13 +147,13 @@ pub async fn atualizar_receita(
         payload.imagem_path,
         id,
     )
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
     .map_err(err)?;
 
     // Substitui todos os ingredientes (delete + insert é mais simples que diff)
     sqlx::query!("DELETE FROM receita_ingredientes WHERE receita_id = ?", id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
         .map_err(err)?;
 
@@ -127,10 +165,12 @@ pub async fn atualizar_receita(
             item.ingrediente_id,
             item.quantidade,
         )
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
         .map_err(err)?;
     }
+
+    tx.commit().await.map_err(err)?;
 
     obter_receita(state, id)
         .await?

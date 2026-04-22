@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, BookOpen, Users } from "lucide-react";
 import Topbar from "../components/layout/Topbar";
 import IngImg from "../components/ui/IngImg";
+import ImagePlaceholder from "../components/ui/ImagePlaceholder";
 import { useToast } from "../components/ui/Toast";
 import { api } from "../utils/api";
 import type { Receita } from "../types";
@@ -23,13 +24,26 @@ export default function Receitas() {
       .finally(() => setLoading(false));
   }, []);
 
-  const categorias = ["Todas", ...Array.from(new Set(receitas.map((r) => r.categoria).filter(Boolean) as string[]))];
+  const { categorias, categoriaCounts } = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const receita of receitas) {
+      if (!receita.categoria) continue;
+      counts.set(receita.categoria, (counts.get(receita.categoria) ?? 0) + 1);
+    }
+    return {
+      categorias: ["Todas", ...counts.keys()],
+      categoriaCounts: counts,
+    };
+  }, [receitas]);
 
-  const filtered = receitas.filter((r) => {
-    const matchSearch = r.nome.toLowerCase().includes(search.toLowerCase());
-    const matchCat = categoria === "Todas" || r.categoria === categoria;
-    return matchSearch && matchCat;
-  });
+  const filtered = useMemo(() => {
+    const normalizedSearch = search.toLowerCase();
+    return receitas.filter((r) => {
+      const matchSearch = r.nome.toLowerCase().includes(normalizedSearch);
+      const matchCat = categoria === "Todas" || r.categoria === categoria;
+      return matchSearch && matchCat;
+    });
+  }, [categoria, receitas, search]);
 
   return (
     <>
@@ -65,7 +79,7 @@ export default function Receitas() {
                 {cat}
                 {cat !== "Todas" && (
                   <span className="chip-count">
-                    {receitas.filter((r) => r.categoria === cat).length}
+                    {categoriaCounts.get(cat) ?? 0}
                   </span>
                 )}
               </button>
@@ -111,9 +125,9 @@ function ReceitaCard({ receita, onClick }: { receita: Receita; onClick: () => vo
     <div className="recipe-card" onClick={onClick}>
       <div className="recipe-card-img">
         {receita.imagem_path ? (
-          <IngImg path={receita.imagem_path} alt={receita.nome} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <IngImg path={receita.imagem_path} alt={receita.nome} style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center" }} />
         ) : (
-          <RecipePlaceholder nome={receita.nome} />
+          <ImagePlaceholder seed={receita.nome} />
         )}
       </div>
       <div className="recipe-card-body">
@@ -138,16 +152,4 @@ function ReceitaCard({ receita, onClick }: { receita: Receita; onClick: () => vo
       </div>
     </div>
   );
-}
-
-const STRIPES = [
-  "stripe-amber", "stripe-rose", "stripe-sage", "stripe-sand",
-  "stripe-cocoa", "stripe-stone", "stripe-butter", "stripe-terra",
-];
-
-function RecipePlaceholder({ nome }: { nome: string }) {
-  let h = 0;
-  for (let i = 0; i < nome.length; i++) h = (h * 31 + nome.charCodeAt(i)) | 0;
-  const cls = STRIPES[Math.abs(h) % STRIPES.length];
-  return <div className={cls} style={{ width: "100%", height: "100%" }} />;
 }

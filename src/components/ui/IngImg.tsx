@@ -1,28 +1,18 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { isBundledIngredientImage } from "../../utils/ingredientDefaults";
+import ImagePlaceholder from "./ImagePlaceholder";
 
 interface IngImgProps {
   path: string | null;
   alt?: string;
   className?: string;
   style?: React.CSSProperties;
+  fit?: "contain" | "cover";
 }
 
-const STRIPE_CLASSES = [
-  "stripe-amber", "stripe-rose", "stripe-sage", "stripe-sand",
-  "stripe-cocoa", "stripe-stone", "stripe-butter", "stripe-terra",
-];
-
-function stripeFor(seed: string) {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
-  return STRIPE_CLASSES[Math.abs(h) % STRIPE_CLASSES.length];
-}
-
-export default function IngImg({ path, alt = "", className, style }: IngImgProps) {
+export default function IngImg({ path, alt = "", className, style, fit = "contain" }: IngImgProps) {
   if (!path) {
-    const stripe = stripeFor(alt);
-    return <div className={`${stripe} ${className ?? ""}`} style={style} />;
+    return <ImagePlaceholder seed={alt} className={className} style={style} />;
   }
   let src = path;
   if (
@@ -38,7 +28,13 @@ export default function IngImg({ path, alt = "", className, style }: IngImgProps
       src={src}
       alt={alt}
       className={className}
-      style={style}
+      style={{
+        width: "100%",
+        height: "100%",
+        objectFit: fit,
+        objectPosition: "center",
+        ...style,
+      }}
       onError={(e) => {
         (e.currentTarget as HTMLImageElement).style.display = "none";
       }}

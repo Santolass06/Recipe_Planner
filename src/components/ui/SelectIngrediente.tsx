@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { ChevronDown, Search, Check } from "lucide-react";
 import type { Ingrediente } from "../../types";
 
@@ -16,10 +16,18 @@ export default function SelectIngrediente({ ingredientes, value, onChange }: Pro
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
-  const selected = ingredientes.find((i) => i.id === value) ?? null;
+  const selected = useMemo(
+    () => ingredientes.find((i) => i.id === value) ?? null,
+    [ingredientes, value]
+  );
 
-  const filtered = ingredientes.filter((i) =>
-    i.nome.toLowerCase().includes(search.toLowerCase())
+  const filtered = useMemo(
+    () => {
+      const normalizedSearch = search.toLowerCase();
+      if (!normalizedSearch) return ingredientes;
+      return ingredientes.filter((i) => i.nome.toLowerCase().includes(normalizedSearch));
+    },
+    [ingredientes, search]
   );
 
   // Close on outside click

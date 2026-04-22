@@ -38,6 +38,15 @@ export interface ReceitaIngrediente {
   ingrediente?: Ingrediente; // populated em joins
 }
 
+export interface ReceitaIngredientePayload {
+  ingrediente_id: number;
+  quantidade: number;
+}
+
+export interface ReceitaCompleta extends Receita {
+  ingredientes: ReceitaIngredientePayload[];
+}
+
 // Para cálculo de custo — pode ter preço promocional temporário
 export interface IngredienteComPromocao {
   ingrediente_id: number;

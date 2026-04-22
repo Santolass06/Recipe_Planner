@@ -45,6 +45,13 @@ pub struct Receita {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct ReceitaCompleta {
+    #[serde(flatten)]
+    pub receita: Receita,
+    pub ingredientes: Vec<ReceitaIngredientePayload>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ReceitaPayload {
     pub nome: String,
     pub categoria: Option<String>,
@@ -62,7 +69,7 @@ pub struct ReceitaIngrediente {
     pub quantidade: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
 pub struct ReceitaIngredientePayload {
     pub ingrediente_id: i64,
     pub quantidade: f64,

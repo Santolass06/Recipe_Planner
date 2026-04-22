@@ -361,9 +361,9 @@ html:not(.dark) .sidebar { background-color: #2c2c28; }
   position: relative;
   overflow: hidden;
   display: grid; place-items: center;
-  background: var(--bg-alt);
+  background: linear-gradient(180deg, var(--bg-alt), var(--card));
 }
-.ing-img-wrap img { width: 100%; height: 100%; object-fit: cover; }
+.ing-img-wrap img { width: 100%; height: 100%; object-fit: contain; object-position: center; }
 .ing-img-label {
   font-family: var(--font-mono);
   font-size: 10.5px;
@@ -447,7 +447,7 @@ html:not(.dark) .sidebar { background-color: #2c2c28; }
   position: relative;
   overflow: hidden;
 }
-.recipe-card-img img { width: 100%; height: 100%; object-fit: cover; }
+.recipe-card-img img { width: 100%; height: 100%; object-fit: contain; object-position: center; }
 .recipe-card-body { padding: 16px 18px; }
 .recipe-card-category {
   font-size: 11px;
@@ -524,7 +524,7 @@ html:not(.dark) .sidebar { background-color: #2c2c28; }
   background: #e8dfd0;
   overflow: hidden;
 }
-.hero-img img { width: 100%; height: 100%; object-fit: cover; }
+.hero-img img { width: 100%; height: 100%; object-fit: contain; object-position: center; }
 .hero-img .hero-img-label {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -599,7 +599,7 @@ html:not(.dark) .sidebar { background-color: #2c2c28; }
 .ing-table tr:last-child td { border-bottom: none; }
 .ing-row-name { display: flex; align-items: center; gap: 12px; }
 .ing-row-swatch { width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0; background: var(--bg-alt); overflow: hidden; }
-.ing-row-swatch img { width: 100%; height: 100%; object-fit: cover; }
+.ing-row-swatch img { width: 100%; height: 100%; object-fit: contain; object-position: center; }
 .ing-row-title { font-weight: 500; font-size: 14px; }
 .ing-row-sub { font-size: 11.5px; color: var(--text-light); font-family: var(--font-mono); }
 .td-num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 13px; }
@@ -871,14 +871,20 @@ html:not(.dark) .sidebar { background-color: #2c2c28; }
   cursor: pointer;
   transition: all 0.12s;
   text-align: center;
-  background: var(--bg);
+  background: linear-gradient(180deg, var(--bg-alt), var(--card));
   min-height: 100px;
   position: relative;
   overflow: hidden;
 }
-.img-upload-zone:hover { border-color: var(--primary); background: var(--primary-tint); }
+.img-upload-zone:hover { border-color: var(--primary); background: linear-gradient(180deg, var(--primary-tint), var(--card)); }
 .img-upload-zone.has-image { padding: 0; }
-.img-upload-zone.has-image img { width: 100%; height: 160px; object-fit: cover; display: block; }
+.img-upload-zone.has-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+}
 .img-upload-hint { font-size: 12.5px; color: var(--text-muted); }
 .img-upload-overlay {
   position: absolute; inset: 0;
@@ -910,15 +916,19 @@ html:not(.dark) .sidebar { background-color: #2c2c28; }
 .empty-state h3 { font-family: var(--font-serif); font-size: 20px; color: var(--text); margin: 0 0 8px; }
 .empty-state p { font-size: 14px; }
 
-/* ── Stripe placeholders ─────────────────────── */
-.stripe-amber  { background: repeating-linear-gradient(135deg, #f2d9b9 0px, #f2d9b9 8px, #ead1ae 8px, #ead1ae 16px); }
-.stripe-rose   { background: repeating-linear-gradient(135deg, #efd1cc 0px, #efd1cc 8px, #e7c7c1 8px, #e7c7c1 16px); }
-.stripe-sage   { background: repeating-linear-gradient(135deg, #d7e0ca 0px, #d7e0ca 8px, #cfd9c1 8px, #cfd9c1 16px); }
-.stripe-sand   { background: repeating-linear-gradient(135deg, #ece4d3 0px, #ece4d3 8px, #e4dbc8 8px, #e4dbc8 16px); }
-.stripe-cocoa  { background: repeating-linear-gradient(135deg, #d8c5b0 0px, #d8c5b0 8px, #d0bba3 8px, #d0bba3 16px); }
-.stripe-stone  { background: repeating-linear-gradient(135deg, #e4e2dc 0px, #e4e2dc 8px, #dcd9d1 8px, #dcd9d1 16px); }
-.stripe-butter { background: repeating-linear-gradient(135deg, #f1e4b8 0px, #f1e4b8 8px, #e9daa8 8px, #e9daa8 16px); }
-.stripe-terra  { background: repeating-linear-gradient(135deg, #e7c4a7 0px, #e7c4a7 8px, #dfb998 8px, #dfb998 16px); }
+/* ── Neutral placeholders ─────────────────────── */
+.stripe-amber,
+.stripe-rose,
+.stripe-sage,
+.stripe-sand,
+.stripe-cocoa,
+.stripe-stone,
+.stripe-butter,
+.stripe-terra {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255,255,255,0.68) 0 34%, transparent 35%),
+    linear-gradient(180deg, var(--bg-alt), var(--card));
+}
 
 /* ── Loading / spinner ─────────────────────── */
 .spinner { width: 28px; height: 28px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.7s linear infinite; margin: 60px auto; }

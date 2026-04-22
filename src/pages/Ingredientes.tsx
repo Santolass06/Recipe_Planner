@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Plus, Pencil, Trash2, Carrot } from "lucide-react";
 import { useForm } from "react-hook-form";
 import Topbar from "../components/layout/Topbar";
@@ -6,6 +6,7 @@ import Modal from "../components/ui/Modal";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import ImageUpload from "../components/ui/ImageUpload";
 import IngImg from "../components/ui/IngImg";
+import ImagePlaceholder from "../components/ui/ImagePlaceholder";
 import { useToast } from "../components/ui/Toast";
 import { api } from "../utils/api";
 import { defaultIngredientImageFor } from "../utils/ingredientDefaults";
@@ -118,9 +119,11 @@ export default function Ingredientes() {
     }
   }
 
-  const filtered = ingredientes.filter((i) =>
-    i.nome.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = useMemo(() => {
+    const normalizedSearch = search.toLowerCase();
+    if (!normalizedSearch) return ingredientes;
+    return ingredientes.filter((i) => i.nome.toLowerCase().includes(normalizedSearch));
+  }, [ingredientes, search]);
 
   return (
     <>
@@ -265,9 +268,9 @@ function IngredienteCard({
     <div className="ing-card">
       <div className="ing-img-wrap">
         {ing.imagem_path ? (
-          <IngImg path={ing.imagem_path} alt={ing.nome} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <IngImg path={ing.imagem_path} alt={ing.nome} style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center" }} />
         ) : (
-          <IngImgPlaceholder nome={ing.nome} />
+          <ImagePlaceholder seed={ing.nome} />
         )}
         <div className="ing-tag-badge">{unidadeLabel}</div>
       </div>
@@ -299,16 +302,4 @@ function IngredienteCard({
       </div>
     </div>
   );
-}
-
-const STRIPES = [
-  "stripe-amber", "stripe-rose", "stripe-sage", "stripe-sand",
-  "stripe-cocoa", "stripe-stone", "stripe-butter", "stripe-terra",
-];
-
-function IngImgPlaceholder({ nome }: { nome: string }) {
-  let h = 0;
-  for (let i = 0; i < nome.length; i++) h = (h * 31 + nome.charCodeAt(i)) | 0;
-  const cls = STRIPES[Math.abs(h) % STRIPES.length];
-  return <div className={cls} style={{ width: "100%", height: "100%" }} />;
 }

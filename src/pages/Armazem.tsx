@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { AlertTriangle, Package, Pencil } from "lucide-react";
 import Topbar from "../components/layout/Topbar";
 import { useToast } from "../components/ui/Toast";
@@ -61,11 +61,16 @@ export default function Armazem() {
     if (e.key === "Escape") cancelEdit(id);
   }
 
-  const filtered = items.filter((i) =>
-    i.nome.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = useMemo(() => {
+    const normalizedSearch = search.toLowerCase();
+    if (!normalizedSearch) return items;
+    return items.filter((i) => i.nome.toLowerCase().includes(normalizedSearch));
+  }, [items, search]);
 
-  const emStockBaixo = items.filter((i) => i.quantidade_disponivel === 0).length;
+  const emStockBaixo = useMemo(
+    () => items.reduce((count, item) => count + (item.quantidade_disponivel === 0 ? 1 : 0), 0),
+    [items]
+  );
 
   return (
     <>

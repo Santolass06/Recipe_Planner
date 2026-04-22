@@ -34,9 +34,12 @@ pub fn run() {
             commands::ingredientes::criar_ingrediente,
             commands::ingredientes::atualizar_ingrediente,
             commands::ingredientes::eliminar_ingrediente,
+            // Imagens
+            commands::imagens::importar_imagem,
             // Receitas
             commands::receitas::listar_receitas,
             commands::receitas::obter_receita,
+            commands::receitas::obter_receita_completa,
             commands::receitas::criar_receita,
             commands::receitas::atualizar_receita,
             commands::receitas::eliminar_receita,
