@@ -140,9 +140,14 @@ Legenda do roadmap: 🟢 todos os tipos · 👤 Individual/Família · 🏢 Neg�
 
 ## 5. Fluxo de desenvolvimento
 
-Cada sprint é uma branch, um PR, um ciclo de review completo.
+Cada sprint é uma branch, um ciclo de review completo.
 Dentro de cada sprint as features são implementadas em sequência
 — nunca em paralelo, para evitar conflitos de merge.
+
+```
+main (sempre compilável)
+ └─ feat/<nome> (uma branch por sprint)
+```
 
 ### Sprints da Fase 1
 
@@ -157,13 +162,11 @@ Dentro de cada sprint as features são implementadas em sequência
 ### Ciclo de cada sprint
 
 1. Planeamos o sprint (humano + Claude Sonnet 4.6)
-2. Agente implementa `feat/<nome>` — Haiku 4.5, budget_tokens conforme complexidade
-3. Testes escritos e a passar
-4. PR aberto pelo agente via `gh pr create`
-5. Review: Devstral (código) + Gemini 3.1 Pro `thinking_level: low`
-6. Aprovação humana
-7. Merge para `dev` — Haiku 4.5 · sem thinking
-8. Logbook actualizado neste README
+2. Agente implementa em feat/<nome>
+3. Testes a passar (cargo test + tsc + npm run build)
+4. Review na branch — Devstral
+5. Merge squash para main + delete branch
+6. Logbook actualizado neste README
 
 ### Routing de modelos
 
@@ -172,8 +175,7 @@ Dentro de cada sprint as features são implementadas em sequência
 | Scaffold, mover ficheiros | Haiku 4.5 | sem thinking |
 | Implementar feature simples | Haiku 4.5 | `budget_tokens: 8000` |
 | Implementar feature complexa | Haiku 4.5 | `budget_tokens: 16000` |
-| PR review (código) | Devstral | — |
-| PR review (decisão) | Gemini 3.1 Pro | `thinking_level: low` (rotina) · `high` (features complexas) |
+| Review na branch | Devstral | — |
 | Debug difícil | Sonnet 4.6 | `effort: medium` |
 | Decisão arquitectural | Sonnet 4.6 | `effort: high` |
 | Auditoria periódica | Sonnet 4.6 | `effort: high` |
