@@ -6,7 +6,7 @@ use mise_data::{
 use mise_core::Unit;
 use mise_entitlements::{is_allowed, AccountType, Feature};
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Manager, State};
 use tokio::sync::Mutex;
 
 pub struct AppState {
