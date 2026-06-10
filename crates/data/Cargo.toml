@@ -1,0 +1,9 @@
+[package]
+name = "mise-data"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+mise-core = { path = "../core" }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
