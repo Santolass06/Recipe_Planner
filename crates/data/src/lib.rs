@@ -1,31 +1,39 @@
+pub mod db;
+pub mod ingredient_repo;
+
 use async_trait::async_trait;
-use mise_core::{Ingredient, Recipe};
+use mise_core::{Ingredient, Unit};
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum RepoError {
-    #[error("Not found")]
+    #[error("não encontrado")]
     NotFound,
-    #[error("Database error: {0}")]
-    DatabaseError(String),
-    #[error("Validation error: {0}")]
-    ValidationError(String),
+    #[error("erro de armazenamento: {0}")]
+    Storage(String),
+}
+
+pub type RepoResult<T> = Result<T, RepoError>;
+
+#[derive(Debug, Clone)]
+pub struct IngredientInput {
+    pub name:           String,
+    pub unit:           Unit,
+    pub price_per_unit: f64,
 }
 
 #[async_trait]
-pub trait IngredientRepo {
-    async fn create(&self, ingredient: Ingredient) -> Result<Ingredient, RepoError>;
-    async fn get(&self, id: u64) -> Result<Ingredient, RepoError>;
-    async fn list(&self) -> Result<Vec<Ingredient>, RepoError>;
-    async fn update(&self, ingredient: Ingredient) -> Result<Ingredient, RepoError>;
-    async fn delete(&self, id: u64) -> Result<(), RepoError>;
+pub trait IngredientRepo: Send + Sync {
+    async fn list(&self)                              -> RepoResult<Vec<Ingredient>>;
+    async fn get(&self, id: i64)                      -> RepoResult<Ingredient>;
+    async fn create(&self, input: IngredientInput)    -> RepoResult<Ingredient>;
+    async fn update(&self, id: i64, input: IngredientInput) -> RepoResult<Ingredient>;
+    async fn delete(&self, id: i64)                   -> RepoResult<()>;
 }
 
 #[async_trait]
-pub trait RecipeRepo {
-    async fn create(&self, recipe: Recipe) -> Result<Recipe, RepoError>;
-    async fn get(&self, id: u64) -> Result<Recipe, RepoError>;
-    async fn list(&self) -> Result<Vec<Recipe>, RepoError>;
-    async fn update(&self, recipe: Recipe) -> Result<Recipe, RepoError>;
-    async fn delete(&self, id: u64) -> Result<(), RepoError>;
+pub trait RecipeRepo: Send + Sync {
+    async fn list(&self)           -> RepoResult<Vec<mise_core::Recipe>>;
+    async fn get(&self, id: i64)   -> RepoResult<mise_core::Recipe>;
+    async fn delete(&self, id: i64)-> RepoResult<()>;
 }

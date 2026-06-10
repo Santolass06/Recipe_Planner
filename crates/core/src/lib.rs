@@ -2,20 +2,19 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Unit {
-    Grams,
-    Milliliters,
-    Pieces,
-    Tablespoons,
-    Teaspoons,
+    Gram,
+    Kilogram,
+    Liter,
+    Milliliter,
+    Piece,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ingredient {
-    pub id: u64,
+    pub id: i64,
     pub name: String,
-    pub quantity: f64,
     pub unit: Unit,
-    pub cost_per_unit: f64,
+    pub price_per_unit: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,8 +51,8 @@ pub mod cost {
         let mut ingredient_costs = Vec::new();
 
         for recipe_ing in &recipe.ingredients {
-            if let Some(ing) = ingredients.iter().find(|i| i.id == recipe_ing.ingredient_id) {
-                let cost = recipe_ing.quantity * ing.cost_per_unit;
+            if let Some(ing) = ingredients.iter().find(|i| i.id == recipe_ing.ingredient_id as i64) {
+                let cost = recipe_ing.quantity * ing.price_per_unit;
                 total_cost += cost;
                 ingredient_costs.push((recipe_ing.ingredient_name.clone(), cost));
             }
@@ -76,9 +75,8 @@ mod tests {
         let ing = Ingredient {
             id: 1,
             name: "Flour".to_string(),
-            quantity: 1000.0,
-            unit: Unit::Grams,
-            cost_per_unit: 0.01,
+            unit: Unit::Gram,
+            price_per_unit: 0.01,
         };
         assert_eq!(ing.name, "Flour");
     }
@@ -104,7 +102,7 @@ mod tests {
                 ingredient_id: 1,
                 ingredient_name: "Flour".to_string(),
                 quantity: 500.0,
-                unit: Unit::Grams,
+                unit: Unit::Gram,
             }],
             portions: 2,
             instructions: "Test".to_string(),
@@ -113,9 +111,8 @@ mod tests {
         let ingredients = vec![Ingredient {
             id: 1,
             name: "Flour".to_string(),
-            quantity: 1000.0,
-            unit: Unit::Grams,
-            cost_per_unit: 0.01,
+            unit: Unit::Gram,
+            price_per_unit: 0.01,
         }];
 
         let breakdown = cost::calculate_recipe_cost(&recipe, &ingredients);
@@ -133,13 +130,13 @@ mod tests {
                     ingredient_id: 1,
                     ingredient_name: "Flour".to_string(),
                     quantity: 200.0,
-                    unit: Unit::Grams,
+                    unit: Unit::Gram,
                 },
                 RecipeIngredient {
                     ingredient_id: 2,
                     ingredient_name: "Butter".to_string(),
                     quantity: 100.0,
-                    unit: Unit::Grams,
+                    unit: Unit::Gram,
                 },
             ],
             portions: 1,
@@ -150,16 +147,14 @@ mod tests {
             Ingredient {
                 id: 1,
                 name: "Flour".to_string(),
-                quantity: 1000.0,
-                unit: Unit::Grams,
-                cost_per_unit: 0.01,
+                unit: Unit::Gram,
+                price_per_unit: 0.01,
             },
             Ingredient {
                 id: 2,
                 name: "Butter".to_string(),
-                quantity: 250.0,
-                unit: Unit::Grams,
-                cost_per_unit: 0.02,
+                unit: Unit::Gram,
+                price_per_unit: 0.02,
             },
         ];
 

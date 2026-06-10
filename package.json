@@ -10,9 +10,13 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@tailwindcss/postcss": "^4.3.0",
     "@tauri-apps/api": "^2",
+    "autoprefixer": "^10.5.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.0.0",
+    "tailwindcss": "^4.3.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
