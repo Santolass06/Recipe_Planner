@@ -19,3 +19,4 @@ serde_json = { workspace = true }
 mise-core = { path = "../crates/core" }
 mise-data = { path = "../crates/data" }
 mise-entitlements = { path = "../crates/entitlements" }
+tokio = { workspace = true }

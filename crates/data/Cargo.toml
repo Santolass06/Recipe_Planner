@@ -7,3 +7,5 @@ version.workspace = true
 mise-core = { path = "../core" }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
+libsql = { workspace = true }
+tokio = { workspace = true }

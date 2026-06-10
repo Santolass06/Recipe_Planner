@@ -1,3 +1,5 @@
+import { NavLink } from "react-router-dom";
+
 export default function Sidebar() {
   return (
     <aside className="sidebar">
@@ -5,18 +7,26 @@ export default function Sidebar() {
         MISE
       </div>
       <nav style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <a href="/" style={{ padding: "6px 8px", borderRadius: 4, fontSize: 12 }}>
+        <NavLink to="/ingredientes" className={({ isActive }) =>
+          "nav-item" + (isActive ? " active" : "")
+        } style={{ padding: "6px 8px", borderRadius: 4, fontSize: 12 }}>
           Ingredientes
-        </a>
-        <a href="/" style={{ padding: "6px 8px", borderRadius: 4, fontSize: 12 }}>
+        </NavLink>
+        <NavLink to="/receitas" className={({ isActive }) =>
+          "nav-item" + (isActive ? " active" : "")
+        } style={{ padding: "6px 8px", borderRadius: 4, fontSize: 12 }}>
           Receitas
-        </a>
-        <a href="/" style={{ padding: "6px 8px", borderRadius: 4, fontSize: 12 }}>
+        </NavLink>
+        <NavLink to="/custos" className={({ isActive }) =>
+          "nav-item" + (isActive ? " active" : "")
+        } style={{ padding: "6px 8px", borderRadius: 4, fontSize: 12 }}>
           Custos
-        </a>
-        <a href="/" style={{ padding: "6px 8px", borderRadius: 4, fontSize: 12 }}>
+        </NavLink>
+        <NavLink to="/sugestor" className={({ isActive }) =>
+          "nav-item" + (isActive ? " active" : "")
+        } style={{ padding: "6px 8px", borderRadius: 4, fontSize: 12 }}>
           Planeamento
-        </a>
+        </NavLink>
       </nav>
     </aside>
   );
