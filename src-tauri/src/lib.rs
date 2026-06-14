@@ -3,7 +3,6 @@ use mise_data::{
     ingredient_repo::SqliteIngredientRepo,
     IngredientInput, IngredientRepo,
 };
-use mise_core::Unit;
 use mise_entitlements::{is_allowed, AccountType, Feature};
 use std::sync::Arc;
 use tauri::{Manager, State};
