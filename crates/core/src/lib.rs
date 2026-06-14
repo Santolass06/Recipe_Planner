@@ -1,12 +1,85 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Unit {
-    Gram,
-    Kilogram,
-    Liter,
-    Milliliter,
-    Piece,
+    Gram, Kilogram, Milligram, Ounce, Pound,
+    Milliliter, Liter, FluidOunce, Cup, Pint, Quart, Gallon,
+    Teaspoon, Tablespoon,
+    Piece, Dozen, Pinch, Bunch, Clove, Slice,
+    Centimeter, Celsius, Fahrenheit,
+}
+
+impl Unit {
+    pub fn group(self) -> UnitGroup {
+        match self {
+            Unit::Gram | Unit::Kilogram | Unit::Milligram
+            | Unit::Ounce | Unit::Pound | Unit::Pinch
+            | Unit::Bunch | Unit::Clove | Unit::Slice
+                => UnitGroup::Weight,
+            Unit::Milliliter | Unit::Liter | Unit::FluidOunce
+            | Unit::Cup | Unit::Pint | Unit::Quart | Unit::Gallon
+            | Unit::Teaspoon | Unit::Tablespoon
+                => UnitGroup::Volume,
+            Unit::Piece | Unit::Dozen => UnitGroup::Count,
+            Unit::Centimeter => UnitGroup::Length,
+            Unit::Celsius | Unit::Fahrenheit => UnitGroup::Temperature,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Unit::Gram => "g", Unit::Kilogram => "kg",
+            Unit::Milligram => "mg", Unit::Ounce => "oz",
+            Unit::Pound => "lb", Unit::Milliliter => "ml",
+            Unit::Liter => "l", Unit::FluidOunce => "fl oz",
+            Unit::Cup => "cup", Unit::Pint => "pt",
+            Unit::Quart => "qt", Unit::Gallon => "gal",
+            Unit::Teaspoon => "tsp", Unit::Tablespoon => "tbsp",
+            Unit::Piece => "pcs", Unit::Dozen => "dz",
+            Unit::Pinch => "pitada", Unit::Bunch => "molho",
+            Unit::Clove => "dente", Unit::Slice => "fatia",
+            Unit::Centimeter => "cm", Unit::Celsius => "°C",
+            Unit::Fahrenheit => "°F",
+        }
+    }
+
+    pub fn name_pt(self) -> &'static str {
+        match self {
+            Unit::Gram => "Grama", Unit::Kilogram => "Quilograma",
+            Unit::Milligram => "Miligrama", Unit::Ounce => "Onça",
+            Unit::Pound => "Libra", Unit::Milliliter => "Mililitro",
+            Unit::Liter => "Litro", Unit::FluidOunce => "Fluid Ounce",
+            Unit::Cup => "Chávena", Unit::Pint => "Pint",
+            Unit::Quart => "Quart", Unit::Gallon => "Galão",
+            Unit::Teaspoon => "Colher de chá",
+            Unit::Tablespoon => "Colher de sopa",
+            Unit::Piece => "Peça", Unit::Dozen => "Dúzia",
+            Unit::Pinch => "Pitada", Unit::Bunch => "Molho",
+            Unit::Clove => "Dente", Unit::Slice => "Fatia",
+            Unit::Centimeter => "Centímetro",
+            Unit::Celsius => "Celsius",
+            Unit::Fahrenheit => "Fahrenheit",
+        }
+    }
+
+    pub fn all() -> &'static [Unit] {
+        &[
+            Unit::Gram, Unit::Kilogram, Unit::Milligram,
+            Unit::Ounce, Unit::Pound,
+            Unit::Milliliter, Unit::Liter, Unit::FluidOunce,
+            Unit::Cup, Unit::Pint, Unit::Quart, Unit::Gallon,
+            Unit::Teaspoon, Unit::Tablespoon,
+            Unit::Piece, Unit::Dozen, Unit::Pinch,
+            Unit::Bunch, Unit::Clove, Unit::Slice,
+            Unit::Centimeter, Unit::Celsius, Unit::Fahrenheit,
+        ]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitGroup {
+    Weight, Volume, Count, Length, Temperature,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +106,9 @@ pub struct Recipe {
     pub portions: u32,
     pub instructions: String,
 }
+
+pub mod converter;
+pub use converter::{convert, compatible_units, ConversionResult};
 
 pub mod cost {
     use super::*;

@@ -30,6 +30,35 @@ async fn ingredients_list(
         .map_err(|e| e.to_string())
 }
 
+fn parse_unit_str(s: &str) -> mise_core::Unit {
+    match s {
+        "gram" => mise_core::Unit::Gram,
+        "kilogram" => mise_core::Unit::Kilogram,
+        "milligram" => mise_core::Unit::Milligram,
+        "ounce" => mise_core::Unit::Ounce,
+        "pound" => mise_core::Unit::Pound,
+        "milliliter" => mise_core::Unit::Milliliter,
+        "liter" => mise_core::Unit::Liter,
+        "fluid_ounce" => mise_core::Unit::FluidOunce,
+        "cup" => mise_core::Unit::Cup,
+        "pint" => mise_core::Unit::Pint,
+        "quart" => mise_core::Unit::Quart,
+        "gallon" => mise_core::Unit::Gallon,
+        "teaspoon" => mise_core::Unit::Teaspoon,
+        "tablespoon" => mise_core::Unit::Tablespoon,
+        "piece" => mise_core::Unit::Piece,
+        "dozen" => mise_core::Unit::Dozen,
+        "pinch" => mise_core::Unit::Pinch,
+        "bunch" => mise_core::Unit::Bunch,
+        "clove" => mise_core::Unit::Clove,
+        "slice" => mise_core::Unit::Slice,
+        "centimeter" => mise_core::Unit::Centimeter,
+        "celsius" => mise_core::Unit::Celsius,
+        "fahrenheit" => mise_core::Unit::Fahrenheit,
+        _ => mise_core::Unit::Gram,
+    }
+}
+
 #[tauri::command]
 async fn ingredient_create(
     state: State<'_, AppState>,
@@ -37,13 +66,7 @@ async fn ingredient_create(
     unit: String,
     price_per_unit: f64,
 ) -> Result<mise_core::Ingredient, String> {
-    let unit = match unit.as_str() {
-        "kilogram"   => Unit::Kilogram,
-        "liter"      => Unit::Liter,
-        "milliliter" => Unit::Milliliter,
-        "piece"      => Unit::Piece,
-        _            => Unit::Gram,
-    };
+    let unit = parse_unit_str(&unit);
     state.ingredients.lock().await
         .create(IngredientInput { name, unit, price_per_unit })
         .await
@@ -58,6 +81,35 @@ async fn ingredient_delete(
     state.ingredients.lock().await
         .delete(id).await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn ingredient_update(
+    state: State<'_, AppState>,
+    id: i64,
+    name: String,
+    unit: String,
+    price_per_unit: f64,
+) -> Result<mise_core::Ingredient, String> {
+    let unit = parse_unit_str(&unit);
+    state.ingredients.lock().await
+        .update(id, IngredientInput { name, unit, price_per_unit })
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn unit_convert(
+    value: f64,
+    from: String,
+    to: String,
+) -> Result<f64, String> {
+    use mise_core::{convert, ConversionResult};
+    match convert(value, parse_unit_str(&from), parse_unit_str(&to)) {
+        ConversionResult::Ok(v) => Ok(v),
+        ConversionResult::NeedsDensity => Err("needs_density".into()),
+        ConversionResult::Incompatible => Err("incompatible".into()),
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -89,6 +141,8 @@ pub fn run() {
             ingredients_list,
             ingredient_create,
             ingredient_delete,
+            ingredient_update,
+            unit_convert,
         ])
         .run(tauri::generate_context!())
         .expect("erro ao arrancar a aplicação Tauri");
