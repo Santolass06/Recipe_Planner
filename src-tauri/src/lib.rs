@@ -10,7 +10,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_global_shortcut::init())
         .setup(|app| {
             // Initialize database and state via mise-tauri
             let app_handle = app.handle().clone();
