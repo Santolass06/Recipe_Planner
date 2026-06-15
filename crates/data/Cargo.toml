@@ -9,3 +9,4 @@ async-trait = { workspace = true }
 thiserror = { workspace = true }
 libsql = { workspace = true }
 tokio = { workspace = true }
+serde = { workspace = true, features = ["derive"] }

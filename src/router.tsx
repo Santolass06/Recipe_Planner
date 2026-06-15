@@ -2,6 +2,7 @@ import { createBrowserRouter } from "react-router-dom";
 import Layout from "./components/Layout";
 import PlaceholderPage from "./components/PlaceholderPage";
 import IngredientsPage from "./pages/IngredientsPage";
+import RecipesPage from "./pages/RecipesPage";
 
 export const router = createBrowserRouter([
   {
@@ -10,7 +11,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <IngredientsPage /> },
       { path: "ingredientes", element: <IngredientsPage /> },
-      { path: "receitas", element: <PlaceholderPage name="receitas" /> },
+      { path: "receitas", element: <RecipesPage /> },
       { path: "armazem", element: <PlaceholderPage name="armazém" /> },
       { path: "sugestor", element: <PlaceholderPage name="sugestor" /> },
       { path: "custos", element: <PlaceholderPage name="custos" /> },

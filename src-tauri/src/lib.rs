@@ -1,7 +1,8 @@
 use mise_data::{
     db::open_local,
     ingredient_repo::SqliteIngredientRepo,
-    IngredientInput, IngredientRepo,
+    recipe_repo::SqliteRecipeRepo,
+    IngredientInput, IngredientRepo, RecipeInput, RecipeIngredientInput, RecipeRepo,
 };
 use mise_entitlements::{is_allowed, AccountType, Feature};
 use std::sync::Arc;
@@ -10,6 +11,7 @@ use tokio::sync::Mutex;
 
 pub struct AppState {
     pub ingredients: Arc<Mutex<SqliteIngredientRepo>>,
+    pub recipes: Arc<Mutex<SqliteRecipeRepo>>,
 }
 
 #[tauri::command]
@@ -97,6 +99,67 @@ async fn ingredient_update(
         .map_err(|e| e.to_string())
 }
 
+// Recipe commands
+#[tauri::command]
+async fn recipes_list(
+    state: State<'_, AppState>,
+) -> Result<Vec<mise_core::Recipe>, String> {
+    state.recipes.lock().await
+        .list().await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn recipe_get(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<mise_core::Recipe, String> {
+    state.recipes.lock().await
+        .get(id).await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn recipe_create(
+    state: State<'_, AppState>,
+    name: String,
+    category: String,
+    portions: u32,
+    instructions: String,
+    ingredients: Vec<RecipeIngredientInput>,
+) -> Result<mise_core::Recipe, String> {
+    state.recipes.lock().await
+        .create(RecipeInput { name, category, portions, instructions, ingredients })
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn recipe_update(
+    state: State<'_, AppState>,
+    id: i64,
+    name: String,
+    category: String,
+    portions: u32,
+    instructions: String,
+    ingredients: Vec<RecipeIngredientInput>,
+) -> Result<mise_core::Recipe, String> {
+    state.recipes.lock().await
+        .update(id, RecipeInput { name, category, portions, instructions, ingredients })
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn recipe_delete(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<(), String> {
+    state.recipes.lock().await
+        .delete(id).await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn unit_convert(
     value: f64,
@@ -127,9 +190,11 @@ pub fn run() {
                 let conn = open_local(&db_path)
                     .await
                     .expect("falha ao abrir base de dados");
-                let repo = SqliteIngredientRepo { conn };
+                let ingredients_repo = SqliteIngredientRepo { conn: conn.clone() };
+                let recipes_repo = SqliteRecipeRepo { conn };
                 app.manage(AppState {
-                    ingredients: Arc::new(Mutex::new(repo)),
+                    ingredients: Arc::new(Mutex::new(ingredients_repo)),
+                    recipes: Arc::new(Mutex::new(recipes_repo)),
                 });
             });
             Ok(())
@@ -141,6 +206,11 @@ pub fn run() {
             ingredient_create,
             ingredient_delete,
             ingredient_update,
+            recipes_list,
+            recipe_get,
+            recipe_create,
+            recipe_update,
+            recipe_delete,
             unit_convert,
         ])
         .run(tauri::generate_context!())

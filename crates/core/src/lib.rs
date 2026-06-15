@@ -102,6 +102,7 @@ pub struct RecipeIngredient {
 pub struct Recipe {
     pub id: u64,
     pub name: String,
+    pub category: String,
     pub ingredients: Vec<RecipeIngredient>,
     pub portions: u32,
     pub instructions: String,
@@ -162,6 +163,7 @@ mod tests {
         let recipe = Recipe {
             id: 1,
             name: "Bread".to_string(),
+            category: "Padaria".to_string(),
             ingredients: vec![],
             portions: 4,
             instructions: "Mix and bake".to_string(),
@@ -174,6 +176,7 @@ mod tests {
         let recipe = Recipe {
             id: 1,
             name: "Test Recipe".to_string(),
+            category: "Test".to_string(),
             ingredients: vec![RecipeIngredient {
                 ingredient_id: 1,
                 ingredient_name: "Flour".to_string(),
@@ -201,6 +204,7 @@ mod tests {
         let recipe = Recipe {
             id: 1,
             name: "Multi Ingredient".to_string(),
+            category: "Test".to_string(),
             ingredients: vec![
                 RecipeIngredient {
                     ingredient_id: 1,
