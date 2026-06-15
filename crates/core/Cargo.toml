@@ -1,8 +1,22 @@
 [package]
 name = "mise-core"
-edition.workspace = true
+edition = "2021"
 version.workspace = true
 
 [dependencies]
 serde = { workspace = true }
-lazy_static = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+libsql = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+validator = { workspace = true }
+specta = { workspace = true }
+ts-rs = { workspace = true }
+image = { workspace = true }
+mime_guess = { workspace = true }
+dirs = { workspace = true }
+
+[lib]
+path = "src/lib.rs"
