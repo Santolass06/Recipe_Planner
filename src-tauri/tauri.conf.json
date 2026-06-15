@@ -28,14 +28,6 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
-    "android": {
-      "signingConfig": {
-        "keystorePath": "mise-release.keystore",
-        "keystorePassword": "${env:TAURI_KEY_PASSWORD}",
-        "keyAlias": "${env:TAURI_KEY_ALIAS}",
-        "keyPassword": "${env:TAURI_KEY_PASSWORD}"
-      }
-    }
+    "targets": "all"
   }
 }

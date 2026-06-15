@@ -91,6 +91,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          TAURI_KEY_ALIAS: ${{ secrets.TAURI_KEY_ALIAS }}
+          SIGNING_STORE_FILE: mise-release.keystore
+          SIGNING_STORE_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.TAURI_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
           JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
