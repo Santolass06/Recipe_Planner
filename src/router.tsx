@@ -3,6 +3,7 @@ import Layout from "./components/Layout";
 import PlaceholderPage from "./components/PlaceholderPage";
 import IngredientsPage from "./pages/IngredientsPage";
 import RecipesPage from "./pages/RecipesPage";
+import CostsPage from "./pages/CostsPage";
 
 export const router = createBrowserRouter([
   {
@@ -12,9 +13,9 @@ export const router = createBrowserRouter([
       { index: true, element: <IngredientsPage /> },
       { path: "ingredientes", element: <IngredientsPage /> },
       { path: "receitas", element: <RecipesPage /> },
+      { path: "custos", element: <CostsPage /> },
       { path: "armazem", element: <PlaceholderPage name="armazém" /> },
       { path: "sugestor", element: <PlaceholderPage name="sugestor" /> },
-      { path: "custos", element: <PlaceholderPage name="custos" /> },
       { path: "relatorios", element: <PlaceholderPage name="relatórios" /> },
       { path: "fornecedores", element: <PlaceholderPage name="fornecedores" /> },
       { path: "compras", element: <PlaceholderPage name="lista de compras" /> },

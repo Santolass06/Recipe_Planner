@@ -114,15 +114,39 @@ pub use converter::{convert, compatible_units, ConversionResult};
 pub mod cost {
     use super::*;
 
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct CostBreakdown {
         pub total_cost: f64,
         pub cost_per_portion: f64,
-        pub ingredient_costs: Vec<(String, f64)>,
+        pub ingredient_costs: Vec<IngredientCost>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct IngredientCost {
+        pub name: String,
+        pub quantity: f64,
+        pub unit: Unit,
+        pub price_per_unit: f64,
+        pub total_cost: f64,
+        pub promo_price_per_unit: Option<f64>,
+        pub promo_total_cost: Option<f64>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct CostAnalysis {
+        pub breakdown: CostBreakdown,
+        pub breakdown_with_promo: Option<CostBreakdown>,
+        pub margin_percent: f64,
+        pub suggested_price_per_portion: f64,
+        pub suggested_price_total: f64,
+        pub profit_per_portion: f64,
+        pub profit_total: f64,
     }
 
     pub fn calculate_recipe_cost(
         recipe: &Recipe,
         ingredients: &[Ingredient],
+        promo_prices: &[(u64, f64)], // (ingredient_id, promo_price_per_unit)
     ) -> CostBreakdown {
         let mut total_cost = 0.0;
         let mut ingredient_costs = Vec::new();
@@ -131,7 +155,22 @@ pub mod cost {
             if let Some(ing) = ingredients.iter().find(|i| i.id == recipe_ing.ingredient_id as i64) {
                 let cost = recipe_ing.quantity * ing.price_per_unit;
                 total_cost += cost;
-                ingredient_costs.push((recipe_ing.ingredient_name.clone(), cost));
+                
+                let promo_price = promo_prices.iter()
+                    .find(|(id, _)| *id == recipe_ing.ingredient_id)
+                    .map(|(_, p)| *p);
+                
+                let promo_total = promo_price.map(|pp| recipe_ing.quantity * pp);
+                
+                ingredient_costs.push(IngredientCost {
+                    name: recipe_ing.ingredient_name.clone(),
+                    quantity: recipe_ing.quantity,
+                    unit: recipe_ing.unit,
+                    price_per_unit: ing.price_per_unit,
+                    total_cost: cost,
+                    promo_price_per_unit: promo_price,
+                    promo_total_cost: promo_total,
+                });
             }
         }
 
@@ -139,6 +178,36 @@ pub mod cost {
             total_cost,
             cost_per_portion: total_cost / recipe.portions as f64,
             ingredient_costs,
+        }
+    }
+
+    pub fn analyze_recipe_cost(
+        recipe: &Recipe,
+        ingredients: &[Ingredient],
+        promo_prices: &[(u64, f64)],
+        margin_percent: f64,
+    ) -> CostAnalysis {
+        let breakdown = calculate_recipe_cost(recipe, ingredients, &[]);
+        let breakdown_with_promo = if !promo_prices.is_empty() {
+            Some(calculate_recipe_cost(recipe, ingredients, promo_prices))
+        } else {
+            None
+        };
+
+        let cost_per_portion = breakdown.cost_per_portion;
+        let suggested_price_per_portion = cost_per_portion * (1.0 + margin_percent / 100.0);
+        let suggested_price_total = suggested_price_per_portion * recipe.portions as f64;
+        let profit_per_portion = suggested_price_per_portion - cost_per_portion;
+        let profit_total = profit_per_portion * recipe.portions as f64;
+
+        CostAnalysis {
+            breakdown,
+            breakdown_with_promo,
+            margin_percent,
+            suggested_price_per_portion,
+            suggested_price_total,
+            profit_per_portion,
+            profit_total,
         }
     }
 }
@@ -194,7 +263,7 @@ mod tests {
             price_per_unit: 0.01,
         }];
 
-        let breakdown = cost::calculate_recipe_cost(&recipe, &ingredients);
+        let breakdown = cost::calculate_recipe_cost(&recipe, &ingredients, &[]);
         assert_eq!(breakdown.total_cost, 5.0);
         assert_eq!(breakdown.cost_per_portion, 2.5);
     }
@@ -238,7 +307,7 @@ mod tests {
             },
         ];
 
-        let breakdown = cost::calculate_recipe_cost(&recipe, &ingredients);
+        let breakdown = cost::calculate_recipe_cost(&recipe, &ingredients, &[]);
         assert_eq!(breakdown.total_cost, 4.0);
     }
 }

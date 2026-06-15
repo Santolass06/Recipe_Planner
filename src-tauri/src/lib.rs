@@ -161,6 +161,24 @@ async fn recipe_delete(
 }
 
 #[tauri::command]
+async fn analyze_recipe_cost(
+    state: State<'_, AppState>,
+    recipe_id: i64,
+    margin_percent: f64,
+    promo_prices: Vec<(u64, f64)>,
+) -> Result<mise_core::cost::CostAnalysis, String> {
+    let recipe = state.recipes.lock().await
+        .get(recipe_id).await
+        .map_err(|e| e.to_string())?;
+    let ingredients = state.ingredients.lock().await
+        .list().await
+        .map_err(|e| e.to_string())?;
+    
+    use mise_core::cost::analyze_recipe_cost;
+    Ok(analyze_recipe_cost(&recipe, &ingredients, &promo_prices, margin_percent))
+}
+
+#[tauri::command]
 fn unit_convert(
     value: f64,
     from: String,
@@ -211,6 +229,7 @@ pub fn run() {
             recipe_create,
             recipe_update,
             recipe_delete,
+            analyze_recipe_cost,
             unit_convert,
         ])
         .run(tauri::generate_context!())
