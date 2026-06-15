@@ -20,6 +20,9 @@ async fn run_migrations(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(MIGRATION_003)
         .await
         .map_err(|e| e.to_string())?;
+    conn.execute_batch(MIGRATION_004)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -89,4 +92,18 @@ CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_recipe
 
 CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_ingredient
     ON recipe_ingredients(ingredient_id);
+";
+
+const MIGRATION_004: &str = "
+CREATE TABLE IF NOT EXISTS stock (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ingredient_id   INTEGER NOT NULL UNIQUE,
+    quantity        REAL    NOT NULL DEFAULT 0.0,
+    min_quantity    REAL    NOT NULL DEFAULT 0.0,
+    updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_ingredient
+    ON stock(ingredient_id);
 ";

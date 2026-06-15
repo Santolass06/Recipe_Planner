@@ -2,7 +2,8 @@ use mise_data::{
     db::open_local,
     ingredient_repo::SqliteIngredientRepo,
     recipe_repo::SqliteRecipeRepo,
-    IngredientInput, IngredientRepo, RecipeInput, RecipeIngredientInput, RecipeRepo,
+    stock_repo::SqliteStockRepo,
+    IngredientInput, IngredientRepo, RecipeInput, RecipeIngredientInput, RecipeRepo, StockInput, StockRepo,
 };
 use mise_entitlements::{is_allowed, AccountType, Feature};
 use std::sync::Arc;
@@ -12,6 +13,7 @@ use tokio::sync::Mutex;
 pub struct AppState {
     pub ingredients: Arc<Mutex<SqliteIngredientRepo>>,
     pub recipes: Arc<Mutex<SqliteRecipeRepo>>,
+    pub stock: Arc<Mutex<SqliteStockRepo>>,
 }
 
 #[tauri::command]
@@ -178,6 +180,60 @@ async fn analyze_recipe_cost(
     Ok(analyze_recipe_cost(&recipe, &ingredients, &promo_prices, margin_percent))
 }
 
+// Stock commands
+#[tauri::command]
+async fn stock_list(
+    state: State<'_, AppState>,
+) -> Result<Vec<mise_data::StockItem>, String> {
+    state.stock.lock().await
+        .list().await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn stock_get(
+    state: State<'_, AppState>,
+    ingredient_id: i64,
+) -> Result<mise_data::StockItem, String> {
+    state.stock.lock().await
+        .get(ingredient_id).await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn stock_upsert(
+    state: State<'_, AppState>,
+    ingredient_id: u64,
+    quantity: f64,
+    min_quantity: f64,
+) -> Result<mise_data::StockItem, String> {
+    state.stock.lock().await
+        .upsert(StockInput { ingredient_id, quantity, min_quantity })
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn stock_update_quantity(
+    state: State<'_, AppState>,
+    ingredient_id: i64,
+    quantity: f64,
+) -> Result<mise_data::StockItem, String> {
+    state.stock.lock().await
+        .update_quantity(ingredient_id, quantity).await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn stock_delete(
+    state: State<'_, AppState>,
+    ingredient_id: i64,
+) -> Result<(), String> {
+    state.stock.lock().await
+        .delete(ingredient_id).await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn unit_convert(
     value: f64,
@@ -209,10 +265,12 @@ pub fn run() {
                     .await
                     .expect("falha ao abrir base de dados");
                 let ingredients_repo = SqliteIngredientRepo { conn: conn.clone() };
-                let recipes_repo = SqliteRecipeRepo { conn };
+                let recipes_repo = SqliteRecipeRepo { conn: conn.clone() };
+                let stock_repo = SqliteStockRepo { conn };
                 app.manage(AppState {
                     ingredients: Arc::new(Mutex::new(ingredients_repo)),
                     recipes: Arc::new(Mutex::new(recipes_repo)),
+                    stock: Arc::new(Mutex::new(stock_repo)),
                 });
             });
             Ok(())
@@ -230,6 +288,11 @@ pub fn run() {
             recipe_update,
             recipe_delete,
             analyze_recipe_cost,
+            stock_list,
+            stock_get,
+            stock_upsert,
+            stock_update_quantity,
+            stock_delete,
             unit_convert,
         ])
         .run(tauri::generate_context!())
