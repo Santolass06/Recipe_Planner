@@ -78,6 +78,14 @@ jobs:
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         run: npx tauri android init --ci
 
+      - name: Setup keystore
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+        run: |
+          echo "$TAURI_PRIVATE_KEY" | base64 -d > src-tauri/mise-release.keystore
+          echo "Keystore criado em src-tauri/mise-release.keystore"
+          ls -la src-tauri/mise-release.keystore
+
       - name: Build Android APK
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
