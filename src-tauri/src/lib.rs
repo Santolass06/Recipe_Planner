@@ -3,6 +3,7 @@ use mise_data::{
     ingredient_repo::SqliteIngredientRepo,
     recipe_repo::SqliteRecipeRepo,
     stock_repo::SqliteStockRepo,
+    shopping::ShoppingList,
     IngredientInput, IngredientRepo, RecipeInput, RecipeIngredientInput, RecipeRepo, StockInput, StockRepo,
 };
 use mise_entitlements::{is_allowed, AccountType, Feature};
@@ -234,6 +235,33 @@ async fn stock_delete(
         .map_err(|e| e.to_string())
 }
 
+// Shopping commands
+#[tauri::command]
+async fn shopping_generate(
+    state: State<'_, AppState>,
+    recipe_ids: Vec<u64>,
+    portions_multiplier: u32,
+) -> Result<mise_data::shopping::ShoppingList, String> {
+    let recipes = state.recipes.lock().await
+        .list().await
+        .map_err(|e| e.to_string())?;
+    
+    let selected_recipes: Vec<_> = recipes.into_iter()
+        .filter(|r| recipe_ids.contains(&r.id))
+        .collect();
+
+    let stock = state.stock.lock().await
+        .list().await
+        .map_err(|e| e.to_string())?;
+    
+    let ingredients = state.ingredients.lock().await
+        .list().await
+        .map_err(|e| e.to_string())?;
+
+    use mise_data::shopping::generate_shopping_list;
+    Ok(generate_shopping_list(&selected_recipes, &stock, &ingredients, portions_multiplier))
+}
+
 #[tauri::command]
 fn unit_convert(
     value: f64,
@@ -293,6 +321,7 @@ pub fn run() {
             stock_upsert,
             stock_update_quantity,
             stock_delete,
+            shopping_generate,
             unit_convert,
         ])
         .run(tauri::generate_context!())
