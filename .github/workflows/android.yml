@@ -13,6 +13,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   build-android:
     name: Build Android APK
@@ -52,14 +55,16 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          api-level: 34
-          ndk-version: r27c
           cmdline-tools-version: latest
+          packages: |
+            platforms;android-34
+            build-tools;34.0.0
+            ndk;27.2.12479018
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: Recipe_Planner/package-lock.json
 
