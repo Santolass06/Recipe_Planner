@@ -5,3 +5,4 @@ version.workspace = true
 
 [dependencies]
 serde = { workspace = true }
+lazy_static = { workspace = true }

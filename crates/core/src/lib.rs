@@ -490,3 +490,307 @@ mod tests {
         assert_eq!(breakdown.total_cost, 4.0);
     }
 }
+
+pub mod i18n {
+    use serde::{Deserialize, Serialize};
+    use std::collections::HashMap;
+    use std::sync::{Arc, RwLock};
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "lowercase")]
+    pub enum Language {
+        Pt,
+        En,
+    }
+
+    impl Language {
+        pub fn as_str(&self) -> &'static str {
+            match self {
+                Language::Pt => "pt",
+                Language::En => "en",
+            }
+        }
+
+        pub fn from_str(s: &str) -> Self {
+            match s.to_lowercase().as_str() {
+                "pt" | "pt-br" | "portuguese" => Language::Pt,
+                _ => Language::En,
+            }
+        }
+
+        pub fn toggle(&self) -> Self {
+            match self {
+                Language::Pt => Language::En,
+                Language::En => Language::Pt,
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct Translations {
+        pub pt: HashMap<String, String>,
+        pub en: HashMap<String, String>,
+    }
+
+    impl Translations {
+        pub fn new() -> Self {
+            let mut pt = HashMap::new();
+            let mut en = HashMap::new();
+
+            // UI strings - navigation
+            pt.insert("nav.ingredients".into(), "Ingredientes".into());
+            en.insert("nav.ingredients".into(), "Ingredients".into());
+            pt.insert("nav.recipes".into(), "Receitas".into());
+            en.insert("nav.recipes".into(), "Recipes".into());
+            pt.insert("nav.costs".into(), "Custos".into());
+            en.insert("nav.costs".into(), "Costs".into());
+            pt.insert("nav.stock".into(), "Armazém".into());
+            en.insert("nav.stock".into(), "Warehouse".into());
+            pt.insert("nav.shopping".into(), "Lista de Compras".into());
+            en.insert("nav.shopping".into(), "Shopping List".into());
+            pt.insert("nav.suggester".into(), "Sugestor".into());
+            en.insert("nav.suggester".into(), "Suggester".into());
+            pt.insert("nav.settings".into(), "Definições".into());
+            en.insert("nav.settings".into(), "Settings".into());
+            pt.insert("nav.reports".into(), "Relatórios".into());
+            en.insert("nav.reports".into(), "Reports".into());
+            pt.insert("nav.suppliers".into(), "Fornecedores".into());
+            en.insert("nav.suppliers".into(), "Suppliers".into());
+            pt.insert("nav.calendar".into(), "Calendário".into());
+            en.insert("nav.calendar".into(), "Calendar".into());
+            pt.insert("nav.importer".into(), "Importador".into());
+            en.insert("nav.importer".into(), "Importer".into());
+            pt.insert("nav.help".into(), "Ajuda".into());
+            en.insert("nav.help".into(), "Help".into());
+
+            // Common actions
+            pt.insert("action.new".into(), "Novo".into());
+            en.insert("action.new".into(), "New".into());
+            pt.insert("action.edit".into(), "Editar".into());
+            en.insert("action.edit".into(), "Edit".into());
+            pt.insert("action.delete".into(), "Eliminar".into());
+            en.insert("action.delete".into(), "Delete".into());
+            pt.insert("action.save".into(), "Guardar".into());
+            en.insert("action.save".into(), "Save".into());
+            pt.insert("action.cancel".into(), "Cancelar".into());
+            en.insert("action.cancel".into(), "Cancel".into());
+            pt.insert("action.search".into(), "Pesquisar".into());
+            en.insert("action.search".into(), "Search".into());
+            pt.insert("action.add".into(), "Adicionar".into());
+            en.insert("action.add".into(), "Add".into());
+            pt.insert("action.clear".into(), "Limpar".into());
+            en.insert("action.clear".into(), "Clear".into());
+            pt.insert("action.refresh".into(), "Actualizar".into());
+            en.insert("action.refresh".into(), "Refresh".into());
+
+            // Ingredients page
+            pt.insert("ingredients.title".into(), "Ingredientes".into());
+            en.insert("ingredients.title".into(), "Ingredients".into());
+            pt.insert("ingredients.subtitle".into(), "ingredientes".into());
+            en.insert("ingredients.subtitle".into(), "ingredients".into());
+            pt.insert("ingredients.new".into(), "Novo ingrediente".into());
+            en.insert("ingredients.new".into(), "New ingredient".into());
+            pt.insert("ingredients.name".into(), "Nome".into());
+            en.insert("ingredients.name".into(), "Name".into());
+            pt.insert("ingredients.unit".into(), "Unidade".into());
+            en.insert("ingredients.unit".into(), "Unit".into());
+            pt.insert("ingredients.price".into(), "Preço por unidade".into());
+            en.insert("ingredients.price".into(), "Price per unit".into());
+
+            // Recipes page
+            pt.insert("recipes.title".into(), "Receitas".into());
+            en.insert("recipes.title".into(), "Recipes".into());
+            pt.insert("recipes.new".into(), "Nova receita".into());
+            en.insert("recipes.new".into(), "New recipe".into());
+            pt.insert("recipes.category".into(), "Categoria".into());
+            en.insert("recipes.category".into(), "Category".into());
+            pt.insert("recipes.portions".into(), "Porções".into());
+            en.insert("recipes.portions".into(), "Portions".into());
+            pt.insert("recipes.instructions".into(), "Instruções".into());
+            en.insert("recipes.instructions".into(), "Instructions".into());
+            pt.insert("recipes.add_ingredient".into(), "Adicionar ingrediente".into());
+            en.insert("recipes.add_ingredient".into(), "Add ingredient".into());
+
+            // Costs page
+            pt.insert("costs.title".into(), "Custos".into());
+            en.insert("costs.title".into(), "Costs".into());
+            pt.insert("costs.select_recipe".into(), "Selecionar receita".into());
+            en.insert("costs.select_recipe".into(), "Select recipe".into());
+            pt.insert("costs.margin".into(), "Margem %".into());
+            en.insert("costs.margin".into(), "Margin %".into());
+            pt.insert("costs.portions".into(), "Porções".into());
+            en.insert("costs.portions".into(), "Portions".into());
+            pt.insert("costs.promo_prices".into(), "Preços promocionais".into());
+            en.insert("costs.promo_prices".into(), "Promo prices".into());
+            pt.insert("costs.total".into(), "Total".into());
+            en.insert("costs.total".into(), "Total".into());
+            pt.insert("costs.per_portion".into(), "Por porção".into());
+            en.insert("costs.per_portion".into(), "Per portion".into());
+            pt.insert("costs.suggested_price".into(), "Preço sugerido".into());
+            en.insert("costs.suggested_price".into(), "Suggested price".into());
+            pt.insert("costs.profit".into(), "Lucro".into());
+            en.insert("costs.profit".into(), "Profit".into());
+
+            // Stock page
+            pt.insert("stock.title".into(), "Armazém".into());
+            en.insert("stock.title".into(), "Warehouse".into());
+            pt.insert("stock.current_qty".into(), "Qtd Actual".into());
+            en.insert("stock.current_qty".into(), "Current Qty".into());
+            pt.insert("stock.min_qty".into(), "Mínimo".into());
+            en.insert("stock.min_qty".into(), "Minimum".into());
+            pt.insert("stock.status".into(), "Estado".into());
+            en.insert("stock.status".into(), "Status".into());
+            pt.insert("stock.ok".into(), "OK".into());
+            en.insert("stock.ok".into(), "OK".into());
+            pt.insert("stock.low".into(), "Baixo".into());
+            en.insert("stock.low".into(), "Low".into());
+            pt.insert("stock.out".into(), "Esgotado".into());
+            en.insert("stock.out".into(), "Out".into());
+            pt.insert("stock.partial".into(), "Parcial".into());
+            en.insert("stock.partial".into(), "Partial".into());
+
+            // Shopping list page
+            pt.insert("shopping.title".into(), "Lista de Compras".into());
+            en.insert("shopping.title".into(), "Shopping List".into());
+            pt.insert("shopping.new".into(), "Nova lista".into());
+            en.insert("shopping.new".into(), "New list".into());
+            pt.insert("shopping.estimated".into(), "estimado".into());
+            en.insert("shopping.estimated".into(), "estimated".into());
+            pt.insert("shopping.purchased".into(), "Comprado".into());
+            en.insert("shopping.purchased".into(), "Purchased".into());
+            pt.insert("shopping.missing".into(), "Faltando".into());
+            en.insert("shopping.missing".into(), "Missing".into());
+            pt.insert("shopping.select_recipes".into(), "Selecionar receitas".into());
+            en.insert("shopping.select_recipes".into(), "Select recipes".into());
+            pt.insert("shopping.multiplier".into(), "Multiplicador de porções".into());
+            en.insert("shopping.multiplier".into(), "Portions multiplier".into());
+
+            // Suggester page
+            pt.insert("suggester.title".into(), "Sugestor de Receitas".into());
+            en.insert("suggester.title".into(), "Recipe Suggester".into());
+            pt.insert("suggester.allow_partial".into(), "Incluir parciais".into());
+            en.insert("suggester.allow_partial".into(), "Include partial".into());
+            pt.insert("suggester.can_make".into(), "Pode fazer".into());
+            en.insert("suggester.can_make".into(), "Can make".into());
+            pt.insert("suggester.partial".into(), "Parcial".into());
+            en.insert("suggester.partial".into(), "Partial".into());
+            pt.insert("suggester.missing".into(), "Faltando".into());
+            en.insert("suggester.missing".into(), "Missing".into());
+
+            // Settings page
+            pt.insert("settings.title".into(), "Definições".into());
+            en.insert("settings.title".into(), "Settings".into());
+            pt.insert("settings.language".into(), "Idioma".into());
+            en.insert("settings.language".into(), "Language".into());
+            pt.insert("settings.theme".into(), "Tema".into());
+            en.insert("settings.theme".into(), "Theme".into());
+            pt.insert("settings.data".into(), "Dados".into());
+            en.insert("settings.data".into(), "Data".into());
+            pt.insert("settings.export".into(), "Exportar".into());
+            en.insert("settings.export".into(), "Export".into());
+            pt.insert("settings.import".into(), "Importar".into());
+            en.insert("settings.import".into(), "Import".into());
+            pt.insert("settings.reset".into(), "Repor".into());
+            en.insert("settings.reset".into(), "Reset".into());
+
+            // Units
+            pt.insert("unit.gram".into(), "g — Grama".into());
+            en.insert("unit.gram".into(), "g — Gram".into());
+            pt.insert("unit.kilogram".into(), "kg — Quilograma".into());
+            en.insert("unit.kilogram".into(), "kg — Kilogram".into());
+            pt.insert("unit.milliliter".into(), "ml — Mililitro".into());
+            en.insert("unit.milliliter".into(), "ml — Milliliter".into());
+            pt.insert("unit.liter".into(), "l — Litro".into());
+            en.insert("unit.liter".into(), "l — Liter".into());
+            pt.insert("unit.piece".into(), "pcs — Peça".into());
+            en.insert("unit.piece".into(), "pcs — Piece".into());
+            pt.insert("unit.teaspoon".into(), "tsp — Colher de chá".into());
+            en.insert("unit.teaspoon".into(), "tsp — Teaspoon".into());
+            pt.insert("unit.tablespoon".into(), "tbsp — Colher de sopa".into());
+            en.insert("unit.tablespoon".into(), "tbsp — Tablespoon".into());
+
+            // Status/Toast messages
+            pt.insert("toast.created".into(), "Criado com sucesso".into());
+            en.insert("toast.created".into(), "Created successfully".into());
+            pt.insert("toast.updated".into(), "Actualizado com sucesso".into());
+            en.insert("toast.updated".into(), "Updated successfully".into());
+            pt.insert("toast.deleted".into(), "Eliminado com sucesso".into());
+            en.insert("toast.deleted".into(), "Deleted successfully".into());
+            pt.insert("toast.error".into(), "Erro".into());
+            en.insert("toast.error".into(), "Error".into());
+            pt.insert("toast.warning".into(), "Atenção".into());
+            en.insert("toast.warning".into(), "Warning".into());
+            pt.insert("toast.info".into(), "Informação".into());
+            en.insert("toast.info".into(), "Info".into());
+
+            // Confirm dialogs
+            pt.insert("confirm.delete".into(), "Tem a certeza que quer eliminar?".into());
+            en.insert("confirm.delete".into(), "Are you sure you want to delete?".into());
+            pt.insert("confirm.reset".into(), "Tem a certeza que quer repor? Esta ação não pode ser desfeita.".into());
+            en.insert("confirm.reset".into(), "Are you sure you want to reset? This action cannot be undone.".into());
+
+            Self { pt, en }
+        }
+    }
+
+    lazy_static::lazy_static! {
+        static ref TRANSLATIONS: Arc<RwLock<Translations>> = Arc::new(RwLock::new(Translations::new()));
+        static ref CURRENT_LANG: Arc<RwLock<Language>> = Arc::new(RwLock::new(Language::Pt));
+    }
+
+    pub fn t(key: &str) -> String {
+        let lang = CURRENT_LANG.read().unwrap().clone();
+        let trans = TRANSLATIONS.read().unwrap();
+        let map = match lang {
+            Language::Pt => &trans.pt,
+            Language::En => &trans.en,
+        };
+        map.get(key).cloned().unwrap_or_else(|| key.into())
+    }
+
+    pub fn current_language() -> Language {
+        CURRENT_LANG.read().unwrap().clone()
+    }
+
+    pub fn set_language(lang: Language) {
+        *CURRENT_LANG.write().unwrap() = lang;
+    }
+
+    pub fn toggle_language() {
+        let mut lang = CURRENT_LANG.write().unwrap();
+        *lang = lang.toggle();
+    }
+}
+
+#[cfg(test)]
+mod i18n_tests {
+    use crate::i18n::{Language, Translations};
+
+    #[test]
+    fn test_language_toggle() {
+        let pt = Language::Pt;
+        let en = Language::En;
+        assert_eq!(pt.toggle(), en);
+        assert_eq!(en.toggle(), pt);
+    }
+
+    #[test]
+    fn test_language_from_str() {
+        assert_eq!(Language::from_str("pt"), Language::Pt);
+        assert_eq!(Language::from_str("en"), Language::En);
+        assert_eq!(Language::from_str("PT"), Language::Pt);
+        assert_eq!(Language::from_str("EN"), Language::En);
+        assert_eq!(Language::from_str("portuguese"), Language::Pt);
+        assert_eq!(Language::from_str("english"), Language::En);
+        assert_eq!(Language::from_str("unknown"), Language::En);
+    }
+
+    #[test]
+    fn test_translations() {
+        let t = Translations::new();
+        assert!(t.pt.contains_key("nav.ingredients"));
+        assert!(t.en.contains_key("nav.ingredients"));
+        assert_eq!(t.pt.get("nav.ingredients"), Some(&"Ingredientes".to_string()));
+        assert_eq!(t.en.get("nav.ingredients"), Some(&"Ingredients".to_string()));
+    }
+}
