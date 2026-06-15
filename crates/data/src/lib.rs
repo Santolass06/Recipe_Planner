@@ -4,7 +4,7 @@ pub mod recipe_repo;
 pub mod stock_repo;
 
 use async_trait::async_trait;
-use mise_core::{Ingredient, Recipe, Unit};
+use mise_core::{Ingredient, Recipe, Unit, RecipeIngredient};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -269,5 +269,270 @@ mod shopping_tests {
         let list = shopping::generate_shopping_list(&recipes, &stock, &ingredients, 1);
         assert_eq!(list.items.len(), 1);
         assert_eq!(list.items[0].needed_quantity, 600.0);
+    }
+}
+
+pub mod import {
+    use super::*;
+    use mise_core::{Ingredient, Recipe, Unit, RecipeIngredient};
+    use serde::{Deserialize, Serialize};
+    use std::collections::HashMap;
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ImportRecipeIngredient {
+        pub ingredient_name: String,
+        pub quantity: f64,
+        pub unit: Unit,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ImportRecipe {
+        pub name: String,
+        pub category: String,
+        pub portions: u32,
+        pub instructions: String,
+        pub ingredients: Vec<ImportRecipeIngredient>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ImportData {
+        pub version: u32,
+        pub recipes: Vec<ImportRecipe>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ImportResult {
+        pub recipes_created: usize,
+        pub ingredients_created: usize,
+        pub errors: Vec<String>,
+    }
+
+    pub fn parse_import_json(json: &str) -> Result<ImportData, String> {
+        let data: ImportData = serde_json::from_str(json)
+            .map_err(|e| format!("JSON inválido: {}", e))?;
+        
+        if data.version != 1 {
+            return Err(format!("Versão não suportada: {} (esperado 1)", data.version));
+        }
+        
+        if data.recipes.is_empty() {
+            return Err("Nenhuma receita no arquivo".to_string());
+        }
+        
+        for recipe in &data.recipes {
+            if recipe.name.trim().is_empty() {
+                return Err("Nome da receita não pode ser vazio".to_string());
+            }
+            if recipe.portions == 0 {
+                return Err("Porções deve ser maior que zero".to_string());
+            }
+            if recipe.ingredients.is_empty() {
+                return Err(format!("Receita '{}' não tem ingredientes", recipe.name));
+            }
+            for ing in &recipe.ingredients {
+                if ing.ingredient_name.trim().is_empty() {
+                    return Err("Nome do ingrediente não pode ser vazio".to_string());
+                }
+                if ing.quantity <= 0.0 {
+                    return Err(format!("Quantidade do ingrediente '{}' deve ser positiva", ing.ingredient_name));
+                }
+            }
+        }
+        
+        Ok(data)
+    }
+
+    pub async fn execute_import(
+        data: ImportData,
+        recipe_repo: &mut dyn RecipeRepo,
+        ingredient_repo: &mut dyn IngredientRepo,
+    ) -> ImportResult {
+        let mut result = ImportResult {
+            recipes_created: 0,
+            ingredients_created: 0,
+            errors: Vec::new(),
+        };
+
+        let mut ingredient_name_to_id: HashMap<String, u64> = HashMap::new();
+
+        let existing_ingredients = ingredient_repo.list().await.unwrap_or_default();
+        for ing in &existing_ingredients {
+            ingredient_name_to_id.insert(ing.name.to_lowercase(), ing.id as u64);
+        }
+
+        // Create new ingredients in DB before recipes (FK constraint)
+        for import_recipe in &data.recipes {
+            for import_ing in &import_recipe.ingredients {
+                let ing_key = import_ing.ingredient_name.to_lowercase();
+                if !ingredient_name_to_id.contains_key(&ing_key) {
+                    let _ = ingredient_repo.create(IngredientInput {
+                        name: import_ing.ingredient_name.clone(),
+                        unit: import_ing.unit,
+                        price_per_unit: 0.0,
+                    }).await;
+                    // Re-fetch to get the actual DB ID
+                    let all_ings = ingredient_repo.list().await.unwrap_or_default();
+                    if let Some(new_ing) = all_ings.iter().find(|i| i.name.to_lowercase() == ing_key) {
+                        ingredient_name_to_id.insert(ing_key, new_ing.id as u64);
+                    }
+                }
+            }
+        }
+
+        for import_recipe in data.recipes {
+            let mut recipe_ingredients = Vec::new();
+
+            for import_ing in import_recipe.ingredients {
+                let ing_key = import_ing.ingredient_name.to_lowercase();
+                let ingredient_id = if let Some(&id) = ingredient_name_to_id.get(&ing_key) {
+                    id
+                } else {
+                    let new_id = (ingredient_name_to_id.len() + 1) as u64;
+                    ingredient_name_to_id.insert(ing_key.clone(), new_id);
+                    new_id
+                };
+
+                recipe_ingredients.push(RecipeIngredient {
+                    ingredient_id: ingredient_id,
+                    ingredient_name: import_ing.ingredient_name,
+                    quantity: import_ing.quantity,
+                    unit: import_ing.unit,
+                });
+            }
+
+            let recipe_input = RecipeInput {
+                name: import_recipe.name,
+                category: import_recipe.category,
+                portions: import_recipe.portions,
+                instructions: import_recipe.instructions,
+                ingredients: recipe_ingredients.into_iter().map(|ri| RecipeIngredientInput {
+                    ingredient_id: ri.ingredient_id,
+                    quantity: ri.quantity,
+                    unit: ri.unit,
+                }).collect(),
+            };
+
+            match recipe_repo.create(recipe_input).await {
+                Ok(_) => result.recipes_created += 1,
+                Err(e) => result.errors.push(format!("Erro ao criar receita: {}", e)),
+            }
+        }
+
+        result.ingredients_created = ingredient_name_to_id.len() 
+            .saturating_sub(
+                ingredient_name_to_id.values()
+                    .filter(|id| {
+                        let id_val = **id;
+                        existing_ingredients.iter().any(|e| e.id as u64 == id_val)
+                    })
+                    .count()
+            );
+
+        result
+    }
+}
+
+#[cfg(test)]
+mod import_tests {
+    use super::*;
+    use crate::{db::open_local, ingredient_repo::SqliteIngredientRepo, recipe_repo::SqliteRecipeRepo, IngredientInput, RecipeInput, RecipeIngredientInput, StockInput, IngredientRepo, RecipeRepo};
+    use mise_core::Unit;
+
+    async fn test_setup() -> (SqliteRecipeRepo, SqliteIngredientRepo) {
+        let conn = open_local(":memory:").await.unwrap();
+        (SqliteRecipeRepo { conn: conn.clone() }, SqliteIngredientRepo { conn })
+    }
+
+    #[tokio::test]
+    async fn test_parse_valid_import_json() {
+        let json = r#"{
+            "version": 1,
+            "recipes": [
+                {
+                    "name": "Pão",
+                    "category": "Padaria",
+                    "portions": 1,
+                    "instructions": "Misturar e assar",
+                    "ingredients": [
+                        {"ingredient_name": "Farinha", "quantity": 500.0, "unit": "gram"},
+                        {"ingredient_name": "Fermento", "quantity": 10.0, "unit": "gram"}
+                    ]
+                }
+            ]
+        }"#;
+        
+        let data = import::parse_import_json(json).unwrap();
+        assert_eq!(data.version, 1);
+        assert_eq!(data.recipes.len(), 1);
+        assert_eq!(data.recipes[0].name, "Pão");
+        assert_eq!(data.recipes[0].ingredients.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_execute_import() {
+        let (recipe_repo, ing_repo) = test_setup().await;
+        
+        let json = r#"{
+            "version": 1,
+            "recipes": [
+                {
+                    "name": "Pão",
+                    "category": "Padaria",
+                    "portions": 1,
+                    "instructions": "Misturar e assar",
+                    "ingredients": [
+                        {"ingredient_name": "Farinha", "quantity": 500.0, "unit": "gram"},
+                        {"ingredient_name": "Água", "quantity": 300.0, "unit": "milliliter"}
+                    ]
+                }
+            ]
+        }"#;
+        
+        let data = import::parse_import_json(json).unwrap();
+        let mut recipe_repo = recipe_repo;
+        let mut ing_repo = ing_repo;
+        
+        let result = import::execute_import(data, &mut recipe_repo, &mut ing_repo).await;
+        //eprintln!("Result: {:?}", result);
+        assert_eq!(result.recipes_created, 1);
+        assert_eq!(result.ingredients_created, 2);
+        assert!(result.errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_execute_import_duplicate_ingredients() {
+        let (recipe_repo, ing_repo) = test_setup().await;
+        
+        let json = r#"{
+            "version": 1,
+            "recipes": [
+                {
+                    "name": "Pão",
+                    "category": "Padaria",
+                    "portions": 1,
+                    "instructions": "Misturar",
+                    "ingredients": [
+                        {"ingredient_name": "Farinha", "quantity": 500.0, "unit": "gram"}
+                    ]
+                },
+                {
+                    "name": "Bolo",
+                    "category": "Sobremesa",
+                    "portions": 1,
+                    "instructions": "Misturar",
+                    "ingredients": [
+                        {"ingredient_name": "Farinha", "quantity": 300.0, "unit": "gram"}
+                    ]
+                }
+            ]
+        }"#;
+        
+        let data = import::parse_import_json(json).unwrap();
+        let mut recipe_repo = recipe_repo;
+        let mut ing_repo = ing_repo;
+        
+        let result = import::execute_import(data, &mut recipe_repo, &mut ing_repo).await;
+        assert_eq!(result.recipes_created, 2);
+        assert_eq!(result.ingredients_created, 1);
     }
 }
