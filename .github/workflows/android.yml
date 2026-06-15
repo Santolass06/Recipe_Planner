@@ -78,7 +78,7 @@ jobs:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
         with:
-          args: ""
+          args: android build
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
