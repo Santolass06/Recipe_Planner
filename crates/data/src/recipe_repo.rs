@@ -92,6 +92,11 @@ impl crate::RecipeRepo for SqliteRecipeRepo {
                 portions,
                 instructions,
                 ingredients,
+                favorite: false,
+                prep_time_minutes: None,
+                cook_time_minutes: None,
+                tags: vec![],
+                nutrition: None,
             });
         }
         Ok(recipes)
@@ -118,6 +123,11 @@ impl crate::RecipeRepo for SqliteRecipeRepo {
                     portions: row.get::<i64>(3).map_err(|e| RepoError::Storage(e.to_string()))? as u32,
                     instructions: row.get::<String>(4).map_err(|e| RepoError::Storage(e.to_string()))?,
                     ingredients,
+                    favorite: false,
+                    prep_time_minutes: None,
+                    cook_time_minutes: None,
+                    tags: vec![],
+                    nutrition: None,
                 })
             },
         }
