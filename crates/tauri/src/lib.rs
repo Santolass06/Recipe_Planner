@@ -6,6 +6,10 @@
 use mise_core::*;
 use libsql::Database;
 use tauri::Manager;
+use tauri::path::BaseDirectory;
+
+// Re-export for commands module
+use crate::AppDb;
 
 pub mod commands {
     use super::*;
@@ -559,7 +563,13 @@ impl AppDb {
 
 /// Initialize app state (called from src-tauri)
 pub async fn initialize_app_state(app: &tauri::AppHandle) -> Result<(), String> {
-    let db = mise_core::db::open_db()
+    // Get app data directory (works on Android, iOS, Desktop)
+    let app_data_dir = app
+        .path()
+        .resolve("mise", BaseDirectory::AppData)
+        .map_err(|e| e.to_string())?;
+
+    let db = mise_core::db::open_db(Some(app_data_dir))
         .await
         .map_err(|e| e.to_string())?;
     app.manage(AppDb::new(db));

@@ -8,8 +8,13 @@ use chrono::{DateTime, Utc};
 use serde_json;
 
 /// Open database connection with WAL mode and connection pooling
-pub async fn open_db() -> LibsqlResult<Database> {
-    let data_dir = get_data_dir().map_err(|e| libsql::Error::Misuse(e.to_string()))?;
+/// If `app_data_dir` is provided, use it (for Android mobile); otherwise fall back to system data dir
+pub async fn open_db(app_data_dir: Option<PathBuf>) -> LibsqlResult<Database> {
+    let data_dir = if let Some(dir) = app_data_dir {
+        dir.join("mise")
+    } else {
+        get_data_dir().map_err(|e| libsql::Error::Misuse(e.to_string()))?
+    };
     std::fs::create_dir_all(&data_dir).map_err(|e| libsql::Error::Misuse(e.to_string()))?;
 
     let db_path = data_dir.join("mise.db");
@@ -33,12 +38,12 @@ pub fn get_conn(db: &Database) -> LibsqlResult<Connection> {
     db.connect()
 }
 
-/// Get data directory for the app
+/// Get data directory for the app (desktop fallback)
 fn get_data_dir() -> std::io::Result<PathBuf> {
     if let Some(data_dir) = dirs::data_dir() {
         Ok(data_dir.join("mise"))
     } else {
-        // Fallback
+        // Final fallback
         Ok(std::env::current_dir()?.join(".mise_data"))
     }
 }
