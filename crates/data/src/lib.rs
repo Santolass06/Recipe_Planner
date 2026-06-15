@@ -536,3 +536,159 @@ mod import_tests {
         assert_eq!(result.ingredients_created, 1);
     }
 }
+
+pub mod suggester {
+    use super::*;
+    use mise_core::{Ingredient, Recipe, Unit, RecipeIngredient, StockItem as CoreStockItem};
+    use mise_core::suggester::{SuggestedRecipe, suggest_recipes_by_stock};
+
+    fn to_core_stock(stock: Vec<crate::StockItem>) -> Vec<CoreStockItem> {
+        stock.into_iter().map(|s| CoreStockItem {
+            id: s.id,
+            ingredient_id: s.ingredient_id,
+            ingredient_name: s.ingredient_name,
+            ingredient_unit: s.ingredient_unit,
+            quantity: s.quantity,
+            min_quantity: s.min_quantity,
+        }).collect()
+    }
+
+    pub async fn suggest_recipes(
+        recipe_repo: &mut dyn RecipeRepo,
+        stock_repo: &mut dyn StockRepo,
+        ingredient_repo: &mut dyn IngredientRepo,
+        allow_partial: bool,
+    ) -> Vec<SuggestedRecipe> {
+        let recipes = recipe_repo.list().await.unwrap_or_default();
+        let stock = to_core_stock(stock_repo.list().await.unwrap_or_default());
+        let ingredients = ingredient_repo.list().await.unwrap_or_default();
+        
+        suggest_recipes_by_stock(&recipes, &stock[..], &ingredients, allow_partial)
+    }
+}
+
+#[cfg(test)]
+mod suggester_tests {
+    use super::*;
+    use crate::{db::open_local, ingredient_repo::SqliteIngredientRepo, recipe_repo::SqliteRecipeRepo, stock_repo::SqliteStockRepo, IngredientInput, RecipeInput, RecipeIngredientInput, StockInput, IngredientRepo, RecipeRepo, StockRepo};
+    use mise_core::Unit;
+
+    async fn test_setup() -> (SqliteRecipeRepo, SqliteIngredientRepo, SqliteStockRepo) {
+        let conn = open_local(":memory:").await.unwrap();
+        (SqliteRecipeRepo { conn: conn.clone() }, SqliteIngredientRepo { conn: conn.clone() }, SqliteStockRepo { conn })
+    }
+
+    #[tokio::test]
+    async fn test_suggest_recipes_full_stock() {
+        let (mut recipe_repo, mut ing_repo, mut stock_repo) = test_setup().await;
+        let ing = ing_repo.create(IngredientInput {
+            name: "Farinha".into(),
+            unit: Unit::Gram,
+            price_per_unit: 0.01,
+        }).await.unwrap();
+        let recipe = recipe_repo.create(RecipeInput {
+            name: "Pão".into(),
+            category: "Padaria".into(),
+            portions: 1,
+            instructions: "Misturar".into(),
+            ingredients: vec![RecipeIngredientInput {
+                ingredient_id: ing.id as u64,
+                quantity: 500.0,
+                unit: Unit::Gram,
+            }],
+        }).await.unwrap();
+        stock_repo.upsert(StockInput {
+            ingredient_id: ing.id as u64,
+            quantity: 1000.0,
+            min_quantity: 100.0,
+        }).await.unwrap();
+
+        let suggestions = suggester::suggest_recipes(&mut recipe_repo, &mut stock_repo, &mut ing_repo, false).await;
+        assert_eq!(suggestions.len(), 1);
+        assert!(suggestions[0].can_make);
+        assert!(suggestions[0].missing_ingredients.is_empty());
+        assert_eq!(suggestions[0].recipe.name, "Pão");
+    }
+
+    #[tokio::test]
+    async fn test_suggest_recipes_partial_stock() {
+        let (mut recipe_repo, mut ing_repo, mut stock_repo) = test_setup().await;
+        let ing = ing_repo.create(IngredientInput {
+            name: "Farinha".into(),
+            unit: Unit::Gram,
+            price_per_unit: 0.01,
+        }).await.unwrap();
+        recipe_repo.create(RecipeInput {
+            name: "Pão".into(),
+            category: "Padaria".into(),
+            portions: 1,
+            instructions: "Misturar".into(),
+            ingredients: vec![RecipeIngredientInput {
+                ingredient_id: ing.id as u64,
+                quantity: 500.0,
+                unit: Unit::Gram,
+            }],
+        }).await.unwrap();
+        
+        // Create Açúcar ingredient for the Bolo recipe
+        let sugar_ing = ing_repo.create(IngredientInput {
+            name: "Açúcar".into(),
+            unit: Unit::Gram,
+            price_per_unit: 0.02,
+        }).await.unwrap();
+        
+        recipe_repo.create(RecipeInput {
+            name: "Bolo".into(),
+            category: "Sobremesa".into(),
+            portions: 1,
+            instructions: "Misturar".into(),
+            ingredients: vec![
+                RecipeIngredientInput {
+                    ingredient_id: ing.id as u64,
+                    quantity: 300.0,
+                    unit: Unit::Gram,
+                },
+                // Açúcar (no stock)
+                RecipeIngredientInput {
+                    ingredient_id: sugar_ing.id as u64,
+                    quantity: 200.0,
+                    unit: Unit::Gram,
+                },
+            ],
+        }).await.unwrap();
+        stock_repo.upsert(StockInput {
+            ingredient_id: ing.id as u64,
+            quantity: 200.0,
+            min_quantity: 100.0,
+        }).await.unwrap();
+
+        let suggestions = suggester::suggest_recipes(&mut recipe_repo, &mut stock_repo, &mut ing_repo, true).await;
+        assert_eq!(suggestions.len(), 2);
+        assert!(!suggestions[0].can_make);
+        assert!(!suggestions[1].can_make);
+    }
+
+    #[tokio::test]
+    async fn test_suggest_recipes_empty_stock() {
+        let (mut recipe_repo, mut ing_repo, mut stock_repo) = test_setup().await;
+        let ing = ing_repo.create(IngredientInput {
+            name: "Farinha".into(),
+            unit: Unit::Gram,
+            price_per_unit: 0.01,
+        }).await.unwrap();
+        recipe_repo.create(RecipeInput {
+            name: "Pão".into(),
+            category: "Padaria".into(),
+            portions: 1,
+            instructions: "Misturar".into(),
+            ingredients: vec![RecipeIngredientInput {
+                ingredient_id: ing.id as u64,
+                quantity: 500.0,
+                unit: Unit::Gram,
+            }],
+        }).await.unwrap();
+
+        let suggestions = suggester::suggest_recipes(&mut recipe_repo, &mut stock_repo, &mut ing_repo, false).await;
+        assert_eq!(suggestions.len(), 0);
+    }
+}
