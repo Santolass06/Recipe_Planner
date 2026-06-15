@@ -4,10 +4,199 @@
 //! No repository traits, no async-trait — just direct libSQL calls.
 
 use mise_core::*;
-use mise_tauri::AppDb;
 use libsql::Database;
 use tauri::Manager;
 use tauri::path::BaseDirectory;
+
+/// Database connection wrapper for Tauri state
+pub struct AppDb {
+    pub db: Database,
+}
+
+impl AppDb {
+    pub fn new(db: Database) -> Self {
+        Self { db }
+    }
+
+    // Ingredients
+    pub async fn ingredients_list(&self) -> Result<Vec<Ingredient>, String> {
+        mise_core::db::ingredients_list(&self.db).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn create_ingredient(&self, input: IngredientInput) -> Result<Ingredient, String> {
+        mise_core::db::create_ingredient(&self.db, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn update_ingredient(&self, id: i64, input: IngredientInput) -> Result<Ingredient, String> {
+        mise_core::db::update_ingredient(&self.db, id, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn delete_ingredient(&self, id: i64) -> Result<(), String> {
+        mise_core::db::delete_ingredient(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn toggle_ingredient_favorite(&self, id: i64) -> Result<Ingredient, String> {
+        mise_core::db::toggle_ingredient_favorite(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    // Recipes
+    pub async fn recipes_list(&self) -> Result<Vec<Recipe>, String> {
+        mise_core::db::recipes_list(&self.db).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn recipes_paginated(&self, page: u32, per_page: u32) -> Result<Paginated<Recipe>, String> {
+        mise_core::db::recipes_paginated(&self.db, page, per_page).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn get_recipe(&self, id: i64) -> Result<Recipe, String> {
+        mise_core::db::get_recipe(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn create_recipe(&self, input: RecipeInput) -> Result<RecipeWithIngredients, String> {
+        mise_core::db::create_recipe(&self.db, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn update_recipe(&self, id: i64, input: RecipeInput) -> Result<RecipeWithIngredients, String> {
+        mise_core::db::update_recipe(&self.db, id, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn delete_recipe(&self, id: i64) -> Result<(), String> {
+        mise_core::db::delete_recipe(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn toggle_recipe_favorite(&self, id: i64) -> Result<Recipe, String> {
+        mise_core::db::toggle_recipe_favorite(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn clone_recipe(&self, id: i64) -> Result<RecipeWithIngredients, String> {
+        mise_core::db::clone_recipe(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    // Stock
+    pub async fn stock_list(&self) -> Result<Vec<StockItem>, String> {
+        mise_core::db::stock_list(&self.db).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn get_stock(&self, ingredient_id: i64) -> Result<StockItem, String> {
+        mise_core::db::get_stock(&self.db, ingredient_id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn upsert_stock(&self, input: StockInput) -> Result<StockItem, String> {
+        mise_core::db::upsert_stock(&self.db, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn update_stock_quantity(&self, ingredient_id: i64, quantity: f64) -> Result<StockItem, String> {
+        mise_core::db::update_stock_quantity(&self.db, ingredient_id, quantity).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn delete_stock(&self, ingredient_id: i64) -> Result<(), String> {
+        mise_core::db::delete_stock(&self.db, ingredient_id).await.map_err(|e| e.to_string())
+    }
+
+    // Shopping
+    pub async fn shopping_lists_list(&self) -> Result<Vec<ShoppingList>, String> {
+        mise_core::db::shopping_lists_list(&self.db).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn get_shopping_list(&self, id: i64) -> Result<ShoppingList, String> {
+        mise_core::db::get_shopping_list(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn create_shopping_list(&self, name: String, items: Vec<ShoppingItem>) -> Result<ShoppingList, String> {
+        mise_core::db::create_shopping_list(&self.db, name, items).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn create_shopping_list_from_recipes(&self, recipe_ids: Vec<i64>, portions_multiplier: u32) -> Result<ShoppingList, String> {
+        mise_core::db::create_shopping_list_from_recipes(&self.db, recipe_ids, portions_multiplier).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn update_shopping_list_item(&self, list_id: i64, item_id: i64, purchased: bool) -> Result<ShoppingList, String> {
+        mise_core::db::update_shopping_list_item(&self.db, list_id, item_id, purchased).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn delete_shopping_list(&self, id: i64) -> Result<(), String> {
+        mise_core::db::delete_shopping_list(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    // Suggester
+    pub async fn suggest_recipes(&self) -> Result<Vec<SuggestedRecipe>, String> {
+        mise_core::db::suggest_recipes(&self.db).await.map_err(|e| e.to_string())
+    }
+
+    // Cost
+    pub async fn calculate_cost(&self, recipe_id: i64) -> Result<CostBreakdown, String> {
+        mise_core::db::calculate_cost(&self.db, recipe_id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn analyze_cost(&self, recipe_id: i64, margin_percent: f64) -> Result<CostBreakdown, String> {
+        mise_core::db::analyze_cost(&self.db, recipe_id, margin_percent).await.map_err(|e| e.to_string())
+    }
+
+    // Settings
+    pub async fn get_setting(&self, key: &str) -> Result<Option<String>, String> {
+        mise_core::db::get_setting(&self.db, key).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn set_setting(&self, key: &str, value: &str) -> Result<(), String> {
+        mise_core::db::set_setting(&self.db, key, value).await.map_err(|e| e.to_string())
+    }
+
+    // Categories
+    pub async fn categories_list(&self, kind: Option<&str>) -> Result<Vec<Category>, String> {
+        mise_core::db::categories_list(&self.db, kind).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn create_category(&self, input: CategoryInput) -> Result<Category, String> {
+        mise_core::db::create_category(&self.db, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn update_category(&self, id: i64, input: CategoryInput) -> Result<Category, String> {
+        mise_core::db::update_category(&self.db, id, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn delete_category(&self, id: i64) -> Result<(), String> {
+        mise_core::db::delete_category(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    // Suppliers
+    pub async fn suppliers_list(&self) -> Result<Vec<Supplier>, String> {
+        mise_core::db::suppliers_list(&self.db).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn create_supplier(&self, input: SupplierInput) -> Result<Supplier, String> {
+        mise_core::db::create_supplier(&self.db, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn update_supplier(&self, id: i64, input: SupplierInput) -> Result<Supplier, String> {
+        mise_core::db::update_supplier(&self.db, id, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn delete_supplier(&self, id: i64) -> Result<(), String> {
+        mise_core::db::delete_supplier(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    // Price quotes
+    pub async fn price_quotes_list(&self, ingredient_id: i64) -> Result<Vec<PriceQuote>, String> {
+        mise_core::db::price_quotes_list(&self.db, ingredient_id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn create_price_quote(&self, input: PriceQuoteInput) -> Result<PriceQuote, String> {
+        mise_core::db::create_price_quote(&self.db, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn delete_price_quote(&self, id: i64) -> Result<(), String> {
+        mise_core::db::delete_price_quote(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    // Import/Export
+    pub async fn export_data(&self) -> Result<ImportData, String> {
+        mise_core::db::export_data(&self.db).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn import_data(&self, data: ImportData) -> Result<ImportResult, String> {
+        mise_core::db::import_data(&self.db, data).await.map_err(|e| e.to_string())
+    }
+}
 
 pub mod commands {
     use super::*;
