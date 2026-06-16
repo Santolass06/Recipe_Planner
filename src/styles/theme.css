@@ -625,3 +625,21 @@ input[type="file"] {
   line-height: 1.6;
 }
 .info-box strong { color: var(--text-1); }
+
+/* Ícones dentro de botões — sempre centrados verticalmente */
+.btn svg, .btn-primary svg, .btn-danger svg, .file-label svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+}
+
+/* Garante que todos os botões são flex */
+.btn, .btn-primary, .btn-danger, .file-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
