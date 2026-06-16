@@ -299,7 +299,7 @@ export default function ReceiptScannerPage() {
             </svg>
           </div>
           <h2 className="empty-title">Carrega um talão ou tirar foto</h2>
-          <p className="empty-desc">Suporta JPG, PNG, WebP. O OCR corre localmente no browser via Tesseract.js (português).</p>
+          <p className="empty-desc" style={{ margin: "12px 0 20px", lineHeight: 1.6 }}>Suporta JPG, PNG, WebP. O OCR corre localmente no browser via Tesseract.js (português).</p>
           <div style={{ display: "flex", flexDirection: "row", gap: "8px", justifyContent: "center", marginTop: "24px" }}>
             <label className="btn" style={{ cursor: "pointer" }}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
@@ -311,7 +311,7 @@ export default function ReceiptScannerPage() {
               Tirar foto
             </button>
           </div>
-          <p className="text-3 text-muted" style={{ marginTop: "var(--space-4)" }}>Desktop: usa "Escolher ficheiro". Mobile: "Tirar foto" abre a câmara traseira.</p>
+          <p className="text-3 text-muted" style={{ margin: "12px 0 0", fontSize: "11px", color: "var(--text-3)", lineHeight: 1.6 }}>Desktop: usa "Escolher ficheiro". Mobile: "Tirar foto" abre a câmara traseira.</p>
         </div>
       )}
 
