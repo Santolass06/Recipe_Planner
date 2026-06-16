@@ -54,4 +54,7 @@ export const pt = {
     saveError: "Erro ao guardar definições",
     invalidFile: "Ficheiro inválido: estrutura incorreta",
   },
+  theme_dark: "Escuro",
+  theme_light: "Claro",
+  theme_system: "Sistema",
 };

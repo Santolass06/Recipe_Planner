@@ -1,3 +1,34 @@
+[data-theme="light"] {
+  --bg-base:     #f4f4f0;
+  --bg-surface:  #ffffff;
+  --bg-elevated: #ededea;
+  --border:      #d4d4ce;
+  --border-mid:  #b4b4ac;
+  --text-1: #1a1a18;
+  --text-2: #4a4a44;
+  --text-3: #8a8a80;
+  --accent:     #c47d0a;
+  --accent-dim: #a06208;
+  --active-bg:   #e8f5e8;
+  --active-text: #1a6b1a;
+  --active-bar:  #22c55e;
+  --ok:  #15803d;
+  --low: #92400e;
+  --out: #dc2626;
+  --bg-modal-backdrop: rgba(0,0,0,0.3);
+  --shadow-modal: 0 24px 64px rgba(0,0,0,0.15);
+  --bg-status-ok:  #dcfce7;
+  --bg-status-out: #fee2e2;
+  --avatar-1-bg: #dcfce7; --avatar-1-fg: #15803d;
+  --avatar-2-bg: #fef3c7; --avatar-2-fg: #92400e;
+  --avatar-3-bg: #dbeafe; --avatar-3-fg: #1d4ed8;
+  --avatar-4-bg: #fce7f3; --avatar-4-fg: #9d174d;
+  --avatar-5-bg: #ede9fe; --avatar-5-fg: #6d28d9;
+  --avatar-6-bg: #ffedd5; --avatar-6-fg: #9a3412;
+  --avatar-7-bg: #d1fae5; --avatar-7-fg: #065f46;
+  --avatar-8-bg: #fef9c3; --avatar-8-fg: #854d0e;
+}
+
 :root {
   /* Backgrounds — 3 layers, never pure black */
   --bg-base:     #0e1216;
@@ -493,6 +524,12 @@ input[type="file"] {
   font-size: 13px;
   cursor: pointer;
   margin-bottom: 2px;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  font-family: var(--sans);
+  transition: background 120ms, color 120ms;
 }
 .settings-nav-item:hover {
   background: var(--bg-elevated);
@@ -567,3 +604,24 @@ input[type="file"] {
   font-family: var(--sans);
 }
 .btn-danger:hover { background: var(--bg-status-out); }
+
+/* Settings section separator */
+.settings-section-sep {
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+}
+
+/* Info box (avisos em desenvolvimento) */
+.info-box {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-top: 16px;
+  line-height: 1.6;
+}
+.info-box strong { color: var(--text-1); }

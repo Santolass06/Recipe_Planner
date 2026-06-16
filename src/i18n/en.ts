@@ -54,4 +54,7 @@ export const en = {
     saveError: "Error saving settings",
     invalidFile: "Invalid file: incorrect structure",
   },
+  theme_dark: "Dark",
+  theme_light: "Light",
+  theme_system: "System",
 };

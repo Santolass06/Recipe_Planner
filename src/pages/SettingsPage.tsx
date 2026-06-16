@@ -175,6 +175,20 @@ export default function SettingsPage() {
       if (values.language) {
         setLanguage(values.language as "pt" | "en");
       }
+      if (values.theme) {
+        localStorage.setItem("mise-theme", values.theme);
+        if (values.theme === "light") {
+          document.documentElement.setAttribute("data-theme", "light");
+        } else if (values.theme === "system") {
+          if (window.matchMedia("(prefers-color-scheme: light)").matches) {
+            document.documentElement.setAttribute("data-theme", "light");
+          } else {
+            document.documentElement.removeAttribute("data-theme");
+          }
+        } else {
+          document.documentElement.removeAttribute("data-theme");
+        }
+      }
       
       showToast("Definições guardadas", "ok");
     } catch (e) {
@@ -263,8 +277,10 @@ export default function SettingsPage() {
               onClick={() => setActiveCategory(cat.key)}
               className={`settings-nav-item${activeCategory === cat.key ? " active" : ""}`}
             >
-              {cat.icon}
-              <span>{cat.label}</span>
+              <span style={{ width: 14, height: 14, display: "flex" }}>
+                {cat.icon}
+              </span>
+              {cat.label}
             </button>
           ))}
         </nav>
@@ -369,9 +385,9 @@ export default function SettingsPage() {
                 </select>
               </div>
 
-              <div style={{ padding: "var(--space-4)", background: "var(--surface)", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
-                <p className="text-3" style={{ marginBottom: "var(--space-2)" }}>Pré-visualização:</p>
-                <p className="mono" style={{ fontSize: "24px", fontWeight: 700, color: "var(--brand)" }}>
+              <div style={{ marginTop: "20px", padding: "16px", background: "var(--bg-elevated)", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
+                <p className="text-3" style={{ marginBottom: "0" }}>Pré-visualização:</p>
+                <p style={{ fontFamily: "var(--mono)", fontSize: "24px", fontWeight: 600, color: "var(--accent)", marginTop: "8px", marginBottom: "0" }}>
                   {getSetting("symbol_position", "currency") === "before"
                     ? `${CURRENCY_SYMBOLS[getSetting("currency", "currency")]}1.234,56`
                     : `1.234,56${CURRENCY_SYMBOLS[getSetting("currency", "currency")]}`}
@@ -382,10 +398,10 @@ export default function SettingsPage() {
 
           {activeCategory === "data" && (
             <SettingsSection title="Dados" description="Exportar, importar e repor dados da aplicação">
-              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
-                <div style={{ padding: "var(--space-4)", background: "var(--surface)", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
-                  <h3 className="text-2" style={{ marginBottom: "var(--space-2)" }}>Exportar dados</h3>
-                  <p className="text-3" style={{ marginBottom: "var(--space-4)", color: "var(--text-3)" }}>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                <div className="settings-section-sep">
+                  <h3 style={{ fontSize: "14px", fontWeight: 500, margin: "0 0 4px" }}>Exportar dados</h3>
+                  <p style={{ fontSize: "12px", color: "var(--text-3)", margin: "0 0 12px" }}>
                     Baixa um ficheiro JSON com todos os teus ingredientes, receitas e definições.
                   </p>
                   <button className="btn" onClick={handleExport} disabled={saving}>
@@ -396,20 +412,20 @@ export default function SettingsPage() {
                   </button>
                 </div>
 
-                <div style={{ padding: "var(--space-4)", background: "var(--surface)", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
-                  <h3 className="text-2" style={{ marginBottom: "var(--space-2)" }}>Importar dados</h3>
-                  <p className="text-3" style={{ marginBottom: "var(--space-4)", color: "var(--text-3)" }}>
+                <div className="settings-section-sep">
+                  <h3 style={{ fontSize: "14px", fontWeight: 500, margin: "0 0 4px" }}>Importar dados</h3>
+                  <p style={{ fontSize: "12px", color: "var(--text-3)", margin: "0 0 12px" }}>
                     Carrega um ficheiro JSON exportado anteriormente. Os dados existentes não serão apagados.
                   </p>
                   <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "var(--space-3)" }}>
-                    <label className="file-label">
-                      Explorar...
-                      <input
-                        type="file"
-                        accept=".json"
-                        onChange={e => setImportFile(e.target.files?.[0] ?? null)}
-                      />
-                    </label>
+                    <label htmlFor="import-file" className="btn">Escolher ficheiro</label>
+                    <input
+                      type="file"
+                      id="import-file"
+                      accept=".json"
+                      style={{ display: "none" }}
+                      onChange={e => setImportFile(e.target.files?.[0] ?? null)}
+                    />
                     <span style={{ color: "var(--text-3)", fontSize: "13px", flex: 1 }}>
                       {importFile ? importFile.name : "Nenhum ficheiro selecionado."}
                     </span>
@@ -423,9 +439,9 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                <div style={{ padding: "var(--space-4)", background: "var(--danger-bg)", borderRadius: "var(--radius)", border: "1px solid var(--danger-border)" }}>
-                  <h3 className="text-2" style={{ marginBottom: "var(--space-2)", color: "var(--danger)" }}>Repor para padrão</h3>
-                  <p className="text-3" style={{ marginBottom: "var(--space-4)", color: "var(--text-3)" }}>
+                <div>
+                  <h3 style={{ fontSize: "14px", fontWeight: 500, margin: "0 0 4px", color: "var(--danger)" }}>Repor para padrão</h3>
+                  <p style={{ fontSize: "12px", color: "var(--text-3)", margin: "0 0 12px" }}>
                     Apaga todas as definições personalizadas e restaura os valores de fábrica. Esta ação não afecta ingredientes, receitas ou stock.
                   </p>
                   <button
@@ -467,11 +483,9 @@ export default function SettingsPage() {
                 />
               </div>
 
-              <div style={{ padding: "var(--space-4)", background: "var(--info-bg)", borderRadius: "var(--radius)", border: "1px solid var(--info-border)" }}>
-                <p className="text-3" style={{ color: "var(--info)" }}>
-                  <strong>Em desenvolvimento:</strong> A sincronização automática ainda não está implementada.
-                  As credenciais serão guardadas localmente para uso futuro.
-                </p>
+              <div className="info-box">
+                <strong style={{ fontWeight: 500 }}>Em desenvolvimento:</strong> A sincronização automática ainda não está implementada.
+                As credenciais serão guardadas localmente para uso futuro.
               </div>
             </SettingsSection>
           )}
