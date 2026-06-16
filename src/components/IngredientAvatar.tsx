@@ -16,7 +16,7 @@ function hashName(name: string): number {
   return Math.abs(h);
 }
 
-export default function IngredientAvatar({ name }: { name: string }) {
+export default function IngredientAvatar({ name, size = 32 }: { name: string; size?: number }) {
   const { bg, color } = PALETTE[hashName(name) % PALETTE.length];
   const initials = name
     .split(" ")
@@ -26,7 +26,7 @@ export default function IngredientAvatar({ name }: { name: string }) {
   return (
     <div
       className="ingredient-avatar"
-      style={{ background: bg, color }}
+      style={{ background: bg, color, width: size, height: size, fontSize: size * 0.4 }}
       title={name}
     >
       {initials || "?"}

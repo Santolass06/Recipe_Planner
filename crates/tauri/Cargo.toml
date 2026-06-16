@@ -18,6 +18,7 @@ specta = { workspace = true }
 ts-rs = { workspace = true }
 thiserror = { workspace = true }
 libsql = { workspace = true }
+chrono = { workspace = true }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

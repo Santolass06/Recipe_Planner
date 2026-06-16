@@ -8,6 +8,7 @@ const shortcutHelp = [
   { keys: "N", action: "Nova receita" },
   { keys: "Esc", action: "Fechar modal / Limpar" },
   { keys: "?", action: "Mostrar esta ajuda" },
+  { keys: "G D", action: "Ir para Dashboard" },
   { keys: "G I", action: "Ir para Ingredientes" },
   { keys: "G R", action: "Ir para Receitas" },
   { keys: "G S", action: "Ir para Armazém" },
@@ -65,6 +66,10 @@ export default function Layout() {
           break;
         case "nav_settings":
           navigate("/definicoes");
+          setSidebarOpen(false);
+          break;
+        case "nav_dashboard":
+          navigate("/dashboard");
           setSidebarOpen(false);
           break;
         default:

@@ -223,10 +223,34 @@ impl StockItem {
     }
 }
 
-/// Shopping list item
+/// Shopping list item input (for create/update)
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct ShoppingItemInput {
+    #[validate(range(min = 1))]
+    pub ingredient_id: i64,
+    #[validate(length(min = 1, max = 200))]
+    pub ingredient_name: String,
+    pub ingredient_unit: Unit,
+    #[validate(range(min = 0.0))]
+    pub needed_quantity: f64,
+    #[validate(range(min = 0.0))]
+    pub stock_quantity: f64,
+    #[validate(range(min = 0.0))]
+    pub to_buy_quantity: f64,
+    #[validate(length(max = 100))]
+    pub category: String,
+    #[validate(range(min = 0.0))]
+    pub estimated_cost: f64,
+    pub purchased: bool,
+    pub notes: Option<String>,
+}
+
+/// Shopping list item (stored)
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct ShoppingItem {
+    pub id: i64,
     pub ingredient_id: i64,
     pub ingredient_name: String,
     pub ingredient_unit: Unit,
@@ -236,6 +260,11 @@ pub struct ShoppingItem {
     pub category: String,
     pub estimated_cost: f64,
     pub purchased: bool,
+    pub notes: Option<String>,
+    #[ts(type = "string")]
+    pub purchased_at: Option<DateTime<Utc>>,
+    #[ts(type = "string")]
+    pub created_at: DateTime<Utc>,
 }
 
 /// Shopping list
@@ -248,6 +277,15 @@ pub struct ShoppingList {
     pub total_estimated_cost: f64,
     #[ts(type = "string")]
     pub created_at: DateTime<Utc>,
+}
+
+/// Shopping list with items (for detail view)
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct ShoppingListWithItems {
+    #[serde(flatten)]
+    pub list: ShoppingList,
+    // items is already part of ShoppingList
 }
 
 /// Suggested recipe (from stock)
@@ -382,6 +420,63 @@ pub struct Setting {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Settings category for grouping
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "bindings/")]
+pub enum SettingsCategory {
+    General,
+    Units,
+    Currency,
+    Data,
+    Sync,
+    About,
+}
+
+impl SettingsCategory {
+    pub fn all() -> &'static [SettingsCategory] {
+        &[
+            SettingsCategory::General,
+            SettingsCategory::Units,
+            SettingsCategory::Currency,
+            SettingsCategory::Data,
+            SettingsCategory::Sync,
+            SettingsCategory::About,
+        ]
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SettingsCategory::General => "Geral",
+            SettingsCategory::Units => "Unidades",
+            SettingsCategory::Currency => "Moeda",
+            SettingsCategory::Data => "Dados",
+            SettingsCategory::Sync => "Sincronização",
+            SettingsCategory::About => "Sobre",
+        }
+    }
+
+    pub fn label_en(self) -> &'static str {
+        match self {
+            SettingsCategory::General => "General",
+            SettingsCategory::Units => "Units",
+            SettingsCategory::Currency => "Currency",
+            SettingsCategory::Data => "Data",
+            SettingsCategory::Sync => "Sync",
+            SettingsCategory::About => "About",
+        }
+    }
+}
+
+/// Settings input for batch operations
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct SettingsInput {
+    pub key: String,
+    pub value: String,
+    pub category: SettingsCategory,
+}
+
 /// Categories (for ingredients/recipes)
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
@@ -421,6 +516,171 @@ pub struct Supplier {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Meal Planner — Meal Type enum
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "bindings/")]
+pub enum MealType {
+    Breakfast,
+    Lunch,
+    Dinner,
+    Snack,
+}
+
+impl MealType {
+    pub fn label(self) -> &'static str {
+        match self {
+            MealType::Breakfast => "Pequeno-almoço",
+            MealType::Lunch => "Almoço",
+            MealType::Dinner => "Jantar",
+            MealType::Snack => "Lanche",
+        }
+    }
+
+    pub fn all() -> &'static [MealType] {
+        &[MealType::Breakfast, MealType::Lunch, MealType::Dinner, MealType::Snack]
+    }
+}
+
+/// Meal Planner — Day of Week enum
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "bindings/")]
+pub enum DayOfWeek {
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+    Sunday,
+}
+
+impl DayOfWeek {
+    pub fn label(self) -> &'static str {
+        match self {
+            DayOfWeek::Monday => "Segunda",
+            DayOfWeek::Tuesday => "Terça",
+            DayOfWeek::Wednesday => "Quarta",
+            DayOfWeek::Thursday => "Quinta",
+            DayOfWeek::Friday => "Sexta",
+            DayOfWeek::Saturday => "Sábado",
+            DayOfWeek::Sunday => "Domingo",
+        }
+    }
+
+    pub fn short_label(self) -> &'static str {
+        match self {
+            DayOfWeek::Monday => "Seg",
+            DayOfWeek::Tuesday => "Ter",
+            DayOfWeek::Wednesday => "Qua",
+            DayOfWeek::Thursday => "Qui",
+            DayOfWeek::Friday => "Sex",
+            DayOfWeek::Saturday => "Sáb",
+            DayOfWeek::Sunday => "Dom",
+        }
+    }
+
+    pub fn all() -> &'static [DayOfWeek] {
+        &[
+            DayOfWeek::Monday,
+            DayOfWeek::Tuesday,
+            DayOfWeek::Wednesday,
+            DayOfWeek::Thursday,
+            DayOfWeek::Friday,
+            DayOfWeek::Saturday,
+            DayOfWeek::Sunday,
+        ]
+    }
+
+    pub fn index(self) -> usize {
+        match self {
+            DayOfWeek::Monday => 0,
+            DayOfWeek::Tuesday => 1,
+            DayOfWeek::Wednesday => 2,
+            DayOfWeek::Thursday => 3,
+            DayOfWeek::Friday => 4,
+            DayOfWeek::Saturday => 5,
+            DayOfWeek::Sunday => 6,
+        }
+    }
+}
+
+/// Meal Plan input (create/update)
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct MealPlanInput {
+    #[validate(length(min = 1, max = 200))]
+    pub name: String,
+    #[ts(type = "string")]
+    pub start_date: DateTime<Utc>,
+    #[ts(type = "string")]
+    pub end_date: DateTime<Utc>,
+}
+
+/// Meal Plan (stored)
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct MealPlan {
+    pub id: i64,
+    pub name: String,
+    #[ts(type = "string")]
+    pub start_date: DateTime<Utc>,
+    #[ts(type = "string")]
+    pub end_date: DateTime<Utc>,
+    #[ts(type = "string")]
+    pub created_at: DateTime<Utc>,
+    #[ts(type = "string")]
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Meal Plan Entry input (create/update)
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct MealEntryInput {
+    #[validate(range(min = 1))]
+    pub recipe_id: i64,
+    pub day_of_week: DayOfWeek,
+    pub meal_type: MealType,
+    #[validate(range(min = 1, max = 100))]
+    pub portions: u32,
+}
+
+/// Meal Plan Entry (stored)
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct MealPlanEntry {
+    pub id: i64,
+    pub meal_plan_id: i64,
+    pub recipe_id: i64,
+    pub recipe_name: String, // denormalized for display
+    pub day_of_week: DayOfWeek,
+    pub meal_type: MealType,
+    pub portions: u32,
+    #[ts(type = "string")]
+    pub created_at: DateTime<Utc>,
+    #[ts(type = "string")]
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Meal Plan with entries (for API responses)
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct MealPlanWithEntries {
+    #[serde(flatten)]
+    pub meal_plan: MealPlan,
+    pub entries: Vec<MealPlanEntry>,
+}
+
+/// Shopping list generation result from meal plan
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct MealPlanShoppingList {
+    pub shopping_list: ShoppingList,
+    pub total_portions: u32,
+    pub recipes_used: Vec<i64>,
+}
+
 /// Pagination
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
@@ -430,4 +690,210 @@ pub struct Paginated<T> {
     pub page: u32,
     pub per_page: u32,
     pub total_pages: u32,
+}
+
+/// Dashboard statistics
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct DashboardStats {
+    pub low_stock_count: i64,
+    pub expiring_soon_count: i64,
+    pub meals_this_week: i64,
+    pub total_stock_value: f64,
+    pub total_recipes: i64,
+    pub total_ingredients: i64,
+    pub pending_shopping_items: i64,
+}
+
+/// Activity item for recent activity feed
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct ActivityItem {
+    pub id: i64,
+    pub activity_type: String, // "recipe_created", "stock_updated", "meal_planned", "shopping_purchased", etc.
+    pub description: String,
+    pub entity_id: Option<i64>,
+    pub entity_type: Option<String>, // "recipe", "ingredient", "meal_plan", "shopping_list"
+    #[ts(type = "string")]
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Meal plan entry with recipe details (for dashboard upcoming meals)
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct MealPlanEntryWithRecipe {
+    pub id: i64,
+    pub meal_plan_id: i64,
+    pub recipe_id: i64,
+    pub recipe_name: String,
+    pub day_of_week: DayOfWeek,
+    pub meal_type: MealType,
+    pub portions: u32,
+    #[ts(type = "string")]
+    pub planned_date: DateTime<Utc>, // The actual date this meal is planned for
+}
+
+/// Stock item with ingredient details (for dashboard low stock)
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct StockItemWithIngredient {
+    pub id: i64,
+    pub ingredient_id: i64,
+    pub ingredient_name: String,
+    pub ingredient_unit: Unit,
+    pub quantity: f64,
+    pub min_quantity: f64,
+    pub price_per_unit: f64,
+    #[ts(type = "string")]
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Price quote stats for an ingredient (avg, min, max)
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct PriceQuoteStats {
+    pub ingredient_id: i64,
+    pub avg_price: f64,
+    pub min_price: f64,
+    pub max_price: f64,
+    pub quote_count: i64,
+}
+
+/// Price quote with denormalized ingredient info
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct PriceQuoteWithIngredient {
+    pub id: i64,
+    pub ingredient_id: i64,
+    pub ingredient_name: String,
+    pub ingredient_unit: Unit,
+    pub supplier: String,
+    pub price_per_unit: f64,
+    #[ts(type = "string")]
+    pub valid_from: Option<DateTime<Utc>>,
+    #[ts(type = "string")]
+    pub valid_to: Option<DateTime<Utc>>,
+    pub is_promo: bool,
+    #[ts(type = "string")]
+    pub created_at: DateTime<Utc>,
+}
+
+/// =====================================================================
+/// REPORTS
+/// =====================================================================
+
+/// Cost report for a date range
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct CostReport {
+    pub total_spent: f64,
+    pub by_category: Vec<CategoryCost>,
+    pub by_recipe: Vec<RecipeCost>,
+    pub by_supplier: Vec<SupplierCost>,
+    pub daily_avg: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct CategoryCost {
+    pub category: String,
+    pub total: f64,
+    pub percentage: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct RecipeCost {
+    pub recipe_id: i64,
+    pub recipe_name: String,
+    pub total_cost: f64,
+    pub portions: u32,
+    pub cost_per_portion: f64,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct SupplierCost {
+    pub supplier: String,
+    pub total: f64,
+    pub percentage: f64,
+}
+
+/// Waste report for a date range
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct WasteReport {
+    pub total_wasted_value: f64,
+    pub by_ingredient: Vec<IngredientWaste>,
+    pub by_category: Vec<CategoryWaste>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct IngredientWaste {
+    pub ingredient_id: i64,
+    pub ingredient_name: String,
+    pub unit: Unit,
+    pub wasted_quantity: f64,
+    pub wasted_value: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct CategoryWaste {
+    pub category: String,
+    pub total_wasted_value: f64,
+    pub percentage: f64,
+}
+
+/// Stock snapshot for trend analysis
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct StockSnapshot {
+    #[ts(type = "string")]
+    pub date: DateTime<Utc>,
+    pub ingredient_id: i64,
+    pub ingredient_name: String,
+    pub quantity: f64,
+    pub value: f64,
+}
+
+/// Meal statistics for a date range
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct MealStats {
+    pub total_meals: u32,
+    pub avg_portions: f64,
+    pub by_meal_type: Vec<MealTypeStat>,
+    pub by_recipe: Vec<RecipeMealStat>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct MealTypeStat {
+    pub meal_type: MealType,
+    pub count: u32,
+    pub total_portions: u32,
+    pub percentage: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct RecipeMealStat {
+    pub recipe_id: i64,
+    pub recipe_name: String,
+    pub count: u32,
+    pub total_portions: u32,
+    pub avg_portions: f64,
+}
+
+/// Price trend point for an ingredient
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct PricePoint {
+    #[ts(type = "string")]
+    pub date: DateTime<Utc>,
+    pub price: f64,
+    pub supplier: String,
 }

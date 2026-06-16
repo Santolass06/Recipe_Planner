@@ -20,6 +20,12 @@ function NavItem({ icon, label, to }: NavItemProps) {
 
 /* 16×16 inline icons — stroke 1.8, crisp at small size */
 const icons = {
+  dashboard: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+      <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+    </svg>
+  ),
   leaf: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M2 22 16 8"/><path d="M16 3s0 7-8 13"/>
@@ -101,12 +107,25 @@ const icons = {
 
 const navGroups = [
   {
+    label: "Geral",
+    items: [
+      { to: "/dashboard", icon: icons.dashboard, label: "Dashboard" },
+    ],
+  },
+  {
     label: "Cozinha",
     items: [
       { to: "/ingredientes", icon: icons.leaf, label: "Ingredientes" },
       { to: "/receitas", icon: icons.book, label: "Receitas" },
       { to: "/armazem", icon: icons.box, label: "Armazém" },
       { to: "/sugestor", icon: icons.bulb, label: "Sugestor" },
+    ],
+  },
+  {
+    label: "Planeamento",
+    items: [
+      { to: "/planeamento", icon: icons.calendar, label: "Planeamento" },
+      { to: "/calendario", icon: icons.calendar, label: "Calendário" },
     ],
   },
   {
@@ -121,7 +140,6 @@ const navGroups = [
     label: "Ferramentas",
     items: [
       { to: "/compras", icon: icons.shopping, label: "Lista de Compras" },
-      { to: "/calendario", icon: icons.calendar, label: "Calendário" },
       { to: "/importador", icon: icons.upload, label: "Importar JSON" },
       { to: "/definicoes", icon: icons.gear, label: "Definições" },
       { to: "/ajuda", icon: icons.help, label: "Ajuda & Docs" },

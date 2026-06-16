@@ -7,6 +7,7 @@ use mise_core::*;
 use libsql::Database;
 use tauri::Manager;
 use tauri::path::BaseDirectory;
+use chrono::{DateTime, Utc};
 
 /// Database connection wrapper for Tauri state
 pub struct AppDb {
@@ -118,6 +119,38 @@ impl AppDb {
         mise_core::db::delete_shopping_list(&self.db, id).await.map_err(|e| e.to_string())
     }
 
+    pub async fn update_shopping_list(&self, id: i64, name: String) -> Result<ShoppingList, String> {
+        mise_core::db::update_shopping_list(&self.db, id, name).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn shopping_list_add_item(&self, list_id: i64, input: ShoppingItemInput) -> Result<ShoppingItem, String> {
+        mise_core::db::shopping_list_add_item(&self.db, list_id, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn shopping_list_update_item(&self, list_id: i64, item_id: i64, input: ShoppingItemInput) -> Result<ShoppingItem, String> {
+        mise_core::db::shopping_list_update_item(&self.db, list_id, item_id, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn shopping_list_toggle_item(&self, list_id: i64, item_id: i64, purchased: bool) -> Result<ShoppingItem, String> {
+        mise_core::db::shopping_list_toggle_item(&self.db, list_id, item_id, purchased).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn shopping_list_remove_item(&self, list_id: i64, item_id: i64) -> Result<(), String> {
+        mise_core::db::shopping_list_remove_item(&self.db, list_id, item_id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn shopping_list_reorder_items(&self, list_id: i64, item_ids: Vec<i64>) -> Result<Vec<ShoppingItem>, String> {
+        mise_core::db::shopping_list_reorder_items(&self.db, list_id, item_ids).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn shopping_list_group_by_category(&self, list_id: i64) -> Result<std::collections::HashMap<String, Vec<ShoppingItem>>, String> {
+        mise_core::db::shopping_list_group_by_category(&self.db, list_id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn shopping_list_clear_purchased(&self, list_id: i64) -> Result<ShoppingList, String> {
+        mise_core::db::shopping_list_clear_purchased(&self.db, list_id).await.map_err(|e| e.to_string())
+    }
+
     // Suggester
     pub async fn suggest_recipes(&self) -> Result<Vec<SuggestedRecipe>, String> {
         mise_core::db::suggest_recipes(&self.db).await.map_err(|e| e.to_string())
@@ -139,6 +172,14 @@ impl AppDb {
 
     pub async fn set_setting(&self, key: &str, value: &str) -> Result<(), String> {
         mise_core::db::set_setting(&self.db, key, value).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn get_all_settings(&self) -> Result<std::collections::HashMap<String, String>, String> {
+        mise_core::db::get_all_settings(&self.db).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn reset_settings(&self) -> Result<(), String> {
+        mise_core::db::reset_to_defaults(&self.db).await.map_err(|e| e.to_string())
     }
 
     // Categories
@@ -163,6 +204,10 @@ impl AppDb {
         mise_core::db::suppliers_list(&self.db).await.map_err(|e| e.to_string())
     }
 
+    pub async fn supplier_get(&self, id: i64) -> Result<Supplier, String> {
+        mise_core::db::supplier_get(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
     pub async fn create_supplier(&self, input: SupplierInput) -> Result<Supplier, String> {
         mise_core::db::create_supplier(&self.db, input).await.map_err(|e| e.to_string())
     }
@@ -180,8 +225,20 @@ impl AppDb {
         mise_core::db::price_quotes_list(&self.db, ingredient_id).await.map_err(|e| e.to_string())
     }
 
+    pub async fn price_quotes_all(&self) -> Result<Vec<PriceQuoteWithIngredient>, String> {
+        mise_core::db::price_quotes_all(&self.db).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn price_quotes_stats(&self) -> Result<Vec<PriceQuoteStats>, String> {
+        mise_core::db::price_quotes_stats(&self.db).await.map_err(|e| e.to_string())
+    }
+
     pub async fn create_price_quote(&self, input: PriceQuoteInput) -> Result<PriceQuote, String> {
         mise_core::db::create_price_quote(&self.db, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn update_price_quote(&self, id: i64, input: PriceQuoteInput) -> Result<PriceQuote, String> {
+        mise_core::db::update_price_quote(&self.db, id, input).await.map_err(|e| e.to_string())
     }
 
     pub async fn delete_price_quote(&self, id: i64) -> Result<(), String> {
@@ -195,6 +252,102 @@ impl AppDb {
 
     pub async fn import_data(&self, data: ImportData) -> Result<ImportResult, String> {
         mise_core::db::import_data(&self.db, data).await.map_err(|e| e.to_string())
+    }
+
+    // Meal Planner
+    pub async fn meal_plans_list(&self) -> Result<Vec<MealPlan>, String> {
+        mise_core::db::list_meal_plans(&self.db).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn meal_plan_get(&self, id: i64) -> Result<MealPlanWithEntries, String> {
+        mise_core::db::get_meal_plan(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn meal_plan_create(&self, input: MealPlanInput) -> Result<MealPlan, String> {
+        mise_core::db::create_meal_plan(&self.db, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn meal_plan_update(&self, id: i64, input: MealPlanInput) -> Result<MealPlan, String> {
+        mise_core::db::update_meal_plan(&self.db, id, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn meal_plan_delete(&self, id: i64) -> Result<(), String> {
+        mise_core::db::delete_meal_plan(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn meal_entry_add(&self, meal_plan_id: i64, input: MealEntryInput) -> Result<MealPlanEntry, String> {
+        mise_core::db::add_meal_entry(&self.db, meal_plan_id, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn meal_entry_update(&self, id: i64, input: MealEntryInput) -> Result<MealPlanEntry, String> {
+        mise_core::db::update_meal_entry(&self.db, id, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn meal_entry_delete(&self, id: i64) -> Result<(), String> {
+        mise_core::db::delete_meal_entry(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn meal_plan_generate_shopping_list(&self, plan_id: i64, portions_multiplier: u32) -> Result<MealPlanShoppingList, String> {
+        mise_core::db::generate_shopping_list_from_meal_plan(&self.db, plan_id, portions_multiplier).await.map_err(|e| e.to_string())
+    }
+
+    // Dashboard
+    pub async fn dashboard_stats(&self) -> Result<DashboardStats, String> {
+        mise_core::db::get_dashboard_stats(&self.db).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn dashboard_recent_activity(&self, limit: u32) -> Result<Vec<ActivityItem>, String> {
+        mise_core::db::get_recent_activity(&self.db, limit).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn dashboard_upcoming_meals(&self, days: u32) -> Result<Vec<MealPlanEntryWithRecipe>, String> {
+        mise_core::db::get_upcoming_meals(&self.db, days).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn dashboard_low_stock(&self, threshold: f64) -> Result<Vec<StockItemWithIngredient>, String> {
+        mise_core::db::get_low_stock_ingredients(&self.db, threshold).await.map_err(|e| e.to_string())
+    }
+
+    // Calendar
+    pub async fn meal_plan_entries_by_date_range(
+        &self,
+        start_date: DateTime<Utc>,
+        end_date: DateTime<Utc>,
+    ) -> Result<Vec<MealPlanEntryWithRecipe>, String> {
+        mise_core::db::get_meal_plan_entries_by_date_range(&self.db, start_date, end_date)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    pub async fn meal_plan_entries_by_month(
+        &self,
+        year: i32,
+        month: u32,
+    ) -> Result<Vec<MealPlanEntryWithRecipe>, String> {
+        mise_core::db::get_meal_plan_entries_by_month(&self.db, year, month)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    // Reports
+    pub async fn get_cost_report(&self, days: u32) -> Result<CostReport, String> {
+        mise_core::db::get_cost_report(&self.db, days).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn get_waste_report(&self, days: u32) -> Result<WasteReport, String> {
+        mise_core::db::get_waste_report(&self.db, days).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn get_stock_trends(&self, days: u32) -> Result<Vec<StockSnapshot>, String> {
+        mise_core::db::get_stock_trends(&self.db, days).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn get_meal_stats(&self, days: u32) -> Result<MealStats, String> {
+        mise_core::db::get_meal_stats(&self.db, days).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn get_price_trends(&self, ingredient_id: i64, days: u32) -> Result<Vec<PricePoint>, String> {
+        mise_core::db::get_price_trends(&self.db, ingredient_id, days).await.map_err(|e| e.to_string())
     }
 }
 
@@ -405,6 +558,78 @@ pub mod commands {
         db.delete_shopping_list(id).await.map_err(|e| e.to_string())
     }
 
+    #[tauri::command]
+    pub async fn shopping_list_update(
+        db: tauri::State<'_, crate::AppDb>,
+        id: i64,
+        name: String,
+    ) -> Result<ShoppingList, String> {
+        db.update_shopping_list(id, name).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn shopping_list_add_item(
+        db: tauri::State<'_, crate::AppDb>,
+        list_id: i64,
+        input: ShoppingItemInput,
+    ) -> Result<ShoppingItem, String> {
+        db.shopping_list_add_item(list_id, input).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn shopping_list_update_item_full(
+        db: tauri::State<'_, crate::AppDb>,
+        list_id: i64,
+        item_id: i64,
+        input: ShoppingItemInput,
+    ) -> Result<ShoppingItem, String> {
+        db.shopping_list_update_item(list_id, item_id, input)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn shopping_list_toggle_item(
+        db: tauri::State<'_, crate::AppDb>,
+        list_id: i64,
+        item_id: i64,
+        purchased: bool,
+    ) -> Result<ShoppingItem, String> {
+        db.shopping_list_toggle_item(list_id, item_id, purchased)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn shopping_list_remove_item(
+        db: tauri::State<'_, crate::AppDb>,
+        list_id: i64,
+        item_id: i64,
+    ) -> Result<(), String> {
+        db.shopping_list_remove_item(list_id, item_id).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn shopping_list_reorder_items(
+        db: tauri::State<'_, crate::AppDb>,
+        list_id: i64,
+        item_ids: Vec<i64>,
+    ) -> Result<Vec<ShoppingItem>, String> {
+        db.shopping_list_reorder_items(list_id, item_ids)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn shopping_list_clear_purchased(
+        db: tauri::State<'_, crate::AppDb>,
+        list_id: i64,
+    ) -> Result<ShoppingList, String> {
+        db.shopping_list_clear_purchased(list_id)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     // Suggester
     #[tauri::command]
     pub async fn suggester_suggest(
@@ -447,6 +672,20 @@ pub mod commands {
         value: String,
     ) -> Result<(), String> {
         db.set_setting(&key, &value).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn settings_get_all(
+        db: tauri::State<'_, crate::AppDb>,
+    ) -> Result<std::collections::HashMap<String, String>, String> {
+        db.get_all_settings().await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn settings_reset(
+        db: tauri::State<'_, crate::AppDb>,
+    ) -> Result<(), String> {
+        db.reset_settings().await.map_err(|e| e.to_string())
     }
 
     // Categories
@@ -492,6 +731,14 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub async fn supplier_get(
+        db: tauri::State<'_, crate::AppDb>,
+        id: i64,
+    ) -> Result<Supplier, String> {
+        db.supplier_get(id).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
     pub async fn supplier_create(
         db: tauri::State<'_, crate::AppDb>,
         input: SupplierInput,
@@ -526,11 +773,34 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub async fn price_quotes_all(
+        db: tauri::State<'_, crate::AppDb>,
+    ) -> Result<Vec<PriceQuoteWithIngredient>, String> {
+        db.price_quotes_all().await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn price_quotes_stats(
+        db: tauri::State<'_, crate::AppDb>,
+    ) -> Result<Vec<PriceQuoteStats>, String> {
+        db.price_quotes_stats().await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
     pub async fn price_quote_create(
         db: tauri::State<'_, crate::AppDb>,
         input: PriceQuoteInput,
     ) -> Result<PriceQuote, String> {
         db.create_price_quote(input).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn price_quote_update(
+        db: tauri::State<'_, crate::AppDb>,
+        id: i64,
+        input: PriceQuoteInput,
+    ) -> Result<PriceQuote, String> {
+        db.update_price_quote(id, input).await.map_err(|e| e.to_string())
     }
 
     #[tauri::command]
@@ -555,6 +825,183 @@ pub mod commands {
         data: ImportData,
     ) -> Result<ImportResult, String> {
         db.import_data(data).await.map_err(|e| e.to_string())
+    }
+
+    // Meal Planner
+    #[tauri::command]
+    pub async fn meal_plans_list(
+        db: tauri::State<'_, crate::AppDb>,
+    ) -> Result<Vec<MealPlan>, String> {
+        db.meal_plans_list().await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn meal_plan_get(
+        db: tauri::State<'_, crate::AppDb>,
+        id: i64,
+    ) -> Result<MealPlanWithEntries, String> {
+        db.meal_plan_get(id).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn meal_plan_create(
+        db: tauri::State<'_, crate::AppDb>,
+        input: MealPlanInput,
+    ) -> Result<MealPlan, String> {
+        db.meal_plan_create(input).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn meal_plan_update(
+        db: tauri::State<'_, crate::AppDb>,
+        id: i64,
+        input: MealPlanInput,
+    ) -> Result<MealPlan, String> {
+        db.meal_plan_update(id, input).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn meal_plan_delete(
+        db: tauri::State<'_, crate::AppDb>,
+        id: i64,
+    ) -> Result<(), String> {
+        db.meal_plan_delete(id).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn meal_entry_add(
+        db: tauri::State<'_, crate::AppDb>,
+        meal_plan_id: i64,
+        input: MealEntryInput,
+    ) -> Result<MealPlanEntry, String> {
+        db.meal_entry_add(meal_plan_id, input).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn meal_entry_update(
+        db: tauri::State<'_, crate::AppDb>,
+        id: i64,
+        input: MealEntryInput,
+    ) -> Result<MealPlanEntry, String> {
+        db.meal_entry_update(id, input).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn meal_entry_delete(
+        db: tauri::State<'_, crate::AppDb>,
+        id: i64,
+    ) -> Result<(), String> {
+        db.meal_entry_delete(id).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn meal_plan_generate_shopping_list(
+        db: tauri::State<'_, crate::AppDb>,
+        plan_id: i64,
+        portions_multiplier: u32,
+    ) -> Result<MealPlanShoppingList, String> {
+        db.meal_plan_generate_shopping_list(plan_id, portions_multiplier)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    // Dashboard
+    #[tauri::command]
+    pub async fn dashboard_stats(
+        db: tauri::State<'_, crate::AppDb>,
+    ) -> Result<DashboardStats, String> {
+        db.dashboard_stats().await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn dashboard_recent_activity(
+        db: tauri::State<'_, crate::AppDb>,
+        limit: u32,
+    ) -> Result<Vec<ActivityItem>, String> {
+        db.dashboard_recent_activity(limit).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn dashboard_upcoming_meals(
+        db: tauri::State<'_, crate::AppDb>,
+        days: u32,
+    ) -> Result<Vec<MealPlanEntryWithRecipe>, String> {
+        db.dashboard_upcoming_meals(days).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn dashboard_low_stock(
+        db: tauri::State<'_, crate::AppDb>,
+        threshold: f64,
+    ) -> Result<Vec<StockItemWithIngredient>, String> {
+        db.dashboard_low_stock(threshold).await.map_err(|e| e.to_string())
+    }
+
+    // Calendar
+    #[tauri::command]
+    pub async fn meal_plan_entries_by_date_range(
+        db: tauri::State<'_, crate::AppDb>,
+        start_date: String,
+        end_date: String,
+    ) -> Result<Vec<MealPlanEntryWithRecipe>, String> {
+        let start = DateTime::parse_from_rfc3339(&start_date)
+            .map(|dt| dt.with_timezone(&Utc))
+            .map_err(|e| e.to_string())?;
+        let end = DateTime::parse_from_rfc3339(&end_date)
+            .map(|dt| dt.with_timezone(&Utc))
+            .map_err(|e| e.to_string())?;
+        db.meal_plan_entries_by_date_range(start, end).await
+    }
+
+    #[tauri::command]
+    pub async fn meal_plan_entries_by_month(
+        db: tauri::State<'_, crate::AppDb>,
+        year: i32,
+        month: u32,
+    ) -> Result<Vec<MealPlanEntryWithRecipe>, String> {
+        db.meal_plan_entries_by_month(year, month).await
+    }
+
+    // Reports
+    #[tauri::command]
+    pub async fn report_cost(
+        db: tauri::State<'_, crate::AppDb>,
+        days: u32,
+    ) -> Result<CostReport, String> {
+        db.get_cost_report(days).await
+    }
+
+    #[tauri::command]
+    pub async fn report_waste(
+        db: tauri::State<'_, crate::AppDb>,
+        days: u32,
+    ) -> Result<WasteReport, String> {
+        db.get_waste_report(days).await
+    }
+
+    #[tauri::command]
+    pub async fn report_stock_trends(
+        db: tauri::State<'_, crate::AppDb>,
+        days: u32,
+    ) -> Result<Vec<StockSnapshot>, String> {
+        db.get_stock_trends(days).await
+    }
+
+    #[tauri::command]
+    pub async fn report_meal_stats(
+        db: tauri::State<'_, crate::AppDb>,
+        days: u32,
+    ) -> Result<MealStats, String> {
+        db.get_meal_stats(days).await
+    }
+
+    #[tauri::command]
+    pub async fn report_price_trends(
+        db: tauri::State<'_, crate::AppDb>,
+        ingredient_id: i64,
+        days: u32,
+    ) -> Result<Vec<PricePoint>, String> {
+        db.get_price_trends(ingredient_id, days).await
     }
 }
 
