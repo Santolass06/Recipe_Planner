@@ -277,6 +277,68 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
     // Default categories
     seed_default_categories(&conn).await?;
 
+    // Migration 011: Images table
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_type TEXT NOT NULL CHECK (entity_type IN ('recipe', 'ingredient', 'supplier', 'receipt', 'profile')),
+            entity_id INTEGER NOT NULL,
+            path TEXT NOT NULL,
+            mime_type TEXT NOT NULL,
+            is_primary INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        "#,
+        (),
+    ).await?;
+
+    // Migration 012: Stock purchases table
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS stock_purchases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ingredient_id INTEGER NOT NULL,
+            quantity REAL NOT NULL,
+            unit TEXT NOT NULL,
+            price_per_unit REAL NOT NULL,
+            total_price REAL NOT NULL,
+            is_discount INTEGER NOT NULL DEFAULT 0,
+            discount_percent REAL NOT NULL DEFAULT 0,
+            purchase_date TEXT NOT NULL,
+            supplier_id INTEGER,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE RESTRICT,
+            FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL
+        );
+        "#,
+        (),
+    ).await?;
+
+    // Migration 013: Receipt imports table
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS receipt_imports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            image_path TEXT NOT NULL,
+            raw_text TEXT,
+            parsed_json TEXT,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'scanned', 'parsed', 'confirmed', 'failed')),
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        "#,
+        (),
+    ).await?;
+
+    // Indexes for new tables
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_images_entity ON images(entity_type, entity_id);", ()).await?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_stock_purchases_ingredient ON stock_purchases(ingredient_id);", ()).await?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_stock_purchases_date ON stock_purchases(purchase_date);", ()).await?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_stock_purchases_supplier ON stock_purchases(supplier_id);", ()).await?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_receipt_imports_status ON receipt_imports(status);", ()).await?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_receipt_imports_created ON receipt_imports(created_at);", ()).await?;
+
     Ok(())
 }
 
@@ -2828,6 +2890,898 @@ pub async fn get_price_trends(db: &Database, ingredient_id: i64, days: u32) -> L
     }
 
     Ok(trends)
+}
+
+// =====================================================================
+// IMAGES
+// =====================================================================
+
+/// Map a libsql Row to Image
+fn row_to_image(row: &Row) -> LibsqlResult<Image> {
+    let entity_type_str: String = row.get(1)?;
+    let entity_type = match entity_type_str.as_str() {
+        "recipe" => ImageEntityType::Recipe,
+        "ingredient" => ImageEntityType::Ingredient,
+        "supplier" => ImageEntityType::Supplier,
+        "receipt" => ImageEntityType::Receipt,
+        "profile" => ImageEntityType::Profile,
+        _ => ImageEntityType::Recipe,
+    };
+
+    let created_at_str: String = row.get(6)?;
+    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+
+    Ok(Image {
+        id: row.get(0)?,
+        entity_type,
+        entity_id: row.get(2)?,
+        path: row.get(3)?,
+        mime_type: row.get(4)?,
+        is_primary: row.get(5)?,
+        created_at,
+    })
+}
+
+/// Save base64 image to file system and return path
+async fn save_base64_image(base64: &str, entity_type: &str, entity_id: i64) -> Result<String, String> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use std::path::PathBuf;
+    use dirs;
+
+    // Decode base64
+    let bytes = STANDARD.decode(base64).map_err(|e| e.to_string())?;
+    
+    // Detect mime type from bytes (simple detection)
+    let mime_type = if bytes.starts_with(b"\xFF\xD8\xFF") {
+        "image/jpeg"
+    } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "image/png"
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        "image/gif"
+    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        "image/webp"
+    } else {
+        "image/jpeg"
+    };
+
+    // Get extension
+    let ext = match mime_type {
+        "image/jpeg" => "jpg",
+        "image/png" => "png",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        _ => "jpg",
+    };
+
+    // Create filename
+    let filename = format!("{}_{}_{}.{}", entity_type, entity_id, chrono::Utc::now().timestamp_millis(), ext);
+    
+    // Get app data directory
+    let data_dir = if let Some(dir) = dirs::data_dir() {
+        dir.join("mise").join("images")
+    } else {
+        std::env::current_dir().map_err(|e| e.to_string())?.join(".mise_data").join("images")
+    };
+    
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    let file_path = data_dir.join(&filename);
+    
+    // Write file
+    std::fs::write(&file_path, &bytes).map_err(|e| e.to_string())?;
+    
+    // Return relative path
+    Ok(format!("images/{}", filename))
+}
+
+/// Upload image for an entity
+pub async fn image_upload(db: &Database, input: ImageUploadInput) -> LibsqlResult<Image> {
+    // Save file
+    let path = save_base64_image(&input.base64, input.entity_type.as_str(), input.entity_id).await
+        .map_err(|e| libsql::Error::Misuse(e))?;
+    
+    let conn = db.connect()?;
+    
+    // If this is primary, unset other primary images for this entity
+    if true { // Always set as primary for now, or add is_primary to input
+        conn.execute(
+            "UPDATE images SET is_primary = 0 WHERE entity_type = ?1 AND entity_id = ?2",
+            params![input.entity_type.as_str(), input.entity_id],
+        ).await?;
+    }
+    
+    conn.execute(
+        "INSERT INTO images (entity_type, entity_id, path, mime_type, is_primary) VALUES (?1, ?2, ?3, ?4, 1)",
+        params![input.entity_type.as_str(), input.entity_id, path, input.mime_type],
+    ).await?;
+    
+    let id = conn.last_insert_rowid();
+    let mut rows = conn.query(
+        "SELECT id, entity_type, entity_id, path, mime_type, is_primary, created_at FROM images WHERE id = ?1",
+        params![id],
+    ).await?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    
+    row_to_image(&row)
+}
+
+/// Delete image
+pub async fn image_delete(db: &Database, id: i64) -> LibsqlResult<()> {
+    let conn = db.connect()?;
+    
+    // Get path first to delete file
+    let mut rows = conn.query("SELECT path FROM images WHERE id = ?1", params![id]).await?;
+    if let Some(row) = rows.next().await? {
+        let path: String = row.get(0)?;
+        // Try to delete file (ignore errors)
+        if let Some(data_dir) = dirs::data_dir() {
+            let _ = std::fs::remove_file(data_dir.join("mise").join(&path));
+        }
+    }
+    
+    conn.execute("DELETE FROM images WHERE id = ?1", params![id]).await?;
+    Ok(())
+}
+
+/// Set image as primary
+pub async fn image_set_primary(db: &Database, id: i64) -> LibsqlResult<Image> {
+    let conn = db.connect()?;
+    
+    // Get the image first
+    let mut rows = conn.query(
+        "SELECT id, entity_type, entity_id FROM images WHERE id = ?1",
+        params![id],
+    ).await?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    let entity_type: String = row.get(1)?;
+    let entity_id: i64 = row.get(2)?;
+    
+    // Unset other primary images
+    conn.execute(
+        "UPDATE images SET is_primary = 0 WHERE entity_type = ?1 AND entity_id = ?2",
+        params![entity_type, entity_id],
+    ).await?;
+    
+    // Set this as primary
+    conn.execute(
+        "UPDATE images SET is_primary = 1 WHERE id = ?1",
+        params![id],
+    ).await?;
+    
+    // Return updated image
+    let mut rows = conn.query(
+        "SELECT id, entity_type, entity_id, path, mime_type, is_primary, created_at FROM images WHERE id = ?1",
+        params![id],
+    ).await?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    
+    row_to_image(&row)
+}
+
+/// Get images for an entity
+pub async fn image_get(db: &Database, entity_type: ImageEntityType, entity_id: i64) -> LibsqlResult<Vec<Image>> {
+    let conn = db.connect()?;
+    let mut rows = conn.query(
+        "SELECT id, entity_type, entity_id, path, mime_type, is_primary, created_at FROM images WHERE entity_type = ?1 AND entity_id = ?2 ORDER BY is_primary DESC, created_at DESC",
+        params![entity_type.as_str(), entity_id],
+    ).await?;
+    
+    let mut images = Vec::new();
+    while let Some(row) = rows.next().await? {
+        images.push(row_to_image(&row)?);
+    }
+    Ok(images)
+}
+
+/// Proxy search images from Unsplash
+async fn search_unsplash(query: &str, per_page: u32) -> Result<Vec<ProxyImageResult>, String> {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "https://api.unsplash.com/search/photos?query={}&per_page={}&client_id={}",
+        urlencoding::encode(query),
+        per_page,
+        std::env::var("UNSPLASH_ACCESS_KEY").unwrap_or_default()
+    );
+    
+    if std::env::var("UNSPLASH_ACCESS_KEY").is_err() {
+        return Ok(Vec::new()); // No API key, return empty
+    }
+    
+    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    
+    let mut results = Vec::new();
+    if let Some(photos) = json["results"].as_array() {
+        for photo in photos {
+            results.push(ProxyImageResult {
+                id: photo["id"].as_str().unwrap_or("").to_string(),
+                url: photo["urls"]["regular"].as_str().unwrap_or("").to_string(),
+                thumb_url: photo["urls"]["thumb"].as_str().unwrap_or("").to_string(),
+                width: photo["width"].as_u64().unwrap_or(0) as u32,
+                height: photo["height"].as_u64().unwrap_or(0) as u32,
+                alt: photo["alt_description"].as_str().map(|s| s.to_string()),
+                photographer: photo["user"]["name"].as_str().map(|s| s.to_string()),
+                source: "unsplash".to_string(),
+            });
+        }
+    }
+    Ok(results)
+}
+
+/// Proxy search images from Pexels
+async fn search_pexels(query: &str, per_page: u32) -> Result<Vec<ProxyImageResult>, String> {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "https://api.pexels.com/v1/search?query={}&per_page={}",
+        urlencoding::encode(query),
+        per_page
+    );
+    
+    let api_key = match std::env::var("PEXELS_API_KEY") {
+        Ok(k) => k,
+        Err(_) => return Ok(Vec::new()), // No API key, return empty
+    };
+    
+    let resp = client
+        .get(&url)
+        .header("Authorization", api_key)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    
+    let mut results = Vec::new();
+    if let Some(photos) = json["photos"].as_array() {
+        for photo in photos {
+            results.push(ProxyImageResult {
+                id: photo["id"].as_u64().unwrap_or(0).to_string(),
+                url: photo["src"]["large"].as_str().unwrap_or("").to_string(),
+                thumb_url: photo["src"]["medium"].as_str().unwrap_or("").to_string(),
+                width: photo["width"].as_u64().unwrap_or(0) as u32,
+                height: photo["height"].as_u64().unwrap_or(0) as u32,
+                alt: photo["alt"].as_str().map(|s| s.to_string()),
+                photographer: photo["photographer"].as_str().map(|s| s.to_string()),
+                source: "pexels".to_string(),
+            });
+        }
+    }
+    Ok(results)
+}
+
+/// Search images from free stock photo APIs
+pub async fn image_search_proxy(query: String, per_page: Option<u32>) -> Result<Vec<ProxyImageResult>, String> {
+    let per_page = per_page.unwrap_or(20).min(30);
+    let mut results = Vec::new();
+    
+    // Search both in parallel
+    let (unsplash_results, pexels_results) = tokio::join!(
+        search_unsplash(&query, per_page),
+        search_pexels(&query, per_page)
+    );
+    
+    results.extend(unsplash_results.unwrap_or_default());
+    results.extend(pexels_results.unwrap_or_default());
+    
+    // Shuffle to mix sources
+    use rand::seq::SliceRandom;
+    let mut rng = rand::rng();
+    results.shuffle(&mut rng);
+    
+    results.truncate(per_page as usize);
+    Ok(results)
+}
+
+// =====================================================================
+// STOCK PURCHASES
+// =====================================================================
+
+/// Map a libsql Row to StockPurchase
+fn row_to_stock_purchase(row: &Row) -> LibsqlResult<StockPurchase> {
+    let unit_str: String = row.get(3)?;
+    let unit = match unit_str.as_str() {
+        "gram" => Unit::Gram,
+        "kilogram" => Unit::Kilogram,
+        "milligram" => Unit::Milligram,
+        "ounce" => Unit::Ounce,
+        "pound" => Unit::Pound,
+        "milliliter" => Unit::Milliliter,
+        "liter" => Unit::Liter,
+        "fluid_ounce" => Unit::FluidOunce,
+        "cup" => Unit::Cup,
+        "pint" => Unit::Pint,
+        "quart" => Unit::Quart,
+        "gallon" => Unit::Gallon,
+        "teaspoon" => Unit::Teaspoon,
+        "tablespoon" => Unit::Tablespoon,
+        "piece" => Unit::Piece,
+        "dozen" => Unit::Dozen,
+        "pinch" => Unit::Pinch,
+        "bunch" => Unit::Bunch,
+        "clove" => Unit::Clove,
+        "slice" => Unit::Slice,
+        _ => Unit::Gram,
+    };
+    
+    let ingredient_unit_str: String = row.get(4)?;
+    let ingredient_unit = match ingredient_unit_str.as_str() {
+        "gram" => Unit::Gram,
+        "kilogram" => Unit::Kilogram,
+        "milligram" => Unit::Milligram,
+        "ounce" => Unit::Ounce,
+        "pound" => Unit::Pound,
+        "milliliter" => Unit::Milliliter,
+        "liter" => Unit::Liter,
+        "fluid_ounce" => Unit::FluidOunce,
+        "cup" => Unit::Cup,
+        "pint" => Unit::Pint,
+        "quart" => Unit::Quart,
+        "gallon" => Unit::Gallon,
+        "teaspoon" => Unit::Teaspoon,
+        "tablespoon" => Unit::Tablespoon,
+        "piece" => Unit::Piece,
+        "dozen" => Unit::Dozen,
+        "pinch" => Unit::Pinch,
+        "bunch" => Unit::Bunch,
+        "clove" => Unit::Clove,
+        "slice" => Unit::Slice,
+        _ => Unit::Gram,
+    };
+
+    let purchase_date_str: String = row.get(8)?;
+    let purchase_date = DateTime::parse_from_rfc3339(&purchase_date_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+    
+    let created_at_str: String = row.get(12)?;
+    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+
+    Ok(StockPurchase {
+        id: row.get(0)?,
+        ingredient_id: row.get(1)?,
+        ingredient_name: row.get(2)?,
+        ingredient_unit,
+        quantity: row.get(3)?,
+        unit,
+        price_per_unit: row.get(5)?,
+        total_price: row.get(6)?,
+        is_discount: row.get(7)?,
+        discount_percent: row.get(8)?,
+        purchase_date,
+        supplier_id: row.get(9)?,
+        supplier_name: row.get(10)?,
+        notes: row.get(11)?,
+        created_at,
+    })
+}
+
+/// Add stock purchase (records purchase history, updates stock quantity only)
+pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> LibsqlResult<StockPurchase> {
+    let conn = db.connect()?;
+    
+    let unit_str = match input.unit {
+        Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
+        Unit::Ounce => "ounce", Unit::Pound => "pound",
+        Unit::Milliliter => "milliliter", Unit::Liter => "liter", Unit::FluidOunce => "fluid_ounce",
+        Unit::Cup => "cup", Unit::Pint => "pint", Unit::Quart => "quart", Unit::Gallon => "gallon",
+        Unit::Teaspoon => "teaspoon", Unit::Tablespoon => "tablespoon",
+        Unit::Piece => "piece", Unit::Dozen => "dozen",
+        Unit::Pinch => "pinch", Unit::Bunch => "bunch", Unit::Clove => "clove", Unit::Slice => "slice",
+    };
+    
+    // Get ingredient name and unit for denormalization
+    let mut rows = conn.query(
+        "SELECT name, unit FROM ingredients WHERE id = ?1",
+        params![input.ingredient_id],
+    ).await?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    let ingredient_name: String = row.get(0)?;
+    let ingredient_unit_str: String = row.get(1)?;
+    let ingredient_unit = match ingredient_unit_str.as_str() {
+        "gram" => Unit::Gram, "kilogram" => Unit::Kilogram, "milligram" => Unit::Milligram,
+        "ounce" => Unit::Ounce, "pound" => Unit::Pound,
+        "milliliter" => Unit::Milliliter, "liter" => Unit::Liter, "fluid_ounce" => Unit::FluidOunce,
+        "cup" => Unit::Cup, "pint" => Unit::Pint, "quart" => Unit::Quart, "gallon" => Unit::Gallon,
+        "teaspoon" => Unit::Teaspoon, "tablespoon" => Unit::Tablespoon,
+        "piece" => Unit::Piece, "dozen" => Unit::Dozen,
+        "pinch" => Unit::Pinch, "bunch" => Unit::Bunch, "clove" => Unit::Clove, "slice" => Unit::Slice,
+        _ => Unit::Gram,
+    };
+    
+    // Get supplier name if provided
+    let supplier_name = if let Some(supplier_id) = input.supplier_id {
+        let mut rows = conn.query("SELECT name FROM suppliers WHERE id = ?1", params![supplier_id]).await?;
+        rows.next().await?.map(|r| r.get::<String>(0).unwrap_or_default())
+    } else {
+        None
+    };
+    
+    // Insert stock purchase
+    conn.execute(
+        r#"
+        INSERT INTO stock_purchases 
+        (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date, supplier_id, notes)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        "#,
+        params![
+            input.ingredient_id,
+            input.quantity,
+            unit_str,
+            input.price_per_unit,
+            input.total_price,
+            input.is_discount as i32,
+            input.discount_percent,
+            input.purchase_date.to_rfc3339(),
+            input.supplier_id,
+            input.notes,
+        ],
+    ).await?;
+    
+    // Update stock quantity (add purchased quantity)
+    conn.execute(
+        "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 0, datetime('now'))
+         ON CONFLICT(ingredient_id) DO UPDATE SET quantity = quantity + ?4, updated_at = datetime('now')",
+        params![input.ingredient_id, ingredient_name, ingredient_unit_str, input.quantity],
+    ).await?;
+    
+    let id = conn.last_insert_rowid();
+    let mut rows = conn.query(
+        r#"
+        SELECT sp.id, sp.ingredient_id, i.name, i.unit, sp.quantity, sp.unit, sp.price_per_unit, sp.total_price,
+               sp.is_discount, sp.discount_percent, sp.purchase_date, sp.supplier_id, s.name, sp.notes, sp.created_at
+        FROM stock_purchases sp
+        JOIN ingredients i ON sp.ingredient_id = i.id
+        LEFT JOIN suppliers s ON sp.supplier_id = s.id
+        WHERE sp.id = ?1
+        "#,
+        params![id],
+    ).await?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    
+    row_to_stock_purchase(&row)
+}
+
+/// List stock purchases for an ingredient
+pub async fn stock_purchases_list(db: &Database, ingredient_id: i64) -> LibsqlResult<Vec<StockPurchase>> {
+    let conn = db.connect()?;
+    let mut rows = conn.query(
+        r#"
+        SELECT sp.id, sp.ingredient_id, i.name, i.unit, sp.quantity, sp.unit, sp.price_per_unit, sp.total_price,
+               sp.is_discount, sp.discount_percent, sp.purchase_date, sp.supplier_id, s.name, sp.notes, sp.created_at
+        FROM stock_purchases sp
+        JOIN ingredients i ON sp.ingredient_id = i.id
+        LEFT JOIN suppliers s ON sp.supplier_id = s.id
+        WHERE sp.ingredient_id = ?1
+        ORDER BY sp.purchase_date DESC
+        "#,
+        params![ingredient_id],
+    ).await?;
+    
+    let mut purchases = Vec::new();
+    while let Some(row) = rows.next().await? {
+        purchases.push(row_to_stock_purchase(&row)?);
+    }
+    Ok(purchases)
+}
+
+/// Delete stock purchase (does NOT revert stock quantity - manual adjustment needed)
+pub async fn stock_purchase_delete(db: &Database, id: i64) -> LibsqlResult<()> {
+    let conn = db.connect()?;
+    conn.execute("DELETE FROM stock_purchases WHERE id = ?1", params![id]).await?;
+    Ok(())
+}
+
+// =====================================================================
+// RECEIPT OCR
+// =====================================================================
+
+/// Map a libsql Row to ReceiptImport
+fn row_to_receipt_import(row: &Row) -> LibsqlResult<ReceiptImport> {
+    let status_str: String = row.get(4)?;
+    let status = match status_str.as_str() {
+        "pending" => ReceiptStatus::Pending,
+        "scanned" => ReceiptStatus::Scanned,
+        "parsed" => ReceiptStatus::Parsed,
+        "confirmed" => ReceiptStatus::Confirmed,
+        "failed" => ReceiptStatus::Failed,
+        _ => ReceiptStatus::Pending,
+    };
+
+    let created_at_str: String = row.get(5)?;
+    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+
+    Ok(ReceiptImport {
+        id: row.get(0)?,
+        image_path: row.get(1)?,
+        raw_text: row.get(2)?,
+        parsed_json: row.get(3)?,
+        status,
+        created_at,
+    })
+}
+
+/// Save base64 image for receipt and return path
+async fn save_receipt_image(base64: &str) -> Result<String, String> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use std::path::PathBuf;
+    use dirs;
+
+    let bytes = STANDARD.decode(base64).map_err(|e| e.to_string())?;
+    
+    let ext = if bytes.starts_with(b"\xFF\xD8\xFF") { "jpg" }
+    else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") { "png" }
+    else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") { "gif" }
+    else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") { "webp" }
+    else { "jpg" };
+
+    let filename = format!("receipt_{}.{}", chrono::Utc::now().timestamp_millis(), ext);
+    
+    let data_dir = if let Some(dir) = dirs::data_dir() {
+        dir.join("mise").join("images")
+    } else {
+        std::env::current_dir().map_err(|e| e.to_string())?.join(".mise_data").join("images")
+    };
+    
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    let file_path = data_dir.join(&filename);
+    
+    std::fs::write(&file_path, &bytes).map_err(|e| e.to_string())?;
+    
+    Ok(format!("images/{}", filename))
+}
+
+/// Scan receipt image with Tesseract OCR
+pub async fn receipt_scan(db: &Database, input: ReceiptScanInput) -> LibsqlResult<ReceiptParseResult> {
+    // Save image
+    let image_path = save_receipt_image(&input.base64_image).await
+        .map_err(|e| libsql::Error::Misuse(e))?;
+    
+    // Create import record
+    let conn = db.connect()?;
+    conn.execute(
+        "INSERT INTO receipt_imports (image_path, status) VALUES (?1, 'scanned')",
+        params![image_path.clone()],
+    ).await?;
+    let import_id = conn.last_insert_rowid();
+    
+    // Run Tesseract OCR
+    let data_dir = if let Some(dir) = dirs::data_dir() {
+        dir.join("mise")
+    } else {
+        std::env::current_dir().map_err(|e| libsql::Error::Misuse(e.to_string()))?.join(".mise_data")
+    };
+    let full_image_path = data_dir.join(&image_path);
+    
+    // Use tesseract command line
+    let output = tokio::process::Command::new("tesseract")
+        .arg(&full_image_path)
+        .arg("stdout")
+        .arg("-l")
+        .arg("por+eng") // Portuguese + English
+        .output()
+        .await;
+    
+    let raw_text = match output {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).to_string(),
+        Ok(out) => {
+            let err = String::from_utf8_lossy(&out.stderr);
+            // Update status to failed
+            conn.execute("UPDATE receipt_imports SET status = 'failed', raw_text = ?1 WHERE id = ?2", params![err.to_string(), import_id]).await?;
+            return Err(libsql::Error::Misuse(format!("OCR failed: {}", err)));
+        }
+        Err(e) => {
+            let err = e.to_string();
+            conn.execute("UPDATE receipt_imports SET status = 'failed', raw_text = ?1 WHERE id = ?2", params![err.clone(), import_id]).await?;
+            return Err(libsql::Error::Misuse(format!("Tesseract not found: {}", err)));
+        }
+    };
+    
+    // Update import with raw text
+    conn.execute(
+        "UPDATE receipt_imports SET raw_text = ?1, status = 'scanned' WHERE id = ?2",
+        params![raw_text.clone(), import_id],
+    ).await?;
+    
+    // Parse the raw text
+    let items = parse_receipt_text(&raw_text).await;
+    
+    // Update with parsed items
+    let parsed_json = serde_json::to_string(&items).unwrap_or_default();
+    conn.execute(
+        "UPDATE receipt_imports SET parsed_json = ?1, status = 'parsed' WHERE id = ?2",
+        params![parsed_json, import_id],
+    ).await?;
+    
+    Ok(ReceiptParseResult {
+        import_id,
+        raw_text,
+        items,
+    })
+}
+
+/// Parse receipt text using regex heuristics
+async fn parse_receipt_text(text: &str) -> Vec<ParsedReceiptItem> {
+    let mut items = Vec::new();
+    let lines: Vec<&str> = text.lines().collect();
+    
+    // Common patterns for receipts:
+    // "Item Name    2 x 1.50    3.00"
+    // "Item Name              3.00"
+    // "2 UN x 1.50 EUR = 3.00"
+    
+    // Regex patterns for quantity, unit, price
+    let price_regex = regex::Regex::new(r"(\d+[.,]\d{2})\s*(?:EUR|€|\$|R\$)?").unwrap();
+    let qty_unit_regex = regex::Regex::new(r"(\d+[.,]?\d*)\s*(?:x|X|UN|UNID|KG|G|L|ML|PCS|PÇ)?").unwrap();
+    let discount_regex = regex::Regex::new(r"(?:DESC|DESCONTO|DISCOUNT|%)\s*(\d+[.,]?\d*)%?").unwrap();
+    
+    // Get ingredient names for fuzzy matching
+    // This would need DB access - for now we just parse without matching
+    
+    for line in lines {
+        let line = line.trim();
+        if line.is_empty() || line.len() < 3 {
+            continue;
+        }
+        
+        // Skip common receipt header/footer lines
+        let lower = line.to_lowercase();
+        if lower.contains("total") || lower.contains("subtotal") || lower.contains("troco") 
+            || lower.contains("change") || lower.contains("vlr") || lower.contains("valor")
+            || lower.contains("pagamento") || lower.contains("cartao") || lower.contains("dinheiro")
+            || lower.contains("multibanco") || lower.contains("mb way") || lower.contains("iva")
+            || lower.contains("tax") || lower.contains("receipt") || lower.contains("cupom")
+            || lower.contains("nota fiscal") || lower.contains("data") || lower.contains("hora")
+            || lower.contains("caixa") || lower.contains("operador") || lower.contains("nif")
+            || lower.contains("contribuinte") {
+            continue;
+        }
+        
+        // Try to extract price (usually at end of line)
+        let price_matches: Vec<_> = price_regex.find_iter(line).collect();
+        if price_matches.is_empty() {
+            continue; // No price found, likely not an item line
+        }
+        
+        // Use the last price match as the line total
+        let total_price_str = price_matches.last().unwrap().as_str();
+        let total_price = total_price_str.replace(',', ".").parse::<f64>().unwrap_or(0.0);
+        if total_price <= 0.0 {
+            continue;
+        }
+        
+        // Extract item name (text before the price/quantity)
+        let price_pos = line.rfind(total_price_str).unwrap_or(line.len());
+        let item_part = &line[..price_pos].trim();
+        
+        // Try to find quantity x unit price pattern
+        let mut quantity = 1.0;
+        let mut unit = Unit::Piece;
+        let mut price_per_unit = total_price;
+        let mut is_discount = false;
+        let mut discount_percent = 0.0;
+        
+        // Look for qty x price pattern in item_part
+        if let Some(caps) = qty_unit_regex.captures(item_part) {
+            if let Some(qty_match) = caps.get(1) {
+                quantity = qty_match.as_str().replace(',', ".").parse::<f64>().unwrap_or(1.0);
+            }
+        }
+        
+        // Look for unit in item_part
+        let item_lower = item_part.to_lowercase();
+        if item_lower.contains("kg") || item_lower.contains("quilo") { unit = Unit::Kilogram; }
+        else if item_lower.contains("g ") || item_lower.ends_with("g") || item_lower.contains("gr ") { unit = Unit::Gram; }
+        else if item_lower.contains("l ") || item_lower.ends_with("l") || item_lower.contains("litro") { unit = Unit::Liter; }
+        else if item_lower.contains("ml") { unit = Unit::Milliliter; }
+        else if item_lower.contains("un") || item_lower.contains("pcs") || item_lower.contains("peça") { unit = Unit::Piece; }
+        
+        // Calculate price per unit
+        if quantity > 0.0 {
+            price_per_unit = total_price / quantity;
+        }
+        
+        // Check for discount
+        if discount_regex.is_match(line) {
+            is_discount = true;
+            if let Some(caps) = discount_regex.captures(line) {
+                if let Some(pct_match) = caps.get(1) {
+                    discount_percent = pct_match.as_str().replace(',', ".").parse::<f64>().unwrap_or(0.0);
+                }
+            }
+        }
+        
+        // Clean item name - remove qty/price parts
+        let mut ingredient_name = item_part.to_string();
+        // Remove trailing numbers, x, prices
+        ingredient_name = price_regex.replace_all(&ingredient_name, "").to_string();
+        ingredient_name = qty_unit_regex.replace_all(&ingredient_name, "").to_string();
+        ingredient_name = discount_regex.replace_all(&ingredient_name, "").to_string();
+        ingredient_name = ingredient_name.trim_matches(|c: char| c.is_ascii_punctuation() || c.is_whitespace()).to_string();
+        
+        if ingredient_name.len() < 2 {
+            continue;
+        }
+        
+        // Try to match with existing ingredients (fuzzy match)
+        // This would require DB access - placeholder for now
+        let matched_ingredient_id = None;
+        let confidence = if matched_ingredient_id.is_some() { 0.9 } else { 0.5 };
+        
+        items.push(ParsedReceiptItem {
+            ingredient_name,
+            quantity,
+            unit,
+            price_per_unit,
+            total_price,
+            is_discount,
+            discount_percent,
+            matched_ingredient_id,
+            confidence,
+            notes: None,
+        });
+    }
+    
+    items
+}
+
+/// Parse raw receipt text (for re-parsing)
+pub async fn receipt_parse(db: &Database, raw_text: String) -> LibsqlResult<Vec<ParsedReceiptItem>> {
+    let items = parse_receipt_text(&raw_text).await;
+    Ok(items)
+}
+
+/// Confirm receipt import - creates stock purchases and ingredients
+pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> LibsqlResult<Vec<StockPurchase>> {
+    let conn = db.connect()?;
+    
+    // Get the import record
+    let mut rows = conn.query(
+        "SELECT id, image_path, raw_text, parsed_json, status FROM receipt_imports WHERE id = ?1",
+        params![input.import_id],
+    ).await?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    let status_str: String = row.get(4)?;
+    let status = match status_str.as_str() {
+        "pending" => ReceiptStatus::Pending,
+        "scanned" => ReceiptStatus::Scanned,
+        "parsed" => ReceiptStatus::Parsed,
+        "confirmed" => ReceiptStatus::Confirmed,
+        "failed" => ReceiptStatus::Failed,
+        _ => ReceiptStatus::Pending,
+    };
+    
+    if status == ReceiptStatus::Confirmed {
+        return Err(libsql::Error::Misuse("Receipt already confirmed".to_string()));
+    }
+    
+    let mut created_purchases = Vec::new();
+    
+    for item in &input.items {
+        // Find or create ingredient
+        let ingredient_id = if let Some(matched_id) = item.matched_ingredient_id {
+            // Verify ingredient exists
+            let mut rows = conn.query("SELECT id FROM ingredients WHERE id = ?1", params![matched_id]).await?;
+            if rows.next().await?.is_some() {
+                matched_id
+            } else {
+                // Create new ingredient
+                create_or_find_ingredient(&conn, &item.ingredient_name, item.unit).await?
+            }
+        } else {
+            create_or_find_ingredient(&conn, &item.ingredient_name, item.unit).await?
+        };
+        
+        // Get ingredient details
+        let mut rows = conn.query("SELECT name, unit FROM ingredients WHERE id = ?1", params![ingredient_id]).await?;
+        let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+        let ingredient_name: String = row.get(0)?;
+        let ingredient_unit_str: String = row.get(1)?;
+        let ingredient_unit = match ingredient_unit_str.as_str() {
+            "gram" => Unit::Gram, "kilogram" => Unit::Kilogram, "milligram" => Unit::Milligram,
+            "ounce" => Unit::Ounce, "pound" => Unit::Pound,
+            "milliliter" => Unit::Milliliter, "liter" => Unit::Liter, "fluid_ounce" => Unit::FluidOunce,
+            "cup" => Unit::Cup, "pint" => Unit::Pint, "quart" => Unit::Quart, "gallon" => Unit::Gallon,
+            "teaspoon" => Unit::Teaspoon, "tablespoon" => Unit::Tablespoon,
+            "piece" => Unit::Piece, "dozen" => Unit::Dozen,
+            "pinch" => Unit::Pinch, "bunch" => Unit::Bunch, "clove" => Unit::Clove, "slice" => Unit::Slice,
+            _ => Unit::Gram,
+        };
+        
+        // Convert unit string for purchase
+        let unit_str = match item.unit {
+            Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
+            Unit::Ounce => "ounce", Unit::Pound => "pound",
+            Unit::Milliliter => "milliliter", Unit::Liter => "liter", Unit::FluidOunce => "fluid_ounce",
+            Unit::Cup => "cup", Unit::Pint => "pint", Unit::Quart => "quart", Unit::Gallon => "gallon",
+            Unit::Teaspoon => "teaspoon", Unit::Tablespoon => "tablespoon",
+            Unit::Piece => "piece", Unit::Dozen => "dozen",
+            Unit::Pinch => "pinch", Unit::Bunch => "bunch", Unit::Clove => "clove", Unit::Slice => "slice",
+        };
+        
+        // Insert stock purchase
+        let purchase_date = chrono::Utc::now(); // Could parse from receipt but using now
+        conn.execute(
+            r#"
+            INSERT INTO stock_purchases 
+            (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date, notes)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "#,
+            params![
+                ingredient_id,
+                item.quantity,
+                unit_str,
+                item.price_per_unit,
+                item.total_price,
+                item.is_discount as i32,
+                item.discount_percent,
+                purchase_date.to_rfc3339(),
+                input.items.iter().find(|i| i.ingredient_name == item.ingredient_name).and_then(|i| i.notes.clone()),
+            ],
+        ).await?;
+        
+        // Update stock quantity
+        conn.execute(
+            "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 0, datetime('now'))
+             ON CONFLICT(ingredient_id) DO UPDATE SET quantity = quantity + ?4, updated_at = datetime('now')",
+            params![ingredient_id, ingredient_name, ingredient_unit_str, item.quantity],
+        ).await?;
+        
+        let purchase_id = conn.last_insert_rowid();
+        
+        // Return created purchase
+        let mut rows = conn.query(
+            r#"
+            SELECT sp.id, sp.ingredient_id, i.name, i.unit, sp.quantity, sp.unit, sp.price_per_unit, sp.total_price,
+                   sp.is_discount, sp.discount_percent, sp.purchase_date, sp.supplier_id, s.name, sp.notes, sp.created_at
+            FROM stock_purchases sp
+            JOIN ingredients i ON sp.ingredient_id = i.id
+            LEFT JOIN suppliers s ON sp.supplier_id = s.id
+            WHERE sp.id = ?1
+            "#,
+            params![purchase_id],
+        ).await?;
+        let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+        created_purchases.push(row_to_stock_purchase(&row)?);
+    }
+    
+    // Mark import as confirmed
+    conn.execute(
+        "UPDATE receipt_imports SET status = 'confirmed' WHERE id = ?1",
+        params![input.import_id],
+    ).await?;
+    
+    Ok(created_purchases)
+}
+
+/// Helper to find or create ingredient by name
+async fn create_or_find_ingredient(conn: &Connection, name: &str, unit: Unit) -> LibsqlResult<i64> {
+    let mut rows = conn.query("SELECT id FROM ingredients WHERE lower(name) = lower(?1)", params![name]).await?;
+    if let Some(row) = rows.next().await? {
+        return Ok(row.get(0)?);
+    }
+    
+    let unit_str = match unit {
+        Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
+        Unit::Ounce => "ounce", Unit::Pound => "pound",
+        Unit::Milliliter => "milliliter", Unit::Liter => "liter", Unit::FluidOunce => "fluid_ounce",
+        Unit::Cup => "cup", Unit::Pint => "pint", Unit::Quart => "quart", Unit::Gallon => "gallon",
+        Unit::Teaspoon => "teaspoon", Unit::Tablespoon => "tablespoon",
+        Unit::Piece => "piece", Unit::Dozen => "dozen",
+        Unit::Pinch => "pinch", Unit::Bunch => "bunch", Unit::Clove => "clove", Unit::Slice => "slice",
+    };
+    
+    conn.execute(
+        "INSERT INTO ingredients (name, unit, price_per_unit, favorite) VALUES (?1, ?2, 0, 0)",
+        params![name, unit_str],
+    ).await?;
+    
+    Ok(conn.last_insert_rowid())
 }
 
 // Input types for categories and price quotes

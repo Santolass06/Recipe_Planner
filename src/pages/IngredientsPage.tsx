@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import IngredientAvatar from "../components/IngredientAvatar";
+import ImageUpload from "../components/ImageUpload";
 
 interface Ingredient {
   id: number;
@@ -292,6 +293,14 @@ export default function IngredientsPage() {
                     price_per_unit: parseFloat(e.target.value) || 0
                   }))}
                   placeholder="0.00"
+                />
+              </div>
+
+              <div className="field">
+                <label className="field-label">Imagem do ingrediente</label>
+                <ImageUpload
+                  entityType="ingredient"
+                  entityId={editing?.id ?? 0}
                 />
               </div>
             </div>

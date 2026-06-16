@@ -8,6 +8,7 @@ use libsql::Database;
 use tauri::Manager;
 use tauri::path::BaseDirectory;
 use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 
 /// Database connection wrapper for Tauri state
 pub struct AppDb {
@@ -348,6 +349,53 @@ impl AppDb {
 
     pub async fn get_price_trends(&self, ingredient_id: i64, days: u32) -> Result<Vec<PricePoint>, String> {
         mise_core::db::get_price_trends(&self.db, ingredient_id, days).await.map_err(|e| e.to_string())
+    }
+
+    // ===== IMAGES =====
+    pub async fn image_upload(&self, input: ImageUploadInput) -> Result<Image, String> {
+        mise_core::db::image_upload(&self.db, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn image_delete(&self, id: i64) -> Result<(), String> {
+        mise_core::db::image_delete(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn image_set_primary(&self, id: i64) -> Result<Image, String> {
+        mise_core::db::image_set_primary(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn image_get(&self, entity_type: ImageEntityType, entity_id: i64) -> Result<Vec<Image>, String> {
+        mise_core::db::image_get(&self.db, entity_type, entity_id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn image_search_proxy(&self, query: String, per_page: Option<u32>) -> Result<Vec<ProxyImageResult>, String> {
+        mise_core::db::image_search_proxy(query, per_page).await.map_err(|e| e.to_string())
+    }
+
+    // ===== STOCK PURCHASES =====
+    pub async fn stock_purchase_add(&self, input: StockPurchaseInput) -> Result<StockPurchase, String> {
+        mise_core::db::stock_purchase_add(&self.db, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn stock_purchases_list(&self, ingredient_id: i64) -> Result<Vec<StockPurchase>, String> {
+        mise_core::db::stock_purchases_list(&self.db, ingredient_id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn stock_purchase_delete(&self, id: i64) -> Result<(), String> {
+        mise_core::db::stock_purchase_delete(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    // ===== RECEIPT OCR =====
+    pub async fn receipt_scan(&self, input: ReceiptScanInput) -> Result<ReceiptParseResult, String> {
+        mise_core::db::receipt_scan(&self.db, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn receipt_parse(&self, raw_text: String) -> Result<Vec<ParsedReceiptItem>, String> {
+        mise_core::db::receipt_parse(&self.db, raw_text).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn receipt_confirm(&self, input: ReceiptConfirmInput) -> Result<Vec<StockPurchase>, String> {
+        mise_core::db::receipt_confirm(&self.db, input).await.map_err(|e| e.to_string())
     }
 }
 
@@ -1002,6 +1050,99 @@ pub mod commands {
         days: u32,
     ) -> Result<Vec<PricePoint>, String> {
         db.get_price_trends(ingredient_id, days).await
+    }
+
+    // ===== IMAGES =====
+    #[tauri::command]
+    pub async fn image_upload(
+        db: tauri::State<'_, crate::AppDb>,
+        input: ImageUploadInput,
+    ) -> Result<Image, String> {
+        db.image_upload(input).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn image_delete(
+        db: tauri::State<'_, crate::AppDb>,
+        id: i64,
+    ) -> Result<(), String> {
+        db.image_delete(id).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn image_set_primary(
+        db: tauri::State<'_, crate::AppDb>,
+        id: i64,
+    ) -> Result<Image, String> {
+        db.image_set_primary(id).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn image_get(
+        db: tauri::State<'_, crate::AppDb>,
+        entity_type: ImageEntityType,
+        entity_id: i64,
+    ) -> Result<Vec<Image>, String> {
+        db.image_get(entity_type, entity_id).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn image_search_proxy(
+        db: tauri::State<'_, crate::AppDb>,
+        query: String,
+        per_page: Option<u32>,
+    ) -> Result<Vec<ProxyImageResult>, String> {
+        db.image_search_proxy(query, per_page).await.map_err(|e| e.to_string())
+    }
+
+    // ===== STOCK PURCHASES =====
+    #[tauri::command]
+    pub async fn stock_purchase_add(
+        db: tauri::State<'_, crate::AppDb>,
+        input: StockPurchaseInput,
+    ) -> Result<StockPurchase, String> {
+        db.stock_purchase_add(input).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn stock_purchases_list(
+        db: tauri::State<'_, crate::AppDb>,
+        ingredient_id: i64,
+    ) -> Result<Vec<StockPurchase>, String> {
+        db.stock_purchases_list(ingredient_id).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn stock_purchase_delete(
+        db: tauri::State<'_, crate::AppDb>,
+        id: i64,
+    ) -> Result<(), String> {
+        db.stock_purchase_delete(id).await.map_err(|e| e.to_string())
+    }
+
+    // ===== RECEIPT OCR =====
+    #[tauri::command]
+    pub async fn receipt_scan(
+        db: tauri::State<'_, crate::AppDb>,
+        input: ReceiptScanInput,
+    ) -> Result<ReceiptParseResult, String> {
+        db.receipt_scan(input).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn receipt_parse(
+        db: tauri::State<'_, crate::AppDb>,
+        raw_text: String,
+    ) -> Result<Vec<ParsedReceiptItem>, String> {
+        db.receipt_parse(raw_text).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn receipt_confirm(
+        db: tauri::State<'_, crate::AppDb>,
+        input: ReceiptConfirmInput,
+    ) -> Result<Vec<StockPurchase>, String> {
+        db.receipt_confirm(input).await.map_err(|e| e.to_string())
     }
 }
 

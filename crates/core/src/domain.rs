@@ -897,3 +897,190 @@ pub struct PricePoint {
     pub price: f64,
     pub supplier: String,
 }
+
+/// =====================================================================
+/// IMAGES
+/// =====================================================================
+
+/// Entity type for images
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "bindings/")]
+pub enum ImageEntityType {
+    Recipe,
+    Ingredient,
+    Supplier,
+    Receipt,
+    Profile,
+}
+
+impl ImageEntityType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ImageEntityType::Recipe => "recipe",
+            ImageEntityType::Ingredient => "ingredient",
+            ImageEntityType::Supplier => "supplier",
+            ImageEntityType::Receipt => "receipt",
+            ImageEntityType::Profile => "profile",
+        }
+    }
+}
+
+/// Image record
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct Image {
+    pub id: i64,
+    pub entity_type: ImageEntityType,
+    pub entity_id: i64,
+    pub path: String,
+    pub mime_type: String,
+    pub is_primary: bool,
+    #[ts(type = "string")]
+    pub created_at: DateTime<Utc>,
+}
+
+/// Image upload input
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct ImageUploadInput {
+    pub entity_type: ImageEntityType,
+    pub entity_id: i64,
+    #[validate(length(min = 1))]
+    pub base64: String,
+    pub mime_type: String,
+}
+
+/// Proxy search result from Unsplash/Pexels
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct ProxyImageResult {
+    pub id: String,
+    pub url: String,
+    pub thumb_url: String,
+    pub width: u32,
+    pub height: u32,
+    pub alt: Option<String>,
+    pub photographer: Option<String>,
+    pub source: String, // "unsplash" | "pexels"
+}
+
+/// =====================================================================
+/// STOCK PURCHASES
+/// =====================================================================
+
+/// Stock purchase input
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct StockPurchaseInput {
+    #[validate(range(min = 1))]
+    pub ingredient_id: i64,
+    #[validate(range(min = 0.001))]
+    pub quantity: f64,
+    pub unit: Unit,
+    #[validate(range(min = 0.0))]
+    pub price_per_unit: f64,
+    #[validate(range(min = 0.0))]
+    pub total_price: f64,
+    pub is_discount: bool,
+    #[validate(range(min = 0.0, max = 100.0))]
+    pub discount_percent: f64,
+    #[ts(type = "string")]
+    pub purchase_date: DateTime<Utc>,
+    pub supplier_id: Option<i64>,
+    pub notes: Option<String>,
+}
+
+/// Stock purchase record
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct StockPurchase {
+    pub id: i64,
+    pub ingredient_id: i64,
+    pub ingredient_name: String, // denormalized
+    pub ingredient_unit: Unit,
+    pub quantity: f64,
+    pub unit: Unit,
+    pub price_per_unit: f64,
+    pub total_price: f64,
+    pub is_discount: bool,
+    pub discount_percent: f64,
+    #[ts(type = "string")]
+    pub purchase_date: DateTime<Utc>,
+    pub supplier_id: Option<i64>,
+    pub supplier_name: Option<String>, // denormalized
+    pub notes: Option<String>,
+    #[ts(type = "string")]
+    pub created_at: DateTime<Utc>,
+}
+
+/// =====================================================================
+/// RECEIPT OCR
+/// =====================================================================
+
+/// Receipt import status
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "bindings/")]
+pub enum ReceiptStatus {
+    Pending,
+    Scanned,
+    Parsed,
+    Confirmed,
+    Failed,
+}
+
+/// Receipt import record
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct ReceiptImport {
+    pub id: i64,
+    pub image_path: String,
+    pub raw_text: Option<String>,
+    pub parsed_json: Option<String>, // JSON array of ParsedReceiptItem
+    pub status: ReceiptStatus,
+    #[ts(type = "string")]
+    pub created_at: DateTime<Utc>,
+}
+
+/// Parsed item from receipt OCR
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct ParsedReceiptItem {
+    pub ingredient_name: String,
+    pub quantity: f64,
+    pub unit: Unit,
+    pub price_per_unit: f64,
+    pub total_price: f64,
+    pub is_discount: bool,
+    pub discount_percent: f64,
+    pub matched_ingredient_id: Option<i64>,
+    pub confidence: f64, // 0.0 - 1.0
+    pub notes: Option<String>,
+}
+
+/// Receipt scan input
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct ReceiptScanInput {
+    #[validate(length(min = 1))]
+    pub base64_image: String,
+}
+
+/// Receipt parse result
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct ReceiptParseResult {
+    pub import_id: i64,
+    pub raw_text: String,
+    pub items: Vec<ParsedReceiptItem>,
+}
+
+/// Receipt confirm input
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct ReceiptConfirmInput {
+    #[validate(range(min = 1))]
+    pub import_id: i64,
+    pub items: Vec<ParsedReceiptItem>, // User-corrected items
+}

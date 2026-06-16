@@ -93,6 +93,14 @@ const icons = {
       <path d="M2.05 2.05h2.5l2.5 11.5L8 21l8-1.5V5.5L4.55 3.5H3.55"/>
     </svg>
   ),
+  scanner: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+      <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+      <circle cx="12" cy="12" r="3"/>
+      <line x1="12" y1="16" x2="12.01" y2="16"/>
+    </svg>
+  ),
   calendar: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
@@ -140,7 +148,7 @@ const navGroups = [
     label: "Ferramentas",
     items: [
       { to: "/compras", icon: icons.shopping, label: "Lista de Compras" },
-      { to: "/importador", icon: icons.upload, label: "Importar JSON" },
+      { to: "/scanner", icon: icons.scanner, label: "Scanner Talões" },
       { to: "/definicoes", icon: icons.gear, label: "Definições" },
       { to: "/ajuda", icon: icons.help, label: "Ajuda & Docs" },
     ],

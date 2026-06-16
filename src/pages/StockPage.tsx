@@ -17,6 +17,30 @@ interface Ingredient {
   price_per_unit: number;
 }
 
+interface Supplier {
+  id: number;
+  name: string;
+  contact?: string;
+  notes?: string;
+}
+
+interface StockPurchase {
+  id: number;
+  ingredient_id: number;
+  ingredient_name: string;
+  ingredient_unit: string;
+  quantity: number;
+  unit: string;
+  price_per_unit: number;
+  total_price: number;
+  is_discount: boolean;
+  discount_percent: number;
+  purchase_date: string;
+  supplier_id?: number;
+  supplier_name?: string;
+  notes?: string;
+}
+
 const UNIT_LABELS: Record<string, string> = {
   gram: "g — Grama", kilogram: "kg — Quilograma", milligram: "mg — Miligrama",
   ounce: "oz — Onça", pound: "lb — Libra", pinch: "pitada — Pitada",
@@ -39,9 +63,37 @@ const getStatus = (quantity: number, min: number) => {
 export default function StockPage() {
   const [stock, setStock] = useState<StockItem[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
   const [editing, setEditing] = useState<StockItem | null>(null);
+  const [purchaseModal, setPurchaseModal] = useState<"create" | null>(null);
+  const [selectedIngredientForPurchases, setSelectedIngredientForPurchases] = useState<StockItem | null>(null);
+  const [purchases, setPurchases] = useState<StockPurchase[]>([]);
+  const [loadingPurchases, setLoadingPurchases] = useState(false);
+  const [purchaseForm, setPurchaseForm] = useState<{
+    ingredient_id: number;
+    quantity: number;
+    unit: string;
+    price_per_unit: number;
+    total_price: number;
+    is_discount: boolean;
+    discount_percent: number;
+    purchase_date: string;
+    supplier_id: number | string;
+    notes: string;
+  }>({
+    ingredient_id: 0,
+    quantity: 0,
+    unit: "gram",
+    price_per_unit: 0,
+    total_price: 0,
+    is_discount: false,
+    discount_percent: 0,
+    purchase_date: new Date().toISOString().split("T")[0],
+    supplier_id: "",
+    notes: "",
+  });
   const [form, setForm] = useState({ ingredient_id: 0, quantity: 0, min_quantity: 0 });
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" | "warn" | "info" } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -66,6 +118,29 @@ export default function StockPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  const loadSuppliers = useCallback(async () => {
+    try {
+      const data = await invoke<Supplier[]>("suppliers_list");
+      setSuppliers(data);
+    } catch (e) {
+      showToast("Erro ao carregar fornecedores", "err");
+    }
+  }, [showToast]);
+
+  useEffect(() => { loadSuppliers(); }, [loadSuppliers]);
+
+  const loadPurchases = useCallback(async (ingredientId: number) => {
+    setLoadingPurchases(true);
+    try {
+      const data = await invoke<StockPurchase[]>("stock_purchases_list", { ingredientId });
+      setPurchases(data);
+    } catch (e) {
+      showToast("Erro ao carregar compras", "err");
+    } finally {
+      setLoadingPurchases(false);
+    }
+  }, [showToast]);
+
   const openCreate = () => {
     setForm({ ingredient_id: 0, quantity: 0, min_quantity: 0 });
     setEditing(null);
@@ -78,7 +153,30 @@ export default function StockPage() {
     setModal("edit");
   };
 
-  const closeModal = () => { setModal(null); setEditing(null); };
+  const closeModal = () => { setModal(null); setEditing(null); }
+
+  const openPurchaseModal = (item: StockItem) => {
+    const ing = ingredients.find(i => i.id === item.ingredient_id);
+    setPurchaseForm(f => ({
+      ...f,
+      ingredient_id: item.ingredient_id,
+      unit: ing?.unit ?? "gram",
+      quantity: 0,
+      price_per_unit: ing?.price_per_unit ?? 0,
+      total_price: 0,
+      is_discount: false,
+      discount_percent: 0,
+    }));
+    setSelectedIngredientForPurchases(item);
+    loadPurchases(item.ingredient_id);
+    setPurchaseModal("create");
+  };
+
+  const closePurchaseModal = () => {
+    setPurchaseModal(null);
+    setSelectedIngredientForPurchases(null);
+    setPurchases([]);
+  };
 
   async function handleSave() {
     if (form.ingredient_id === 0 || form.quantity < 0) {
@@ -118,6 +216,43 @@ export default function StockPage() {
       await load();
     } catch (e) {
       showToast("Erro ao eliminar", "err");
+    }
+  }
+
+  async function handlePurchaseSave() {
+    if (purchaseForm.ingredient_id === 0 || purchaseForm.quantity <= 0 || purchaseForm.price_per_unit <= 0) {
+      showToast("Preenche ingrediente, quantidade e preço", "warn");
+      return;
+    }
+    if (purchaseForm.discount_percent < 0 || purchaseForm.discount_percent > 100) {
+      showToast("Desconto entre 0 e 100%", "warn");
+      return;
+    }
+    setLoading(true);
+    try {
+      const total = purchaseForm.quantity * purchaseForm.price_per_unit;
+      await invoke("stock_purchase_add", {
+        ingredientId: purchaseForm.ingredient_id,
+        quantity: purchaseForm.quantity,
+        unit: purchaseForm.unit,
+        pricePerUnit: purchaseForm.price_per_unit,
+        totalPrice: total,
+        isDiscount: purchaseForm.is_discount,
+        discountPercent: purchaseForm.discount_percent,
+        purchaseDate: purchaseForm.purchase_date,
+        supplierId: purchaseForm.supplier_id ? purchaseForm.supplier_id : null,
+        notes: purchaseForm.notes || null,
+      });
+      showToast("Compra registada e stock actualizado", "ok");
+      closePurchaseModal();
+      await load();
+      if (selectedIngredientForPurchases) {
+        await loadPurchases(selectedIngredientForPurchases.ingredient_id);
+      }
+    } catch (e) {
+      showToast("Erro ao registar compra", "err");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -232,6 +367,16 @@ export default function StockPage() {
                               <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
                             </svg>
                           </button>
+                          <button
+                            className="btn-icon"
+                            onClick={() => openPurchaseModal(item)}
+                            title="Registar compra"
+                            aria-label={`Registar compra de ${getIngredientName(item.ingredient_id)}`}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M21 12V7H5V7M16 7V4M8 7V4M3 18H21M7 18V12M17 18V12M7 12H17"/>
+                            </svg>
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -311,6 +456,185 @@ export default function StockPage() {
                 disabled={loading || form.ingredient_id === 0 || form.quantity < 0}
               >
                 {loading ? "A guardar…" : "Guardar"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+
+      {/* Purchase Modal */}
+      {purchaseModal && selectedIngredientForPurchases && (
+        <div className="modal-backdrop" onClick={closePurchaseModal} role="dialog" aria-modal="true" aria-labelledby="purchase-modal-title">
+          <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
+            <header className="modal-header">
+              <h2 id="purchase-modal-title" className="modal-title">Registar compra — {getIngredientName(selectedIngredientForPurchases.ingredient_id)}</h2>
+              <button className="modal-close" onClick={closePurchaseModal} aria-label="Fechar">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </header>
+            <div className="modal-body" style={{ maxHeight: "70vh", overflowY: "auto" }}>
+              <div className="field">
+                <label className="field-label" htmlFor="purchase-qty">Quantidade</label>
+                <input
+                  id="purchase-qty"
+                  type="number"
+                  className="input input-num"
+                  min="0.01"
+                  step="0.01"
+                  value={purchaseForm.quantity}
+                  onChange={e => setPurchaseForm(f => ({ ...f, quantity: parseFloat(e.target.value) || 0 }))}
+                />
+              </div>
+
+              <div className="field-row">
+                <div className="field" style={{ flex: 1 }}>
+                  <label className="field-label" htmlFor="purchase-unit">Unidade</label>
+                  <select id="purchase-unit" className="select" value={purchaseForm.unit} onChange={e => setPurchaseForm(f => ({ ...f, unit: e.target.value }))}>
+                    {Object.entries(UNIT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                  </select>
+                </div>
+                <div className="field" style={{ flex: 1 }}>
+                  <label className="field-label" htmlFor="purchase-price">Preço por unidade (€)</label>
+                  <input
+                    id="purchase-price"
+                    type="number"
+                    className="input input-num"
+                    min="0"
+                    step="0.01"
+                    value={purchaseForm.price_per_unit}
+                    onChange={e => setPurchaseForm(f => ({ ...f, price_per_unit: parseFloat(e.target.value) || 0 }))}
+                  />
+                </div>
+              </div>
+
+              <div className="field-row">
+                <div className="field" style={{ flex: 1 }}>
+                  <label className="field-label" htmlFor="purchase-date">Data da compra</label>
+                  <input
+                    id="purchase-date"
+                    type="date"
+                    className="input"
+                    value={purchaseForm.purchase_date}
+                    onChange={e => setPurchaseForm(f => ({ ...f, purchase_date: e.target.value }))}
+                  />
+                </div>
+                <div className="field" style={{ flex: 1 }}>
+                  <label className="field-label" htmlFor="purchase-supplier">Fornecedor</label>
+                  <select id="purchase-supplier" className="select" value={purchaseForm.supplier_id ?? ""} onChange={e => {
+                    const val = e.target.value;
+                    setPurchaseForm(f => ({ ...f, supplier_id: val ? parseInt(val) : "" }));
+                  }}>
+                    <option value="">— Nenhum —</option>
+                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="field-row">
+                <div className="field" style={{ flex: 1 }}>
+                  <label className="field-label" htmlFor="purchase-discount">Desconto (%)</label>
+                  <input
+                    id="purchase-discount"
+                    type="number"
+                    className="input input-num"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={purchaseForm.discount_percent}
+                    onChange={e => setPurchaseForm(f => ({ ...f, discount_percent: parseInt(e.target.value) || 0 }))}
+                  />
+                </div>
+                <div className="field" style={{ flex: 1 }}>
+                  <label className="field-label" style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+                    <input
+                      type="checkbox"
+                      checked={purchaseForm.is_discount}
+                      onChange={e => setPurchaseForm(f => ({ ...f, is_discount: e.target.checked }))}
+                    />
+                    <span>Era promoção?</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="field">
+                <label className="field-label" htmlFor="purchase-notes">Notas</label>
+                <textarea
+                  id="purchase-notes"
+                  className="textarea"
+                  rows={3}
+                  value={purchaseForm.notes}
+                  onChange={e => setPurchaseForm(f => ({ ...f, notes: e.target.value }))}
+                  placeholder="Observações opcionais…"
+                />
+              </div>
+
+              <div style={{ marginTop: "var(--space-4)", padding: "var(--space-3)", background: "var(--color-surface)", borderRadius: "var(--radius-md)", border: "1px solid var(--color-border)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span className="text-2">
+                    Total: <strong className="currency">{(purchaseForm.quantity * purchaseForm.price_per_unit).toFixed(2)} €</strong>
+                  </span>
+                  <span className="text-2 mono text-muted">
+                    Subtotal: {(purchaseForm.quantity * purchaseForm.price_per_unit).toFixed(2)} €
+                  </span>
+                </div>
+                {purchaseForm.is_discount && purchaseForm.discount_percent > 0 && (
+                  <div className="text-2 text-muted" style={{ marginTop: "var(--space-2)" }}>
+                    Com desconto de {purchaseForm.discount_percent}%: {(purchaseForm.quantity * purchaseForm.price_per_unit * (1 - purchaseForm.discount_percent / 100)).toFixed(2)} €
+                  </div>
+                )}
+              </div>
+
+              {/* Purchase History */}
+              {purchases.length > 0 && (
+                <div style={{ marginTop: "var(--space-6)" }}>
+                  <h3 className="title-4" style={{ marginBottom: "var(--space-3)" }}>Histórico de compras</h3>
+                  <div className="table-wrap">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th className="mono">Data</th>
+                          <th className="mono">Qtd</th>
+                          <th className="mono">Preço/unid</th>
+                          <th className="mono">Total</th>
+                          <th>Promoção</th>
+                          <th>Fornecedor</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {purchases.map(p => (
+                          <tr key={p.id}>
+                            <td className="mono">{p.purchase_date.split("T")[0]}</td>
+                            <td className="mono">{p.quantity} {UNIT_LABELS[p.unit] ?? p.unit}</td>
+                            <td className="mono">{p.price_per_unit.toFixed(2)} €</td>
+                            <td className="mono">{p.total_price.toFixed(2)} €</td>
+                            <td>{p.is_discount ? <span className="badge badge-success">{p.discount_percent}%</span> : <span className="text-muted">—</span>}</td>
+                            <td>{p.supplier_name ?? "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {loadingPurchases && (
+                <div className="flex-center" style={{ padding: "var(--space-6)" }}>
+                  <svg className="animate-spin" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10" strokeOpacity="0.2"/><path d="M12 2a10 10 0 0 1 10 10" strokeOpacity="1"/>
+                  </svg>
+                </div>
+              )}
+            </div>
+            <footer className="modal-footer">
+              <button className="btn btn-secondary" onClick={closePurchaseModal}>Cancelar</button>
+              <button
+                className="btn btn-primary"
+                onClick={handlePurchaseSave}
+                disabled={loading || purchaseForm.ingredient_id === 0 || purchaseForm.quantity <= 0 || purchaseForm.price_per_unit <= 0}
+              >
+                {loading ? "A registar…" : "Registar compra"}
               </button>
             </footer>
           </div>

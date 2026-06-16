@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import ImageUpload from "../components/ImageUpload";
 
 interface RecipeIngredient {
   ingredient_id: number;
@@ -362,6 +363,15 @@ export default function RecipesPage() {
                     >
                       {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
+                  </div>
+
+                  <div className="field">
+                    <label className="field-label">Imagem da receita</label>
+                    <ImageUpload
+                      entityType="recipe"
+                      entityId={editing?.id ?? 0}
+                      onImageChange={img => setForm(f => ({ ...f, image_path: img?.path ?? null }))}
+                    />
                   </div>
 
                   <div className="field-row">

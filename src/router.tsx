@@ -12,6 +12,7 @@ import CalendarPage from "./pages/CalendarPage";
 import SettingsPage from "./pages/SettingsPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import ReportsPage from "./pages/ReportsPage";
+import ReceiptScannerPage from "./pages/ReceiptScannerPage";
 
 export const router = createBrowserRouter([
   {
@@ -30,7 +31,7 @@ export const router = createBrowserRouter([
       { path: "sugestor", element: <PlaceholderPage name="sugestor" /> },
       { path: "relatorios", element: <ReportsPage /> },
       { path: "fornecedores", element: <SuppliersPage /> },
-      { path: "importador", element: <PlaceholderPage name="importador" /> },
+      { path: "scanner", element: <ReceiptScannerPage /> },
       { path: "definicoes", element: <SettingsPage /> },
       { path: "ajuda", element: <PlaceholderPage name="ajuda" /> },
     ],
