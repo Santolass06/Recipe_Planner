@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import os
+
+code = """import { useState, useEffect, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import Modal from "../components/ui/Modal";
@@ -840,3 +842,8 @@ export default function ShoppingListPage() {
     />
   );
 }
+"""
+
+with open("src/pages/ShoppingListPage.tsx", "w") as f:
+    f.write(code)
+

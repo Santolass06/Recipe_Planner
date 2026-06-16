@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useToast } from "../components/ui/Toast";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "../i18n";
 
@@ -121,19 +122,14 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
 };
 
 export default function SettingsPage() {
-  useI18n();
+  const { setLanguage } = useI18n();
   const [activeCategory, setActiveCategory] = useState("general");
   const [settings, setSettings] = useState<SettingsMap>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" | "warn" | "info" } | null>(null);
+  const { showToast } = useToast();
   const [importFile, setImportFile] = useState<File | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-
-  const showToast = useCallback((msg: string, type: "ok" | "err" | "warn" | "info" = "ok") => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  }, []);
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -175,6 +171,11 @@ export default function SettingsPage() {
       const newSettings = { ...parsed, ...values };
       await invoke("settings_set", { key: category, value: JSON.stringify(newSettings) });
       setSettings(prev => ({ ...prev, [category]: JSON.stringify(newSettings) }));
+      
+      if (values.language) {
+        setLanguage(values.language as "pt" | "en");
+      }
+      
       showToast("Definições guardadas", "ok");
     } catch (e) {
       showToast("Erro ao guardar definições", "err");
@@ -555,44 +556,6 @@ export default function SettingsPage() {
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {toast && (
-        <div className="toast" style={{
-          background: toast.type === "ok" ? "var(--ok-bg)" :
-                      toast.type === "err" ? "var(--danger-bg)" :
-                      toast.type === "warn" ? "var(--warn-bg)" : "var(--info-bg)",
-          borderColor: toast.type === "ok" ? "var(--ok-border)" :
-                       toast.type === "err" ? "var(--danger-border)" :
-                       toast.type === "warn" ? "var(--warn-border)" : "var(--info-border)",
-          color: toast.type === "ok" ? "var(--ok)" :
-                 toast.type === "err" ? "var(--danger)" :
-                 toast.type === "warn" ? "var(--warn)" : "var(--info)",
-        }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            {toast.type === "ok" && (
-              <g>
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
-              </g>
-            )}
-            {toast.type === "err" && (
-              <g>
-                <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
-              </g>
-            )}
-            {toast.type === "warn" && (
-              <g>
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-              </g>
-            )}
-            {toast.type === "info" && (
-              <g>
-                <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
-              </g>
-            )}
-          </svg>
-          <span>{toast.msg}</span>
         </div>
       )}
     </div>

@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useToast } from "../components/ui/Toast";
+import PageHeader from "../components/ui/PageHeader";
+import EmptyState from "../components/ui/EmptyState";
 
 // ============================================================================
 // TYPES
@@ -383,11 +386,386 @@ const UNIT_LABELS: Record<string, string> = {
   pinch: "pitada", bunch: "molho", clove: "dente", slice: "fatia",
 };
 
+
+
+function CostsTab({ costReport, days }: { costReport: CostReport | null; days: number }) {
+  if (!costReport) return <div className="empty" style={{ minHeight: 200 }}>Carregando...</div>;
+
+  const categoryChartData = costReport.by_category.slice(0, 8).map((c) => ({ category: c.category, total: c.total }));
+  const supplierChartData = costReport.by_supplier.slice(0, 8).map((s) => ({ supplier: s.supplier, total: s.total }));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
+      {/* KPI Cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "var(--space-4)" }}>
+        <KPICard
+          label="Total Gasto"
+          value={`€${costReport.total_spent.toFixed(2)}`}
+          subLabel={`${days} dias`}
+          icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>}
+          color="var(--brand)"
+        />
+        <KPICard
+          label="Média Diária"
+          value={`€${costReport.daily_avg.toFixed(2)}`}
+          subLabel="por dia"
+          icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" strokeWidth="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>}
+          color="var(--ok)"
+        />
+        <KPICard
+          label="Categorias"
+          value={costReport.by_category.length}
+          subLabel="com gastos"
+          icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--info)" strokeWidth="1.8"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>}
+          color="var(--info)"
+        />
+        <KPICard
+          label="Fornecedores"
+          value={costReport.by_supplier.length}
+          subLabel="utilizados"
+          icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" strokeWidth="1.8"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>}
+          color="var(--warn)"
+        />
+      </div>
+
+      {/* Charts Row */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-5)" }}>
+        <div className="card" style={{ padding: "var(--space-4)" }}>
+          <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Por Categoria</h3>
+          <BarChart data={categoryChartData} keys={["total"]} colors={["var(--brand)"]} labelKey="category" valueKey="total" height={250} />
+        </div>
+        <div className="card" style={{ padding: "var(--space-4)" }}>
+          <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Por Fornecedor</h3>
+          <PieChart data={supplierChartData} labelKey="supplier" valueKey="total" width={300} height={250} />
+        </div>
+      </div>
+
+      {/* Top Recipes Table */}
+      <div className="card" style={{ padding: "var(--space-4)" }}>
+        <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Top Receitas por Custo</h3>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Receita</th>
+                <th className="mono">Custo Total</th>
+                <th className="mono">Custo/Porção</th>
+                <th className="mono">Vezes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {costReport.by_recipe.slice(0, 10).map((r) => (
+                <tr key={r.recipe_id}>
+                  <td>{r.recipe_name}</td>
+                  <td className="mono">€{r.total_cost.toFixed(2)}</td>
+                  <td className="mono">€{r.cost_per_portion.toFixed(2)}</td>
+                  <td className="mono">{r.count}x</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WasteTab({ wasteReport, days }: { wasteReport: WasteReport | null; days: number }) {
+  if (!wasteReport) return <div className="empty" style={{ minHeight: 200 }}>Carregando...</div>;
+
+  if (wasteReport.total_wasted_value === 0) {
+    return (
+      <div className="card" style={{ padding: "var(--space-8)", textAlign: "center" }}>
+        <EmptyState
+          icon={
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--text-4)" strokeWidth="1.5" style={{ marginBottom: "var(--space-4)", opacity: 0.5 }}>
+              <polyline points="16 2 22 8 16 14"/><line x1="22" y1="8" x2="8" y2="8"/>
+            </svg>
+          }
+          title="Sem dados de desperdício"
+          body="Não existe rastreamento de desperdício automático. Para usar esta funcionalidade, seria necessário registar perdas de stock manualmente ou ter histórico de stock."
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
+      <KPICard
+        label="Valor Total Desperdiçado"
+        value={`€${wasteReport.total_wasted_value.toFixed(2)}`}
+        subLabel={`${days} dias`}
+        icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" strokeWidth="1.8"><polyline points="16 2 22 8 16 14"/><line x1="22" y1="8" x2="8" y2="8"/></svg>}
+        color="var(--danger)"
+      />
+      <div className="card" style={{ padding: "var(--space-4)" }}>
+        <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Por Ingrediente</h3>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Ingrediente</th>
+                <th className="mono">Qtd. Desperdiçada</th>
+                <th className="mono">Valor</th>
+              </tr>
+            </thead>
+            <tbody>
+              {wasteReport.by_ingredient.map((w) => (
+                <tr key={w.ingredient_id}>
+                  <td>{w.ingredient_name}</td>
+                  <td className="mono">{w.wasted_quantity} {UNIT_LABELS[w.unit] ?? w.unit}</td>
+                  <td className="mono">€{w.wasted_value.toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StockTrendsTab({ stockTrends, loading }: { stockTrends: StockSnapshot[]; loading: boolean }) {
+  if (loading) return <div className="empty" style={{ minHeight: 200 }}>Carregando...</div>;
+
+  // Group by ingredient for multi-line chart
+  const ingredientMap = new Map<number, { name: string; data: StockSnapshot[] }>();
+  stockTrends.forEach((s) => {
+    const existing = ingredientMap.get(s.ingredient_id);
+    if (!existing) ingredientMap.set(s.ingredient_id, { name: s.ingredient_name, data: [s] });
+    else existing.data.push(s);
+  });
+
+  const topIngredients = Array.from(ingredientMap.entries())
+    .sort((a, b) => b[1].data[b[1].data.length - 1]?.value - a[1].data[a[1].data.length - 1]?.value)
+    .slice(0, 5);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
+      <div className="card" style={{ padding: "var(--space-4)" }}>
+        <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Evolução do Valor do Stock</h3>
+        {topIngredients.length === 0 ? (
+          <div className="empty" style={{ minHeight: 200 }}>Sem dados de stock</div>
+        ) : (
+          <div style={{ height: 300, position: "relative" }}>
+            <svg viewBox="0 0 100 300" preserveAspectRatio="none" style={{ width: "100%", height: "100%" }}>
+              {/* Grid */}
+              {[0, 0.25, 0.5, 0.75, 1].map((ratio) => (
+                <line key={ratio} x1="5" y1={300 - ratio * 280} x2="95" y2={300 - ratio * 280} stroke="var(--border-subtle)" strokeWidth="0.3" strokeDasharray="2,2" />
+              ))}
+              {topIngredients.map(([_, ingredient], i) => {
+                const values = ingredient.data.map((d) => d.value);
+                const min = Math.min(...values);
+                const max = Math.max(...values);
+                const range = max - min || 1;
+                const color = ["var(--brand)", "var(--ok)", "var(--warn)", "var(--info)", "var(--danger)"][i % 5];
+
+                const path = ingredient.data
+                  .map((d, di) => {
+                    const x = 5 + (di / (ingredient.data.length - 1)) * 90;
+                    const y = 300 - 10 - ((d.value - min) / range) * 280;
+                    return `${di === 0 ? "M" : "L"} ${x} ${y}`;
+                  })
+                  .join(" ");
+
+                return (
+                  <g key={ingredient.name}>
+                    <path d={path} stroke={color} strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" opacity={0.8} />
+                  </g>
+                );
+              })}
+            </svg>
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "var(--space-3)", marginTop: "var(--space-2)", fontSize: "11px" }}>
+              {topIngredients.map(([_, ingredient], i) => (
+                <span key={ingredient.name} style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--text-2)" }}>
+                  <span style={{ width: 10, height: 10, borderRadius: 2, background: ["var(--brand)", "var(--ok)", "var(--warn)", "var(--info)", "var(--danger)"][i % 5] }} />
+                  {ingredient.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MealsTab({ mealStats, days }: { mealStats: MealStats | null; days: number }) {
+  if (!mealStats) return <div className="empty" style={{ minHeight: 200 }}>Carregando...</div>;
+
+  const mealTypeChartData = mealStats.by_meal_type.map((m) => ({
+    type: MEAL_TYPE_LABELS[m.meal_type] ?? m.meal_type,
+    count: m.count,
+    portions: m.total_portions,
+  }));
+
+  const recipeChartData = mealStats.by_recipe.slice(0, 8).map((r) => ({ name: r.recipe_name, count: r.count }));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
+      {/* KPI Cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "var(--space-4)" }}>
+        <KPICard
+          label="Total Refeições"
+          value={mealStats.total_meals}
+          subLabel={`${days} dias`}
+          icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>}
+          color="var(--brand)"
+        />
+        <KPICard
+          label="Média Porções"
+          value={mealStats.avg_portions.toFixed(1)}
+          subLabel="por refeição"
+          icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>}
+          color="var(--ok)"
+        />
+        <KPICard
+          label="Tipos de Refeição"
+          value={mealStats.by_meal_type.length}
+          subLabel="utilizados"
+          icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--info)" strokeWidth="1.8"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>}
+          color="var(--info)"
+        />
+        <KPICard
+          label="Receitas Únicas"
+          value={mealStats.by_recipe.length}
+          subLabel="preparadas"
+          icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" strokeWidth="1.8"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>}
+          color="var(--warn)"
+        />
+      </div>
+
+      {/* Charts */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-5)" }}>
+        <div className="card" style={{ padding: "var(--space-4)" }}>
+          <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Por Tipo de Refeição</h3>
+          <PieChart data={mealTypeChartData} labelKey="type" valueKey="count" width={300} height={250} />
+        </div>
+        <div className="card" style={{ padding: "var(--space-4)" }}>
+          <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Top Receitas</h3>
+          <BarChart data={recipeChartData} keys={["count"]} colors={["var(--brand)"]} labelKey="name" valueKey="count" height={250} />
+        </div>
+      </div>
+
+      {/* Detail Table */}
+      <div className="card" style={{ padding: "var(--space-4)" }}>
+        <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Detalhe por Receita</h3>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Receita</th>
+                <th className="mono">Vezes</th>
+                <th className="mono">Total Porções</th>
+                <th className="mono">Média Porções</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mealStats.by_recipe.slice(0, 15).map((r) => (
+                <tr key={r.recipe_id}>
+                  <td>{r.recipe_name}</td>
+                  <td className="mono">{r.count}x</td>
+                  <td className="mono">{r.total_portions}</td>
+                  <td className="mono">{r.avg_portions.toFixed(1)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PricesTab({
+  ingredients,
+  priceTrendIngredientId,
+  setPriceTrendIngredientId,
+  loading,
+  priceTrends,
+}: {
+  ingredients: { id: number; name: string }[];
+  priceTrendIngredientId: number | null;
+  setPriceTrendIngredientId: (id: number | null) => void;
+  loading: boolean;
+  priceTrends: PricePoint[];
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
+      {/* Ingredient Selector */}
+      <div className="card" style={{ padding: "var(--space-4)" }}>
+        <label className="field-label">Ingrediente</label>
+        <select
+          className="select"
+          value={priceTrendIngredientId ?? ""}
+          onChange={(e) => setPriceTrendIngredientId(Number(e.target.value) || null)}
+          disabled={ingredients.length === 0 || loading}
+        >
+          {ingredients.map((ing) => (
+            <option key={ing.id} value={ing.id}>{ing.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Price Trend Chart */}
+      <div className="card" style={{ padding: "var(--space-4)" }}>
+        <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+          Evolução de Preço {ingredients.find((i) => i.id === priceTrendIngredientId) ? `— ${ingredients.find((i) => i.id === priceTrendIngredientId)!.name}` : ""}
+        </h3>
+        {priceTrends.length === 0 ? (
+          <EmptyState
+            icon={
+              <svg className="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="4" y="2" width="16" height="20" rx="2"/><line x1="4" y1="6" x2="20" y2="6"/>
+                <line x1="8" y1="10" x2="8" y2="10"/><line x1="12" y1="10" x2="12" y2="10"/>
+                <line x1="16" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/>
+              </svg>
+            }
+            title="Sem histórico de preços"
+            body="Adicione cotações de preços para ver a evolução"
+          />
+        ) : (
+          <LineChart data={priceTrends} valueKey="price" dateKey="date" height={300} color="var(--brand)" />
+        )}
+      </div>
+
+      {/* Price Points Table */}
+      {priceTrends.length > 0 && (
+        <div className="card" style={{ padding: "var(--space-4)" }}>
+          <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Histórico de Cotações</h3>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Fornecedor</th>
+                  <th className="mono">Preço</th>
+                </tr>
+              </thead>
+              <tbody>
+                {priceTrends.slice().reverse().map((p, i) => (
+                  <tr key={i}>
+                    <td>{new Date(p.date).toLocaleDateString("pt-PT")}</td>
+                    <td>{p.supplier}</td>
+                    <td className="mono">€{p.price.toFixed(4)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState("costs");
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" | "warn" | "info" } | null>(null);
+
+  const { showToast } = useToast();
 
   // Data states
   const [costReport, setCostReport] = useState<CostReport | null>(null);
@@ -397,11 +775,6 @@ export default function ReportsPage() {
   const [priceTrends, setPriceTrends] = useState<PricePoint[]>([]);
   const [ingredients, setIngredients] = useState<{ id: number; name: string }[]>([]);
   const [priceTrendIngredientId, setPriceTrendIngredientId] = useState<number | null>(null);
-
-  const showToast = useCallback((msg: string, type: "ok" | "err" | "warn" | "info" = "ok") => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  }, []);
 
   // Load ingredients for price trends dropdown
   useEffect(() => {
@@ -461,370 +834,6 @@ export default function ReportsPage() {
     }
   }, [activeTab, ingredients, priceTrendIngredientId]);
 
-  // ========================================================================
-  // RENDER SECTIONS PER TAB
-  // ========================================================================
-
-  const renderCostsTab = () => {
-    if (!costReport) return <div className="empty" style={{ minHeight: 200 }}>Carregando...</div>;
-
-    const categoryChartData = costReport.by_category.slice(0, 8).map((c) => ({ category: c.category, total: c.total }));
-    const supplierChartData = costReport.by_supplier.slice(0, 8).map((s) => ({ supplier: s.supplier, total: s.total }));
-
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
-        {/* KPI Cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "var(--space-4)" }}>
-          <KPICard
-            label="Total Gasto"
-            value={`€${costReport.total_spent.toFixed(2)}`}
-            subLabel={`${days} dias`}
-            icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>}
-            color="var(--brand)"
-          />
-          <KPICard
-            label="Média Diária"
-            value={`€${costReport.daily_avg.toFixed(2)}`}
-            subLabel="por dia"
-            icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" strokeWidth="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>}
-            color="var(--ok)"
-          />
-          <KPICard
-            label="Categorias"
-            value={costReport.by_category.length}
-            subLabel="com gastos"
-            icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--info)" strokeWidth="1.8"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>}
-            color="var(--info)"
-          />
-          <KPICard
-            label="Fornecedores"
-            value={costReport.by_supplier.length}
-            subLabel="utilizados"
-            icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" strokeWidth="1.8"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>}
-            color="var(--warn)"
-          />
-        </div>
-
-        {/* Charts Row */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-5)" }}>
-          <div className="card" style={{ padding: "var(--space-4)" }}>
-            <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Por Categoria</h3>
-            <BarChart data={categoryChartData} keys={["total"]} colors={["var(--brand)"]} labelKey="category" valueKey="total" height={250} />
-          </div>
-          <div className="card" style={{ padding: "var(--space-4)" }}>
-            <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Por Fornecedor</h3>
-            <PieChart data={supplierChartData} labelKey="supplier" valueKey="total" width={300} height={250} />
-          </div>
-        </div>
-
-        {/* Top Recipes Table */}
-        <div className="card" style={{ padding: "var(--space-4)" }}>
-          <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Top Receitas por Custo</h3>
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Receita</th>
-                  <th className="mono">Custo Total</th>
-                  <th className="mono">Custo/Porção</th>
-                  <th className="mono">Vezes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {costReport.by_recipe.slice(0, 10).map((r) => (
-                  <tr key={r.recipe_id}>
-                    <td>{r.recipe_name}</td>
-                    <td className="mono">€{r.total_cost.toFixed(2)}</td>
-                    <td className="mono">€{r.cost_per_portion.toFixed(2)}</td>
-                    <td className="mono">{r.count}x</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderWasteTab = () => {
-    if (!wasteReport) return <div className="empty" style={{ minHeight: 200 }}>Carregando...</div>;
-
-    if (wasteReport.total_wasted_value === 0) {
-      return (
-        <div className="card" style={{ padding: "var(--space-8)", textAlign: "center" }}>
-          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--text-4)" strokeWidth="1.5" style={{ marginBottom: "var(--space-4)", opacity: 0.5 }}>
-            <polyline points="16 2 22 8 16 14"/><line x1="22" y1="8" x2="8" y2="8"/>
-          </svg>
-          <h3 style={{ color: "var(--text-2)", marginBottom: "var(--space-2)" }}>Sem dados de desperdício</h3>
-          <p style={{ color: "var(--text-3)", maxWidth: 400, margin: "0 auto" }}>
-            Não existe rastreamento de desperdício automático. Para usar esta funcionalidade,
-            seria necessário registar perdas de stock manualmente ou ter histórico de stock.
-          </p>
-        </div>
-      );
-    }
-
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
-        <KPICard
-          label="Valor Total Desperdiçado"
-          value={`€${wasteReport.total_wasted_value.toFixed(2)}`}
-          subLabel={`${days} dias`}
-          icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" strokeWidth="1.8"><polyline points="16 2 22 8 16 14"/><line x1="22" y1="8" x2="8" y2="8"/></svg>}
-          color="var(--danger)"
-        />
-        <div className="card" style={{ padding: "var(--space-4)" }}>
-          <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Por Ingrediente</h3>
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Ingrediente</th>
-                  <th className="mono">Qtd. Desperdiçada</th>
-                  <th className="mono">Valor</th>
-                </tr>
-              </thead>
-              <tbody>
-                {wasteReport.by_ingredient.map((w) => (
-                  <tr key={w.ingredient_id}>
-                    <td>{w.ingredient_name}</td>
-                    <td className="mono">{w.wasted_quantity} {UNIT_LABELS[w.unit] ?? w.unit}</td>
-                    <td className="mono">€{w.wasted_value.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderStockTrendsTab = () => {
-    if (loading) return <div className="empty" style={{ minHeight: 200 }}>Carregando...</div>;
-
-    // Group by ingredient for multi-line chart
-    const ingredientMap = new Map<number, { name: string; data: StockSnapshot[] }>();
-    stockTrends.forEach((s) => {
-      const existing = ingredientMap.get(s.ingredient_id);
-      if (!existing) ingredientMap.set(s.ingredient_id, { name: s.ingredient_name, data: [s] });
-      else existing.data.push(s);
-    });
-
-    const topIngredients = Array.from(ingredientMap.entries())
-      .sort((a, b) => b[1].data[b[1].data.length - 1]?.value - a[1].data[a[1].data.length - 1]?.value)
-      .slice(0, 5);
-
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
-        <div className="card" style={{ padding: "var(--space-4)" }}>
-          <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Evolução do Valor do Stock</h3>
-          {topIngredients.length === 0 ? (
-            <div className="empty" style={{ minHeight: 200 }}>Sem dados de stock</div>
-          ) : (
-            <div style={{ height: 300, position: "relative" }}>
-              <svg viewBox="0 0 100 300" preserveAspectRatio="none" style={{ width: "100%", height: "100%" }}>
-                {/* Grid */}
-                {[0, 0.25, 0.5, 0.75, 1].map((ratio) => (
-                  <line key={ratio} x1="5" y1={300 - ratio * 280} x2="95" y2={300 - ratio * 280} stroke="var(--border-subtle)" strokeWidth="0.3" strokeDasharray="2,2" />
-                ))}
-                {topIngredients.map(([_, ingredient], i) => {
-                  const values = ingredient.data.map((d) => d.value);
-                  const min = Math.min(...values);
-                  const max = Math.max(...values);
-                  const range = max - min || 1;
-                  const color = ["var(--brand)", "var(--ok)", "var(--warn)", "var(--info)", "var(--danger)"][i % 5];
-
-                  const path = ingredient.data
-                    .map((d, di) => {
-                      const x = 5 + (di / (ingredient.data.length - 1)) * 90;
-                      const y = 300 - 10 - ((d.value - min) / range) * 280;
-                      return `${di === 0 ? "M" : "L"} ${x} ${y}`;
-                    })
-                    .join(" ");
-
-                  return (
-                    <g key={ingredient.name}>
-                      <path d={path} stroke={color} strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" opacity={0.8} />
-                    </g>
-                  );
-                })}
-              </svg>
-              <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "var(--space-3)", marginTop: "var(--space-2)", fontSize: "11px" }}>
-                {topIngredients.map(([_, ingredient], i) => (
-                  <span key={ingredient.name} style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--text-2)" }}>
-                    <span style={{ width: 10, height: 10, borderRadius: 2, background: ["var(--brand)", "var(--ok)", "var(--warn)", "var(--info)", "var(--danger)"][i % 5] }} />
-                    {ingredient.name}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  const renderMealsTab = () => {
-    if (!mealStats) return <div className="empty" style={{ minHeight: 200 }}>Carregando...</div>;
-
-    const mealTypeChartData = mealStats.by_meal_type.map((m) => ({
-      type: MEAL_TYPE_LABELS[m.meal_type] ?? m.meal_type,
-      count: m.count,
-      portions: m.total_portions,
-    }));
-
-    const recipeChartData = mealStats.by_recipe.slice(0, 8).map((r) => ({ name: r.recipe_name, count: r.count }));
-
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
-        {/* KPI Cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "var(--space-4)" }}>
-          <KPICard
-            label="Total Refeições"
-            value={mealStats.total_meals}
-            subLabel={`${days} dias`}
-            icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>}
-            color="var(--brand)"
-          />
-          <KPICard
-            label="Média Porções"
-            value={mealStats.avg_portions.toFixed(1)}
-            subLabel="por refeição"
-            icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>}
-            color="var(--ok)"
-          />
-          <KPICard
-            label="Tipos de Refeição"
-            value={mealStats.by_meal_type.length}
-            subLabel="utilizados"
-            icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--info)" strokeWidth="1.8"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>}
-            color="var(--info)"
-          />
-          <KPICard
-            label="Receitas Únicas"
-            value={mealStats.by_recipe.length}
-            subLabel="preparadas"
-            icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" strokeWidth="1.8"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>}
-            color="var(--warn)"
-          />
-        </div>
-
-        {/* Charts */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-5)" }}>
-          <div className="card" style={{ padding: "var(--space-4)" }}>
-            <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Por Tipo de Refeição</h3>
-            <PieChart data={mealTypeChartData} labelKey="type" valueKey="count" width={300} height={250} />
-          </div>
-          <div className="card" style={{ padding: "var(--space-4)" }}>
-            <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Top Receitas</h3>
-            <BarChart data={recipeChartData} keys={["count"]} colors={["var(--brand)"]} labelKey="name" valueKey="count" height={250} />
-          </div>
-        </div>
-
-        {/* Detail Table */}
-        <div className="card" style={{ padding: "var(--space-4)" }}>
-          <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Detalhe por Receita</h3>
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Receita</th>
-                  <th className="mono">Vezes</th>
-                  <th className="mono">Total Porções</th>
-                  <th className="mono">Média Porções</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mealStats.by_recipe.slice(0, 15).map((r) => (
-                  <tr key={r.recipe_id}>
-                    <td>{r.recipe_name}</td>
-                    <td className="mono">{r.count}x</td>
-                    <td className="mono">{r.total_portions}</td>
-                    <td className="mono">{r.avg_portions.toFixed(1)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderPricesTab = () => {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
-        {/* Ingredient Selector */}
-        <div className="card" style={{ padding: "var(--space-4)" }}>
-          <label className="field-label">Ingrediente</label>
-          <select
-            className="select"
-            value={priceTrendIngredientId ?? ""}
-            onChange={(e) => setPriceTrendIngredientId(Number(e.target.value) || null)}
-            disabled={ingredients.length === 0 || loading}
-          >
-            {ingredients.map((ing) => (
-              <option key={ing.id} value={ing.id}>{ing.name}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Price Trend Chart */}
-        <div className="card" style={{ padding: "var(--space-4)" }}>
-          <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-            Evolução de Preço {ingredients.find((i) => i.id === priceTrendIngredientId) ? `— ${ingredients.find((i) => i.id === priceTrendIngredientId)!.name}` : ""}
-          </h3>
-          {priceTrends.length === 0 ? (
-            <div className="empty" style={{ minHeight: 200 }}>
-              <svg className="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <rect x="4" y="2" width="16" height="20" rx="2"/><line x1="4" y1="6" x2="20" y2="6"/>
-                <line x1="8" y1="10" x2="8" y2="10"/><line x1="12" y1="10" x2="12" y2="10"/>
-                <line x1="16" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/>
-              </svg>
-              <p className="empty-title">Sem histórico de preços</p>
-              <p className="empty-desc">Adicione cotações de preços para ver a evolução</p>
-            </div>
-          ) : (
-            <LineChart data={priceTrends} valueKey="price" dateKey="date" height={300} color="var(--brand)" />
-          )}
-        </div>
-
-        {/* Price Points Table */}
-        {priceTrends.length > 0 && (
-          <div className="card" style={{ padding: "var(--space-4)" }}>
-            <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Histórico de Cotações</h3>
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Data</th>
-                    <th>Fornecedor</th>
-                    <th className="mono">Preço</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {priceTrends.slice().reverse().map((p, i) => (
-                    <tr key={i}>
-                      <td>{new Date(p.date).toLocaleDateString("pt-PT")}</td>
-                      <td>{p.supplier}</td>
-                      <td className="mono">€{p.price.toFixed(4)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // ========================================================================
-  // MAIN RENDER
-  // ========================================================================
-
   if (loading && activeTab !== "prices") {
     return (
       <div className="content" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "300px" }}>
@@ -841,60 +850,50 @@ export default function ReportsPage() {
 
   return (
     <div className="content">
-      {/* Header + Controls */}
-      <div className="content-header" style={{ flexWrap: "wrap", gap: "var(--space-4)" }}>
-        <div>
-          <h1 className="content-title">Relatórios</h1>
-          <p className="content-sub mono">Análise de custos, desperdício, stock, refeições e preços</p>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>
-          {/* Tab Navigation */}
-          <div style={{ display: "flex", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "2px" }}>
-            {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`btn ${activeTab === tab.id ? "btn-primary" : "btn-ghost"}`}
-                style={{ padding: "0 var(--space-3)", height: "36px", fontSize: "12px" }}
-              >
-                <span style={{ display: "flex", alignItems: "center", gap: "var(--space-1)" }}>{tab.icon}{tab.label}</span>
-              </button>
-            ))}
+      <PageHeader
+        title="Relatórios"
+        subtitle="Análise de custos, desperdício, stock, refeições e preços"
+        actions={
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>
+            <select
+              className="select"
+              value={days}
+              onChange={(e) => setDays(Number(e.target.value))}
+              style={{ minWidth: "140px" }}
+            >
+              {RANGE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
           </div>
-          
-          {/* Date Range */}
-          <select
-            className="select"
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
-            style={{ minWidth: "140px" }}
+        }
+      />
+      
+      <div className="tab-list">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`tab-item ${activeTab === tab.id ? "active" : ""}`}
           >
-            {RANGE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-        </div>
+            {tab.icon}{tab.label}
+          </button>
+        ))}
       </div>
 
-      {/* Toast */}
-      {toast && (
-        <div className="toast" style={{ background: `var(--${toast.type}-bg)`, borderColor: `var(--${toast.type}-border)`, color: `var(--${toast.type})` }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            {toast.type === "ok" && <polyline points="20 6 9 17 4 12" />}
-            {toast.type === "err" && <g> <circle cx="12" cy="12" r="10" /> <line x1="15" y1="9" x2="9" y2="15" /> <line x1="9" y1="9" x2="15" y2="15" /> </g>}
-            {toast.type === "warn" && <g> <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /> <line x1="12" y1="9" x2="12" y2="13" /> <line x1="12" y1="17" x2="12.01" y2="17" /> </g>}
-            {toast.type === "info" && <g> <circle cx="12" cy="12" r="10" /> <line x1="12" y1="16" x2="12" y2="12" /> <line x1="12" y1="8" x2="12.01" y2="8" /> </g>}
-          </svg>
-          <span style={{ fontSize: "13px" }}>{toast.msg}</span>
-        </div>
+      {activeTab === "costs" && <CostsTab costReport={costReport} days={days} />}
+      {activeTab === "waste" && <WasteTab wasteReport={wasteReport} days={days} />}
+      {activeTab === "stock" && <StockTrendsTab stockTrends={stockTrends} loading={loading} />}
+      {activeTab === "meals" && <MealsTab mealStats={mealStats} days={days} />}
+      {activeTab === "prices" && (
+        <PricesTab
+          ingredients={ingredients}
+          priceTrendIngredientId={priceTrendIngredientId}
+          setPriceTrendIngredientId={setPriceTrendIngredientId}
+          loading={loading}
+          priceTrends={priceTrends}
+        />
       )}
-
-      {/* Tab Content */}
-      {activeTab === "costs" && renderCostsTab()}
-      {activeTab === "waste" && renderWasteTab()}
-      {activeTab === "stock" && renderStockTrendsTab()}
-      {activeTab === "meals" && renderMealsTab()}
-      {activeTab === "prices" && renderPricesTab()}
     </div>
   );
 }

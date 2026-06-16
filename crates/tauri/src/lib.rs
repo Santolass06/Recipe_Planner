@@ -42,7 +42,7 @@ impl AppDb {
     }
 
     // Recipes
-    pub async fn recipes_list(&self) -> Result<Vec<Recipe>, String> {
+    pub async fn recipes_list(&self) -> Result<Vec<RecipeWithIngredients>, String> {
         mise_core::db::recipes_list(&self.db).await.map_err(|e| e.to_string())
     }
 
@@ -447,7 +447,7 @@ pub mod commands {
     #[tauri::command]
     pub async fn recipes_list(
         db: tauri::State<'_, crate::AppDb>,
-    ) -> Result<Vec<Recipe>, String> {
+    ) -> Result<Vec<RecipeWithIngredients>, String> {
         db.recipes_list().await.map_err(|e| e.to_string())
     }
 

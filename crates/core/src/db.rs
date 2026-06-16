@@ -822,7 +822,7 @@ pub async fn toggle_ingredient_favorite(db: &Database, id: i64) -> LibsqlResult<
 }
 
 /// List all recipes
-pub async fn recipes_list(db: &Database) -> LibsqlResult<Vec<Recipe>> {
+pub async fn recipes_list(db: &Database) -> LibsqlResult<Vec<RecipeWithIngredients>> {
     let conn = db.connect()?;
     let mut rows = conn.query(
         "SELECT id, name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, image_path, created_at, updated_at
@@ -831,10 +831,57 @@ pub async fn recipes_list(db: &Database) -> LibsqlResult<Vec<Recipe>> {
     ).await?;
 
     let mut recipes = Vec::new();
+    let mut recipe_ids = Vec::new();
     while let Some(row) = rows.next().await? {
-        recipes.push(row_to_recipe(&row)?);
+        let recipe = row_to_recipe(&row)?;
+        recipe_ids.push(recipe.id);
+        recipes.push(recipe);
     }
-    Ok(recipes)
+
+    if recipes.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let ids_str = recipe_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",");
+    let query = format!(
+        "SELECT ri.id, ri.recipe_id, ri.ingredient_id, ri.ingredient_name, ri.quantity, ri.unit
+         FROM recipe_ingredients ri
+         WHERE ri.recipe_id IN ({})", ids_str
+    );
+    let mut rows = conn.query(&query, ()).await?;
+    
+    let mut ingredients_by_recipe: std::collections::HashMap<i64, Vec<RecipeIngredient>> = std::collections::HashMap::new();
+    while let Some(row) = rows.next().await? {
+        let unit_str: String = row.get(5)?;
+        let unit = match unit_str.as_str() {
+            "gram" => Unit::Gram, "kilogram" => Unit::Kilogram, "milligram" => Unit::Milligram,
+            "ounce" => Unit::Ounce, "pound" => Unit::Pound, "milliliter" => Unit::Milliliter,
+            "liter" => Unit::Liter, "fluid_ounce" => Unit::FluidOunce, "cup" => Unit::Cup,
+            "pint" => Unit::Pint, "quart" => Unit::Quart, "gallon" => Unit::Gallon,
+            "teaspoon" => Unit::Teaspoon, "tablespoon" => Unit::Tablespoon, "piece" => Unit::Piece,
+            "dozen" => Unit::Dozen, "pinch" => Unit::Pinch, "bunch" => Unit::Bunch,
+            "clove" => Unit::Clove, "slice" => Unit::Slice, _ => Unit::Gram,
+        };
+
+        let recipe_id: i64 = row.get(1)?;
+        let ingredient = RecipeIngredient {
+            id: row.get(0)?,
+            recipe_id,
+            ingredient_id: row.get(2)?,
+            ingredient_name: row.get(3)?,
+            quantity: row.get(4)?,
+            unit,
+        };
+        ingredients_by_recipe.entry(recipe_id).or_default().push(ingredient);
+    }
+
+    let mut final_recipes = Vec::with_capacity(recipes.len());
+    for recipe in recipes {
+        let ingredients = ingredients_by_recipe.remove(&recipe.id).unwrap_or_default();
+        final_recipes.push(RecipeWithIngredients { recipe, ingredients });
+    }
+
+    Ok(final_recipes)
 }
 
 /// List recipes with pagination
@@ -2461,11 +2508,11 @@ pub async fn get_meal_plan_entries_by_month(
     month: u32,
 ) -> LibsqlResult<Vec<MealPlanEntryWithRecipe>> {
     // Calculate start and end of month
-    let start_date = Utc.with_ymd_and_hms(year, month, 1, 0, 0, 0).single().unwrap();
+    let start_date = Utc.with_ymd_and_hms(year, month, 1, 0, 0, 0).single().unwrap_or_else(|| Utc::now());
     let end_date = if month == 12 {
-        Utc.with_ymd_and_hms(year + 1, 1, 1, 0, 0, 0).single().unwrap() - chrono::Duration::seconds(1)
+        Utc.with_ymd_and_hms(year + 1, 1, 1, 0, 0, 0).single().unwrap_or_else(|| Utc::now()) - chrono::Duration::seconds(1)
     } else {
-        Utc.with_ymd_and_hms(year, month + 1, 1, 0, 0, 0).single().unwrap() - chrono::Duration::seconds(1)
+        Utc.with_ymd_and_hms(year, month + 1, 1, 0, 0, 0).single().unwrap_or_else(|| Utc::now()) - chrono::Duration::seconds(1)
     };
 
     get_meal_plan_entries_by_date_range(db, start_date, end_date).await
@@ -3515,9 +3562,9 @@ async fn parse_receipt_text(text: &str) -> Vec<ParsedReceiptItem> {
     // "2 UN x 1.50 EUR = 3.00"
     
     // Regex patterns for quantity, unit, price
-    let price_regex = regex::Regex::new(r"(\d+[.,]\d{2})\s*(?:EUR|€|\$|R\$)?").unwrap();
-    let qty_unit_regex = regex::Regex::new(r"(\d+[.,]?\d*)\s*(?:x|X|UN|UNID|KG|G|L|ML|PCS|PÇ)?").unwrap();
-    let discount_regex = regex::Regex::new(r"(?:DESC|DESCONTO|DISCOUNT|%)\s*(\d+[.,]?\d*)%?").unwrap();
+    let Ok(price_regex) = regex::Regex::new(r"(\d+[.,]\d{2})\s*(?:EUR|€|\$|R\$)?") else { return items; };
+    let Ok(qty_unit_regex) = regex::Regex::new(r"(\d+[.,]?\d*)\s*(?:x|X|UN|UNID|KG|G|L|ML|PCS|PÇ)?") else { return items; };
+    let Ok(discount_regex) = regex::Regex::new(r"(?:DESC|DESCONTO|DISCOUNT|%)\s*(\d+[.,]?\d*)%?") else { return items; };
     
     // Get ingredient names for fuzzy matching
     // This would need DB access - for now we just parse without matching
@@ -3548,7 +3595,7 @@ async fn parse_receipt_text(text: &str) -> Vec<ParsedReceiptItem> {
         }
         
         // Use the last price match as the line total
-        let total_price_str = price_matches.last().unwrap().as_str();
+        let total_price_str = price_matches.last().map(|m| m.as_str()).unwrap_or("0");
         let total_price = total_price_str.replace(',', ".").parse::<f64>().unwrap_or(0.0);
         if total_price <= 0.0 {
             continue;
