@@ -153,7 +153,7 @@ export default function CostsPage() {
             <h1 className="content-title">Análise de Custos</h1>
             <p className="content-sub mono">Seleciona uma receita para analisar</p>
           </div>
-          <div className="search-bar" style={{ maxWidth: 300 }}>
+          <div style={{ maxWidth: 300 }}>
             <select className="select" style={{ width: "100%" }} 
               value={selectedRecipeId ?? ""} 
               onChange={e => setSelectedRecipeId(e.target.value ? parseInt(e.target.value) : null)}
@@ -186,7 +186,7 @@ export default function CostsPage() {
           <h1 className="content-title">Análise de Custos</h1>
           <p className="content-sub mono">{selectedRecipe.name} • {selectedRecipe.portions} doses base</p>
         </div>
-        <div className="search-bar" style={{ maxWidth: 350 }}>
+        <div style={{ maxWidth: 350 }}>
           <select className="select" style={{ width: "100%" }} 
             value={selectedRecipeId ?? ""} 
             onChange={e => setSelectedRecipeId(e.target.value ? parseInt(e.target.value) : null)}

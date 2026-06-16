@@ -437,10 +437,17 @@ select {
   cursor: pointer;
   outline: none;
   min-width: 140px;
+  box-shadow: none;
 }
 select:hover { border-color: var(--border-mid); }
-select:focus { border-color: var(--accent-dim); }
-select option {
-  background: var(--bg-elevated);
-  color: var(--text-1);
+select:focus { border-color: var(--accent-dim); outline: none; }
+select option { background: var(--bg-elevated); color: var(--text-1); }
+
+/* Remove border de wrappers que possam duplicar */
+.field select,
+.select-wrapper select,
+.filter-bar select {
+  border: 1px solid var(--border);
+  box-shadow: none;
+  outline: none;
 }
