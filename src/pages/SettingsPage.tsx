@@ -254,45 +254,27 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: "var(--space-6)" }}>
+      <div className="card settings-layout">
         {/* Sidebar Navigation */}
-        <div className="card" style={{ padding: "var(--space-2)", height: "fit-content", position: "sticky", top: "var(--space-6)" }}>
-          <nav style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
-            {CATEGORIES.map(cat => (
-              <button
-                key={cat.key}
-                onClick={() => setActiveCategory(cat.key)}
-                className={`nav-item${activeCategory === cat.key ? " active" : ""}`}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "var(--space-3)",
-                  padding: "var(--space-3) var(--space-4)",
-                  borderRadius: "var(--radius)",
-                  border: "none",
-                  background: activeCategory === cat.key ? "var(--brand-muted)" : "transparent",
-                  color: activeCategory === cat.key ? "var(--brand)" : "var(--text-2)",
-                  fontSize: "14px",
-                  fontWeight: activeCategory === cat.key ? 600 : 400,
-                  cursor: "pointer",
-                  width: "100%",
-                  textAlign: "left",
-                  transition: "all var(--fast)",
-                }}
-              >
-                <span style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>{cat.icon}</span>
-                <span>{cat.label}</span>
-              </button>
-            ))}
-          </nav>
-        </div>
+        <nav className="settings-nav">
+          {CATEGORIES.map(cat => (
+            <button
+              key={cat.key}
+              onClick={() => setActiveCategory(cat.key)}
+              className={`settings-nav-item${activeCategory === cat.key ? " active" : ""}`}
+            >
+              {cat.icon}
+              <span>{cat.label}</span>
+            </button>
+          ))}
+        </nav>
 
         {/* Settings Content */}
-        <div className="card" style={{ padding: "var(--space-6)" }}>
+        <div className="settings-content">
           {activeCategory === "general" && (
             <SettingsSection title="Geral" description="Idioma, tema e formato de data">
-              <div className="field">
-                <label className="field-label">Idioma</label>
+              <div className="settings-group">
+                <label >Idioma</label>
                 <select
                   className="select"
                   value={getSetting("language", "general")}
@@ -302,8 +284,8 @@ export default function SettingsPage() {
                 </select>
               </div>
 
-              <div className="field">
-                <label className="field-label">Tema</label>
+              <div className="settings-group">
+                <label >Tema</label>
                 <select
                   className="select"
                   value={getSetting("theme", "general")}
@@ -313,8 +295,8 @@ export default function SettingsPage() {
                 </select>
               </div>
 
-              <div className="field">
-                <label className="field-label">Formato de data</label>
+              <div className="settings-group">
+                <label >Formato de data</label>
                 <select
                   className="select"
                   value={getSetting("date_format", "general")}
@@ -328,8 +310,8 @@ export default function SettingsPage() {
 
           {activeCategory === "units" && (
             <SettingsSection title="Unidades" description="Unidades padrão para peso, volume e temperatura">
-              <div className="field">
-                <label className="field-label">Peso padrão</label>
+              <div className="settings-group">
+                <label >Peso padrão</label>
                 <select
                   className="select"
                   value={getSetting("weight", "units")}
@@ -339,8 +321,8 @@ export default function SettingsPage() {
                 </select>
               </div>
 
-              <div className="field">
-                <label className="field-label">Volume padrão</label>
+              <div className="settings-group">
+                <label >Volume padrão</label>
                 <select
                   className="select"
                   value={getSetting("volume", "units")}
@@ -350,8 +332,8 @@ export default function SettingsPage() {
                 </select>
               </div>
 
-              <div className="field">
-                <label className="field-label">Temperatura</label>
+              <div className="settings-group">
+                <label >Temperatura</label>
                 <select
                   className="select"
                   value={getSetting("temperature", "units")}
@@ -365,8 +347,8 @@ export default function SettingsPage() {
 
           {activeCategory === "currency" && (
             <SettingsSection title="Moeda" description="Moeda padrão e posição do símbolo">
-              <div className="field">
-                <label className="field-label">Moeda</label>
+              <div className="settings-group">
+                <label >Moeda</label>
                 <select
                   className="select"
                   value={getSetting("currency", "currency")}
@@ -376,8 +358,8 @@ export default function SettingsPage() {
                 </select>
               </div>
 
-              <div className="field">
-                <label className="field-label">Posição do símbolo</label>
+              <div className="settings-group">
+                <label >Posição do símbolo</label>
                 <select
                   className="select"
                   value={getSetting("symbol_position", "currency")}
@@ -406,7 +388,7 @@ export default function SettingsPage() {
                   <p className="text-3" style={{ marginBottom: "var(--space-4)", color: "var(--text-3)" }}>
                     Baixa um ficheiro JSON com todos os teus ingredientes, receitas e definições.
                   </p>
-                  <button className="btn btn-secondary" onClick={handleExport} disabled={saving}>
+                  <button className="btn" onClick={handleExport} disabled={saving}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
                     </svg>
@@ -419,19 +401,24 @@ export default function SettingsPage() {
                   <p className="text-3" style={{ marginBottom: "var(--space-4)", color: "var(--text-3)" }}>
                     Carrega um ficheiro JSON exportado anteriormente. Os dados existentes não serão apagados.
                   </p>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-                    <input
-                      type="file"
-                      accept=".json"
-                      className="input"
-                      onChange={e => setImportFile(e.target.files?.[0] ?? null)}
-                    />
+                  <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "var(--space-3)" }}>
+                    <label className="file-label">
+                      Explorar...
+                      <input
+                        type="file"
+                        accept=".json"
+                        onChange={e => setImportFile(e.target.files?.[0] ?? null)}
+                      />
+                    </label>
+                    <span style={{ color: "var(--text-3)", fontSize: "13px", flex: 1 }}>
+                      {importFile ? importFile.name : "Nenhum ficheiro selecionado."}
+                    </span>
                     <button
-                      className="btn btn-primary"
+                      className="btn"
                       onClick={handleImport}
                       disabled={saving || !importFile}
                     >
-                      {importFile ? `Importar ${importFile.name}` : "Selecionar ficheiro..."}
+                      Importar JSON
                     </button>
                   </div>
                 </div>
@@ -458,8 +445,8 @@ export default function SettingsPage() {
 
           {activeCategory === "sync" && (
             <SettingsSection title="Sincronização" description="Configuração de sincronização na nuvem (Turso/libSQL)">
-              <div className="field">
-                <label className="field-label">Turso Database URL</label>
+              <div className="settings-group">
+                <label >Turso Database URL</label>
                 <input
                   type="text"
                   className="input"
@@ -469,8 +456,8 @@ export default function SettingsPage() {
                 />
               </div>
 
-              <div className="field">
-                <label className="field-label">Auth Token</label>
+              <div className="settings-group">
+                <label >Auth Token</label>
                 <input
                   type="password"
                   className="input"
@@ -493,27 +480,24 @@ export default function SettingsPage() {
             <SettingsSection title="Sobre" description="Informações da aplicação e links úteis">
               <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
                 <div style={{ textAlign: "center", padding: "var(--space-6) 0" }}>
-                  <div className="brand-logo" style={{ width: 80, height: 80, borderRadius: "var(--radius-xl)", background: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "32px", fontWeight: 700, color: "var(--text-inverse)", margin: "0 auto var(--space-4)" }}>
+                  <div className="settings-about-logo">
                     M
                   </div>
-                  <h2 style={{ fontSize: "24px", fontWeight: 600, marginBottom: "var(--space-1)" }}>mise</h2>
-                  <p className="text-2 mono" style={{ marginBottom: "var(--space-2)" }}>pro-kitchen</p>
-                  <p className="text-3">Versão 1.0.0 (build 2026.06)</p>
+                  <h2 style={{ fontSize: "20px", fontWeight: 600, marginBottom: "var(--space-1)" }}>mise</h2>
+                  <p style={{ color: "var(--text-3)", fontSize: "13px", marginBottom: "var(--space-2)" }} className="mono">pro-kitchen</p>
+                  <p style={{ color: "var(--text-2)", fontSize: "13px", marginBottom: "24px" }}>Versão 1.0.0 (build 2026.06)</p>
                 </div>
 
                 <div style={{ borderTop: "1px solid var(--border)", paddingTop: "var(--space-6)" }}>
                   <h3 className="text-2" style={{ marginBottom: "var(--space-4)" }}>Links úteis</h3>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-                    <a href="https://github.com/nousresearch/hermes-agent" target="_blank" rel="noopener noreferrer" className="btn btn-secondary" style={{ justifyContent: "flex-start" }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
+                  <div className="settings-links">
+                    <a href="https://github.com/nousresearch/hermes-agent" target="_blank" rel="noopener noreferrer">
                       Repositório no GitHub
                     </a>
-                    <a href="https://tauri.app" target="_blank" rel="noopener noreferrer" className="btn btn-secondary" style={{ justifyContent: "flex-start" }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+                    <a href="https://tauri.app" target="_blank" rel="noopener noreferrer">
                       Documentação Tauri
                     </a>
-                    <a href="https://react.dev" target="_blank" rel="noopener noreferrer" className="btn btn-secondary" style={{ justifyContent: "flex-start" }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                    <a href="https://react.dev" target="_blank" rel="noopener noreferrer">
                       Documentação React
                     </a>
                   </div>
@@ -521,7 +505,7 @@ export default function SettingsPage() {
 
                 <div style={{ borderTop: "1px solid var(--border)", paddingTop: "var(--space-6)" }}>
                   <h3 className="text-2" style={{ marginBottom: "var(--space-4)" }}>Licenças</h3>
-                  <p className="text-3" style={{ color: "var(--text-3)", lineHeight: 1.6 }}>
+                  <p style={{ color: "var(--text-3)", fontSize: "12px", lineHeight: 1.6 }}>
                     Esta aplicação é construída com tecnologias de código aberto:
                     Tauri, React, Rust, libSQL, e muitas outras bibliotecas incríveis.
                     Consulte o ficheiro LICENSE no repositório para detalhes.
@@ -564,12 +548,10 @@ export default function SettingsPage() {
 
 function SettingsSection({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
+    <div>
+      <h2 className="settings-section-title">{title}</h2>
+      <p className="settings-section-sub">{description}</p>
       <div>
-        <h2 className="text-1" style={{ fontSize: "20px", fontWeight: 600, marginBottom: "var(--space-1)" }}>{title}</h2>
-        <p className="text-3">{description}</p>
-      </div>
-      <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: "var(--space-4)" }}>
         {children}
       </div>
     </div>
