@@ -1785,13 +1785,13 @@ pub async fn export_data(db: &Database) -> LibsqlResult<ImportData> {
     let import_recipes: Vec<ImportRecipe> = recipes.into_iter().map(|r| {
         let recipe_ingredients: Vec<ImportRecipeIngredient> = Vec::new(); // Would need to fetch
         ImportRecipe {
-            name: r.name,
-            category: r.category,
-            portions: r.portions,
-            instructions: r.instructions,
-            prep_time_minutes: r.prep_time_minutes,
-            cook_time_minutes: r.cook_time_minutes,
-            tags: serde_json::from_str(&r.tags).unwrap_or_default(),
+            name: r.recipe.name,
+            category: r.recipe.category,
+            portions: r.recipe.portions,
+            instructions: r.recipe.instructions,
+            prep_time_minutes: r.recipe.prep_time_minutes,
+            cook_time_minutes: r.recipe.cook_time_minutes,
+            tags: serde_json::from_str(&r.recipe.tags).unwrap_or_default(),
             ingredients: recipe_ingredients,
         }
     }).collect();
