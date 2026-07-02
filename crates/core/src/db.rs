@@ -361,6 +361,48 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
     // SQLite has no ALTER COLUMN, so recreate the table when needed.
     repair_shopping_list_items_nullable_ingredient(&conn).await?;
 
+    // Migration 015: approximate unit weights, for costing recipe lines
+    // that use a descriptive count unit (clove, pinch, bunch, slice) with
+    // no fixed physical size against an ingredient priced by weight/volume.
+    // Lives in the DB (not a Rust table) so new cases can be added with an
+    // INSERT, no recompile needed.
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS approximate_unit_weights (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ingredient_name_pattern TEXT NOT NULL,
+            from_unit TEXT NOT NULL,
+            approx_grams_per_unit REAL NOT NULL,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        "#,
+        (),
+    ).await?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_approx_unit_weights_unit ON approximate_unit_weights(from_unit);", ()).await?;
+
+    conn.execute(
+        r#"
+        INSERT INTO approximate_unit_weights (ingredient_name_pattern, from_unit, approx_grams_per_unit, notes)
+        SELECT 'alho', 'clove', 5.0, 'Dente de alho médio (softneck), ~4-7g típico'
+        WHERE NOT EXISTS (
+            SELECT 1 FROM approximate_unit_weights WHERE ingredient_name_pattern = 'alho' AND from_unit = 'clove'
+        )
+        "#,
+        (),
+    ).await?;
+    conn.execute(
+        r#"
+        INSERT INTO approximate_unit_weights (ingredient_name_pattern, from_unit, approx_grams_per_unit, notes)
+        SELECT 'garlic', 'clove', 5.0, 'Average garlic clove (softneck), ~4-7g typical'
+        WHERE NOT EXISTS (
+            SELECT 1 FROM approximate_unit_weights WHERE ingredient_name_pattern = 'garlic' AND from_unit = 'clove'
+        )
+        "#,
+        (),
+    ).await?;
+
     Ok(())
 }
 
@@ -1579,14 +1621,36 @@ pub async fn calculate_cost(db: &Database, recipe_id: i64) -> LibsqlResult<CostB
     while let Some(row) = rows.next().await? {
         let name: String = row.get(0)?;
         let quantity: f64 = row.get(1)?;
-        let unit = parse_unit(&row.get::<String>(2)?);
+        let unit_str: String = row.get(2)?;
+        let unit = parse_unit(&unit_str);
         let price_per_unit: f64 = row.get(3)?;
         let ingredient_unit = parse_unit(&row.get::<String>(4)?);
 
         // Convert the recipe line's quantity into the ingredient's priced
         // unit before multiplying — otherwise "150 g" of an ingredient
-        // priced per kilogram would cost 1000x too much.
-        let quantity_in_ingredient_unit = unit.convert_to(ingredient_unit, quantity).unwrap_or(quantity);
+        // priced per kilogram would cost 1000x too much. When the units
+        // aren't convertible (e.g. "clove" has no fixed physical size),
+        // fall back to an approximate weight lookup before giving up and
+        // using the quantity as-is.
+        let mut is_approximate = false;
+        let mut approximation_note: Option<String> = None;
+        let quantity_in_ingredient_unit = match unit.convert_to(ingredient_unit, quantity) {
+            Some(q) => q,
+            None => match lookup_approximate_grams_per_unit(&conn, &name, &unit_str).await? {
+                Some((grams_per_unit, note)) => {
+                    let quantity_in_grams = quantity * grams_per_unit;
+                    match Unit::Gram.convert_to(ingredient_unit, quantity_in_grams) {
+                        Some(q) => {
+                            is_approximate = true;
+                            approximation_note = Some(note);
+                            q
+                        }
+                        None => quantity,
+                    }
+                }
+                None => quantity,
+            },
+        };
         let line_cost = quantity_in_ingredient_unit * price_per_unit;
         total_cost += line_cost;
 
@@ -1601,6 +1665,8 @@ pub async fn calculate_cost(db: &Database, recipe_id: i64) -> LibsqlResult<CostB
             unit,
             price_per_unit: display_price_per_unit,
             total_cost: line_cost,
+            is_approximate,
+            approximation_note,
         });
     }
 
@@ -1611,6 +1677,37 @@ pub async fn calculate_cost(db: &Database, recipe_id: i64) -> LibsqlResult<CostB
         cost_per_portion,
         ingredient_costs,
     })
+}
+
+/// Look up an approximate gram-per-unit weight for a descriptive count
+/// unit (e.g. "clove") that has no fixed physical size, matched by
+/// ingredient name substring. Prefers the most specific (longest) pattern
+/// when more than one matches. Returns the factor plus a human-readable
+/// note for the UI.
+async fn lookup_approximate_grams_per_unit(
+    conn: &Connection,
+    ingredient_name: &str,
+    from_unit: &str,
+) -> LibsqlResult<Option<(f64, String)>> {
+    let mut rows = conn.query(
+        r#"
+        SELECT approx_grams_per_unit, ingredient_name_pattern
+        FROM approximate_unit_weights
+        WHERE from_unit = ?1
+          AND LOWER(?2) LIKE '%' || LOWER(ingredient_name_pattern) || '%'
+        ORDER BY LENGTH(ingredient_name_pattern) DESC
+        LIMIT 1
+        "#,
+        params![from_unit, ingredient_name],
+    ).await?;
+    if let Some(row) = rows.next().await? {
+        let grams_per_unit: f64 = row.get(0)?;
+        let _pattern: String = row.get(1)?;
+        let note = format!("~{:.0}g por {} (custo aproximado)", grams_per_unit, from_unit);
+        Ok(Some((grams_per_unit, note)))
+    } else {
+        Ok(None)
+    }
 }
 
 /// Analyze recipe cost with margin (returns same breakdown; margin is

@@ -31,6 +31,8 @@ interface IngredientCost {
   unit: string;
   price_per_unit: number;
   total_cost: number;
+  is_approximate: boolean;
+  approximation_note?: string | null;
   promo_price_per_unit?: number | null;
   promo_total_cost?: number | null;
 }
@@ -292,7 +294,17 @@ const profit_total = suggested_price_total - total_cost;
             <tbody>
               {analysis.breakdown.ingredient_costs.map((ic, idx) => (
                 <tr key={idx}>
-                  <td>{ic.name}</td>
+                  <td>
+                    {ic.name}
+                    {ic.is_approximate && (
+                      <span
+                        title={ic.approximation_note ?? "Custo aproximado"}
+                        style={{ marginLeft: "var(--space-1)", color: "var(--warn)", cursor: "help" }}
+                      >
+                        ≈
+                      </span>
+                    )}
+                  </td>
                   <td className="mono">{ic.quantity}</td>
                   <td>{UNIT_LABELS[ic.unit] ?? ic.unit}</td>
                   <td className="mono">{ic.price_per_unit.toFixed(4)} €</td>
@@ -343,6 +355,11 @@ const profit_total = suggested_price_total - total_cost;
             </tfoot>
           </table>
         </div>
+        {analysis.breakdown.ingredient_costs.some(ic => ic.is_approximate) && (
+          <p className="text-3" style={{ marginTop: "var(--space-3)", fontSize: "12px" }}>
+            <span style={{ color: "var(--warn)" }}>≈</span> custo estimado — a receita usa uma unidade (ex: dente, pitada) sem peso fixo universal para este ingrediente.
+          </p>
+        )}
       </div>
 
       {/* SVG Chart: Cost vs Profit */}

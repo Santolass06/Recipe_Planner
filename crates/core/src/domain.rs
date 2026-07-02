@@ -369,6 +369,10 @@ pub struct IngredientCost {
     pub unit: Unit,
     pub price_per_unit: f64,
     pub total_cost: f64,
+    /// True when total_cost relied on an approximate unit-weight lookup
+    /// (e.g. "clove" -> grams) rather than an exact unit conversion.
+    pub is_approximate: bool,
+    pub approximation_note: Option<String>,
 }
 
 /// Price quote (for supplier prices)
