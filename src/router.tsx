@@ -13,6 +13,7 @@ import SettingsPage from "./pages/SettingsPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import ReportsPage from "./pages/ReportsPage";
 import ReceiptScannerPage from "./pages/ReceiptScannerPage";
+import HelpPage from "./pages/HelpPage";
 
 export const router = createBrowserRouter([
   {
@@ -33,7 +34,7 @@ export const router = createBrowserRouter([
       { path: "fornecedores", element: <SuppliersPage /> },
       { path: "scanner", element: <ReceiptScannerPage /> },
       { path: "definicoes", element: <SettingsPage /> },
-      { path: "ajuda", element: <PlaceholderPage name="ajuda" /> },
+      { path: "ajuda", element: <HelpPage /> },
     ],
   },
 ]);

@@ -4,6 +4,7 @@ export const pt = {
     subtitle: "pro-kitchen",
   },
   nav: {
+    dashboard: "Dashboard",
     ingredients: "Ingredientes",
     recipes: "Receitas",
     costs: "Custos",

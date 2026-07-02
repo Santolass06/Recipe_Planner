@@ -2,6 +2,17 @@ import { useState, useEffect, useCallback } from "react";
 import { useToast } from "../components/ui/Toast";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "../i18n";
+import { applyTheme } from "../theme";
+
+// WebKitGTK bloqueia <a href> externos — abrir via plugin opener
+// (capability opener:default já inclui allow-default-urls para https/http).
+async function openExternal(url: string) {
+  try {
+    await invoke("plugin:opener|open_url", { url });
+  } catch (e) {
+    console.error("Erro ao abrir link:", e);
+  }
+}
 
 type SettingsMap = Record<string, string>;
 
@@ -41,6 +52,11 @@ const CATEGORIES: SettingsCategory[] = [
   { key: "about", label: "Sobre", icon: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
+    </svg>
+  )},
+  { key: "developer", label: "Desenvolvedor", icon: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 18l6-6-6-6"/><path d="M8 6l-6 6 6 6"/>
     </svg>
   )},
 ];
@@ -123,6 +139,7 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
 
 export default function SettingsPage() {
   const { setLanguage } = useI18n();
+  const visibleCategories = CATEGORIES.filter(c => c.key !== "developer" || import.meta.env.DEV);
   const [activeCategory, setActiveCategory] = useState("general");
   const [settings, setSettings] = useState<SettingsMap>({});
   const [loading, setLoading] = useState(true);
@@ -130,6 +147,7 @@ export default function SettingsPage() {
   const { showToast } = useToast();
   const [importFile, setImportFile] = useState<File | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showDeleteDataConfirm, setShowDeleteDataConfirm] = useState(false);
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -177,17 +195,7 @@ export default function SettingsPage() {
       }
       if (values.theme) {
         localStorage.setItem("mise-theme", values.theme);
-        if (values.theme === "light") {
-          document.documentElement.setAttribute("data-theme", "light");
-        } else if (values.theme === "system") {
-          if (window.matchMedia("(prefers-color-scheme: light)").matches) {
-            document.documentElement.setAttribute("data-theme", "light");
-          } else {
-            document.documentElement.removeAttribute("data-theme");
-          }
-        } else {
-          document.documentElement.removeAttribute("data-theme");
-        }
+        await applyTheme(values.theme);
       }
       
       showToast("Definições guardadas", "ok");
@@ -245,6 +253,32 @@ export default function SettingsPage() {
     }
   };
 
+  const handleDeleteAllData = async () => {
+    setSaving(true);
+    try {
+      await invoke("delete_all_data");
+      setSettings({});
+      showToast("Todos os dados foram apagados", "ok");
+      setShowDeleteDataConfirm(false);
+    } catch (e) {
+      showToast("Erro ao apagar dados", "err");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSeedDemoData = async () => {
+    setSaving(true);
+    try {
+      await invoke("seed_demo_data");
+      showToast("Dados de demonstração gerados", "ok");
+    } catch (e) {
+      showToast("Erro ao gerar dados", "err");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="content" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "300px" }}>
@@ -271,7 +305,7 @@ export default function SettingsPage() {
       <div className="card settings-layout">
         {/* Sidebar Navigation */}
         <nav className="settings-nav">
-          {CATEGORIES.map(cat => (
+          {visibleCategories.map(cat => (
             <button
               key={cat.key}
               onClick={() => setActiveCategory(cat.key)}
@@ -505,13 +539,13 @@ export default function SettingsPage() {
                 <div style={{ borderTop: "1px solid var(--border)", paddingTop: "var(--space-6)" }}>
                   <h3 className="text-2" style={{ marginBottom: "var(--space-4)" }}>Links úteis</h3>
                   <div className="settings-links">
-                    <a href="https://github.com/nousresearch/hermes-agent" target="_blank" rel="noopener noreferrer">
+                    <a href="https://github.com/Santolass06/Recipe_Planner" target="_blank" rel="noopener noreferrer" onClick={(e) => { e.preventDefault(); openExternal("https://github.com/Santolass06/Recipe_Planner"); }}>
                       Repositório no GitHub
                     </a>
-                    <a href="https://tauri.app" target="_blank" rel="noopener noreferrer">
+                    <a href="https://tauri.app" target="_blank" rel="noopener noreferrer" onClick={(e) => { e.preventDefault(); openExternal("https://tauri.app"); }}>
                       Documentação Tauri
                     </a>
-                    <a href="https://react.dev" target="_blank" rel="noopener noreferrer">
+                    <a href="https://react.dev" target="_blank" rel="noopener noreferrer" onClick={(e) => { e.preventDefault(); openExternal("https://react.dev"); }}>
                       Documentação React
                     </a>
                   </div>
@@ -524,6 +558,52 @@ export default function SettingsPage() {
                     Tauri, React, Rust, libSQL, e muitas outras bibliotecas incríveis.
                     Consulte o ficheiro LICENSE no repositório para detalhes.
                   </p>
+                </div>
+              </div>
+            </SettingsSection>
+          )}
+
+          {activeCategory === "developer" && import.meta.env.DEV && (
+            <SettingsSection title="Desenvolvedor" description="Ferramentas e opções avançadas">
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
+                <div>
+                  <h3 className="text-2" style={{ marginBottom: "var(--space-3)" }}>Informação da aplicação</h3>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", padding: "var(--space-2) 0", borderBottom: "1px solid var(--border)" }}>
+                      <span className="text-3">Versão</span>
+                      <span className="mono">1.0.0 (build 2026.07)</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", padding: "var(--space-2) 0", borderBottom: "1px solid var(--border)" }}>
+                      <span className="text-3">Tecnologia</span>
+                      <span className="mono">Tauri 2 · React 19 · Rust · libSQL</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", padding: "var(--space-2) 0" }}>
+                      <span className="text-3">Base de dados</span>
+                      <span className="mono">libSQL (SQLite) · WAL</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ borderTop: "1px solid var(--border)", paddingTop: "var(--space-6)" }}>
+                  <h3 className="text-2" style={{ marginBottom: "var(--space-3)" }}>Dados de demonstração</h3>
+                  <p className="text-3" style={{ marginBottom: "var(--space-4)", lineHeight: 1.6 }}>
+                    Preenche a base de dados com ingredientes, receitas, stock e cotações de demonstração para testes.
+                  </p>
+                  <button className="btn btn-primary" onClick={handleSeedDemoData} disabled={saving}>
+                    Gerar dados de demonstração
+                  </button>
+                </div>
+
+                <div style={{ borderTop: "1px solid var(--border)", paddingTop: "var(--space-6)" }}>
+                  <h3 className="text-2" style={{ marginBottom: "var(--space-3)", color: "var(--danger)" }}>Zona de perigo</h3>
+                  <p className="text-3" style={{ marginBottom: "var(--space-4)", lineHeight: 1.6 }}>
+                    Apaga permanentemente todos os ingredientes, receitas, stock, listas de compras,
+                    planeamento, fornecedores e definições. Esta acção não pode ser desfeita.
+                  </p>
+                  <button className="btn btn-danger" onClick={() => setShowDeleteDataConfirm(true)}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "var(--space-2)" }}><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+                    Apagar todos os dados
+                  </button>
                 </div>
               </div>
             </SettingsSection>
@@ -551,6 +631,33 @@ export default function SettingsPage() {
               <button className="btn btn-secondary" onClick={() => setShowResetConfirm(false)}>Cancelar</button>
               <button className="btn btn-danger" onClick={handleReset} disabled={saving}>
                 Repor tudo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete All Data Confirmation Modal */}
+      {showDeleteDataConfirm && (
+        <div className="modal-backdrop" onClick={() => setShowDeleteDataConfirm(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Apagar todos os dados</h2>
+              <button className="modal-close" onClick={() => setShowDeleteDataConfirm(false)} aria-label="Fechar">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            <div className="modal-body">
+              <p style={{ color: "var(--text-2)", lineHeight: 1.6 }}>
+                Tem a certeza que quer apagar TODOS os dados? Todos os ingredientes, receitas, stock,
+                listas de compras, planeamento, fornecedores e definições serão permanentemente eliminados.
+                Esta acção NÃO pode ser desfeita.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowDeleteDataConfirm(false)}>Cancelar</button>
+              <button className="btn btn-danger" onClick={handleDeleteAllData} disabled={saving}>
+                Apagar tudo
               </button>
             </div>
           </div>

@@ -466,29 +466,44 @@ export default function RecipesPage() {
     try {
       if (modal === "create") {
         await invoke("recipe_create", {
-          name: form.name.trim(),
-          category: form.category,
-          portions: form.portions,
-          instructions: form.instructions.trim(),
-          ingredients: form.ingredients.map(ing => ({
-            ingredient_id: ing.ingredient_id,
-            quantity: ing.quantity,
-            unit: ing.unit,
-          })),
+          input: {
+            name: form.name.trim(),
+            category: form.category,
+            portions: form.portions,
+            instructions: form.instructions.trim(),
+            ingredients: form.ingredients.map(ing => ({
+              ingredient_id: ing.ingredient_id,
+              quantity: ing.quantity,
+              unit: ing.unit,
+            })),
+            // Campos do RecipeInput sem UI no formulário: enviados explicitamente
+            // para o serde não rejeitar por "missing field" (tags é Vec, obrigatório).
+            prep_time_minutes: null,
+            cook_time_minutes: null,
+            tags: [],
+            image_base64: null,
+          },
         });
         showToast("Receita criada", "ok");
       } else if (editing) {
         await invoke("recipe_update", {
           id: editing.id,
-          name: form.name.trim(),
-          category: form.category,
-          portions: form.portions,
-          instructions: form.instructions.trim(),
-          ingredients: form.ingredients.map(ing => ({
-            ingredient_id: ing.ingredient_id,
-            quantity: ing.quantity,
-            unit: ing.unit,
-          })),
+          input: {
+            name: form.name.trim(),
+            category: form.category,
+            portions: form.portions,
+            instructions: form.instructions.trim(),
+            ingredients: form.ingredients.map(ing => ({
+              ingredient_id: ing.ingredient_id,
+              quantity: ing.quantity,
+              unit: ing.unit,
+            })),
+            // Campos do RecipeInput sem UI no formulário.
+            prep_time_minutes: null,
+            cook_time_minutes: null,
+            tags: [],
+            image_base64: null,
+          },
         });
         showToast("Receita actualizada", "ok");
       }

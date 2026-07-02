@@ -10,6 +10,46 @@ use tauri::path::BaseDirectory;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
+/// Whether the desktop environment prefers a dark color scheme.
+///
+/// WebKitGTK's `prefers-color-scheme` CSS media feature and GTK3's
+/// `gtk-application-prefer-dark-theme` setting don't follow modern
+/// GNOME's dark-mode preference (`org.gnome.desktop.interface
+/// color-scheme`, used by GNOME 42+) — both default to light regardless
+/// of the actual desktop setting, unless something explicitly reads and
+/// applies it. This shells out to `gsettings` (present on any GNOME-based
+/// desktop) instead of relying on those unreliable defaults.
+#[cfg(target_os = "linux")]
+fn system_prefers_dark() -> bool {
+    std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", "color-scheme"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("dark"))
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn system_prefers_dark() -> bool {
+    false
+}
+
+/// Sync GTK's own dark-theme preference so native dialogs (e.g. the file
+/// picker used by the receipt scanner) render in the same theme as the
+/// desktop and the app itself, instead of always opening in light mode.
+#[cfg(target_os = "linux")]
+fn apply_native_theme() {
+    if system_prefers_dark() {
+        if let Some(settings) = gtk::Settings::default() {
+            gtk::prelude::GtkSettingsExt::set_gtk_application_prefer_dark_theme(&settings, true);
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn apply_native_theme() {}
+
 /// Database connection wrapper for Tauri state
 pub struct AppDb {
     pub db: Database,
@@ -181,6 +221,16 @@ impl AppDb {
 
     pub async fn reset_settings(&self) -> Result<(), String> {
         mise_core::db::reset_to_defaults(&self.db).await.map_err(|e| e.to_string())
+    }
+
+    #[cfg(debug_assertions)]
+    pub async fn delete_all_data(&self) -> Result<(), String> {
+        mise_core::db::delete_all_data(&self.db).await.map_err(|e| e.to_string())
+    }
+
+    #[cfg(debug_assertions)]
+    pub async fn seed_demo_data(&self) -> Result<(), String> {
+        mise_core::db::seed_demo_data(&self.db).await.map_err(|e| e.to_string())
     }
 
     // Categories
@@ -401,6 +451,15 @@ impl AppDb {
 
 pub mod commands {
     use super::*;
+
+    /// Returns "dark" or "light" based on the desktop's actual color
+    /// scheme preference (see `system_prefers_dark`), for the frontend's
+    /// "system" theme option — more reliable than the CSS
+    /// `prefers-color-scheme` media query under WebKitGTK.
+    #[tauri::command]
+    pub async fn get_system_theme() -> Result<String, String> {
+        Ok(if system_prefers_dark() { "dark".to_string() } else { "light".to_string() })
+    }
 
     // Ingredients
     #[tauri::command]
@@ -678,6 +737,16 @@ pub mod commands {
             .map_err(|e| e.to_string())
     }
 
+    #[tauri::command]
+    pub async fn shopping_list_group_by_category(
+        db: tauri::State<'_, crate::AppDb>,
+        list_id: i64,
+    ) -> Result<std::collections::HashMap<String, Vec<ShoppingItem>>, String> {
+        db.shopping_list_group_by_category(list_id)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     // Suggester
     #[tauri::command]
     pub async fn suggester_suggest(
@@ -734,6 +803,22 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<(), String> {
         db.reset_settings().await.map_err(|e| e.to_string())
+    }
+
+    #[cfg(debug_assertions)]
+    #[tauri::command]
+    pub async fn delete_all_data(
+        db: tauri::State<'_, crate::AppDb>,
+    ) -> Result<(), String> {
+        db.delete_all_data().await.map_err(|e| e.to_string())
+    }
+
+    #[cfg(debug_assertions)]
+    #[tauri::command]
+    pub async fn seed_demo_data(
+        db: tauri::State<'_, crate::AppDb>,
+    ) -> Result<(), String> {
+        db.seed_demo_data().await.map_err(|e| e.to_string())
     }
 
     // Categories
@@ -1148,6 +1233,8 @@ pub mod commands {
 
 /// Initialize app state (called from src-tauri)
 pub async fn initialize_app_state(app: &tauri::AppHandle) -> Result<(), String> {
+    apply_native_theme();
+
     // Get app data directory (works on Android, iOS, Desktop)
     let app_data_dir = app
         .path()

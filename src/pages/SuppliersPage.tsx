@@ -72,11 +72,9 @@ export default function SuppliersPage() {
 
   const loadSuppliers = useCallback(async () => {
     try {
-      const [suppliersData, quotesData, ingredientsData] = await Promise.all([
-        invoke<Supplier[]>("suppliers_list"),
-        invoke<PriceQuote[]>("price_quotes_all"),
-        invoke<{ id: number; name: string; unit: string }[]>("ingredients_list"),
-      ]);
+      const suppliersData = await invoke<Supplier[]>("suppliers_list");
+      const quotesData = await invoke<PriceQuote[]>("price_quotes_all");
+      const ingredientsData = await invoke<{ id: number; name: string; unit: string }[]>("ingredients_list");
       setIngredients(ingredientsData);
 
       const quotesBySupplier = new Map<string, PriceQuote[]>();
@@ -121,17 +119,21 @@ export default function SuppliersPage() {
       const notes = supplierForm.notes?.trim() || null;
       if (supplierModal === "create") {
         await invoke("supplier_create", {
-          name: supplierForm.name.trim(),
-          contact,
-          notes,
+          input: {
+            name: supplierForm.name.trim(),
+            contact,
+            notes,
+          },
         });
         showToast("Fornecedor criado", "ok");
       } else if (editingSupplier) {
         await invoke("supplier_update", {
           id: editingSupplier.id,
-          name: supplierForm.name.trim(),
-          contact,
-          notes,
+          input: {
+            name: supplierForm.name.trim(),
+            contact,
+            notes,
+          },
         });
         showToast("Fornecedor actualizado", "ok");
       }
@@ -191,10 +193,10 @@ export default function SuppliersPage() {
         is_promo: quoteForm.is_promo,
       };
       if (quoteModal === "create") {
-        await invoke("price_quote_create", payload);
+        await invoke("price_quote_create", { input: payload });
         showToast("Cotação criada", "ok");
       } else if (editingQuote) {
-        await invoke("price_quote_update", { id: editingQuote.id, ...payload });
+        await invoke("price_quote_update", { id: editingQuote.id, input: payload });
         showToast("Cotação actualizada", "ok");
       }
       closeQuoteModal();

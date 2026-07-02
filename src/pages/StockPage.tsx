@@ -403,9 +403,11 @@ export default function StockPage() {
     setLoading(true);
     try {
       await invoke("stock_upsert", {
-        ingredientId: form.ingredient_id,
-        quantity: form.quantity,
-        minQuantity: form.min_quantity,
+        input: {
+          ingredient_id: form.ingredient_id,
+          quantity: form.quantity,
+          min_quantity: form.min_quantity,
+        },
       });
       showToast(modal === "create" ? "Stock criado" : "Stock actualizado", "ok");
       closeModal();
@@ -443,16 +445,20 @@ export default function StockPage() {
     try {
       const total = purchaseForm.quantity * purchaseForm.price_per_unit;
       await invoke("stock_purchase_add", {
-        ingredientId: purchaseForm.ingredient_id,
-        quantity: purchaseForm.quantity,
-        unit: purchaseForm.unit,
-        pricePerUnit: purchaseForm.price_per_unit,
-        totalPrice: total,
-        isDiscount: purchaseForm.is_discount,
-        discountPercent: purchaseForm.discount_percent,
-        purchaseDate: purchaseForm.purchase_date,
-        supplierId: purchaseForm.supplier_id ? purchaseForm.supplier_id : null,
-        notes: purchaseForm.notes || null,
+        input: {
+          ingredient_id: purchaseForm.ingredient_id,
+          quantity: purchaseForm.quantity,
+          unit: purchaseForm.unit,
+          price_per_unit: purchaseForm.price_per_unit,
+          total_price: total,
+          is_discount: purchaseForm.is_discount,
+          discount_percent: purchaseForm.discount_percent,
+          // StockPurchaseInput.purchase_date é DateTime<Utc> (chrono) — exige RFC3339.
+          // O formulário guarda só "YYYY-MM-DD", por isso acrescentamos a hora UTC.
+          purchase_date: `${purchaseForm.purchase_date}T00:00:00Z`,
+          supplier_id: purchaseForm.supplier_id ? Number(purchaseForm.supplier_id) : null,
+          notes: purchaseForm.notes || null,
+        },
       });
       showToast("Compra registada e stock actualizado", "ok");
       closePurchaseModal();

@@ -1,4 +1,4 @@
-[data-theme="light"] {
+:root[data-theme="light"] {
   --bg-base:     #f4f4f0;
   --bg-surface:  #ffffff;
   --bg-elevated: #ededea;
@@ -19,6 +19,10 @@
   --shadow-modal: 0 24px 64px rgba(0,0,0,0.15);
   --bg-status-ok:  #dcfce7;
   --bg-status-out: #fee2e2;
+  --status-pill-ok-bg: #dcfce7;
+  --status-pill-low-bg: #fef3c7;
+  --bg-nav-hover: #e2e2dc;
+  --bg-btn-primary-hover: #d1ebd1;
   --avatar-1-bg: #dcfce7; --avatar-1-fg: #15803d;
   --avatar-2-bg: #fef3c7; --avatar-2-fg: #92400e;
   --avatar-3-bg: #dbeafe; --avatar-3-fg: #1d4ed8;
@@ -27,6 +31,15 @@
   --avatar-6-bg: #ffedd5; --avatar-6-fg: #9a3412;
   --avatar-7-bg: #d1fae5; --avatar-7-fg: #065f46;
   --avatar-8-bg: #fef9c3; --avatar-8-fg: #854d0e;
+
+  /* Overrides light para as vars novas (os aliases em :root resolvem
+     dinamicamente para os valores light, ex. --brand -> --accent light). */
+  --brand-muted:  #f5e9c8;
+  --info:         #1d4ed8;
+  --ok-border:    #86efac;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.12);
 }
 
 :root {
@@ -75,6 +88,10 @@
   /* Status backgrounds */
   --bg-status-ok:  #0d2a15;
   --bg-status-out: #2a0f0f;
+  --status-pill-ok-bg: #0d2a15;
+  --status-pill-low-bg: #2a1f08;
+  --bg-nav-hover: #1f2b39;
+  --bg-btn-primary-hover: #1f381f;
 
   /* Layout */
   --sidebar-w: 220px;
@@ -84,6 +101,33 @@
   /* Typography */
   --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Aliases — bridge entre a nomenclatura do README (--brand/--warn/--danger)
+     e a theme.css actual (--accent/--low/--out). Ambas coexistem. */
+  --brand:        var(--accent);
+  --brand-dim:    var(--accent-dim);
+  --brand-muted:  #3d351a;
+  --surface:      var(--bg-surface);
+  --elevated:     var(--bg-elevated);
+  --danger:       var(--out);
+  --warn:         var(--low);
+  --ok-bg:        var(--bg-status-ok);
+  --border-subtle: var(--border);
+  --info:         #60a5fa;
+  --ok-border:    #1a4d2a;
+
+  /* Espaçamento / elevação / velocidade — usados em todo o frontend. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.4);
+  --fast: 150ms;
+  --radius-md: 10px;
 }
 
 * { box-sizing: border-box; }
@@ -152,7 +196,7 @@ body {
   white-space: nowrap; transition: background 120ms, color 120ms;
   position: relative; text-decoration: none;
 }
-.nav-item:hover { background: #1f2b39; color: var(--text-1); }
+.nav-item:hover { background: var(--bg-nav-hover); color: var(--text-1); }
 .nav-item.active { background: var(--active-bg); color: var(--active-text); }
 .nav-item.active::before {
   content: ""; position: absolute;
@@ -200,7 +244,7 @@ body {
   color: var(--active-text); font-size: 13px; cursor: pointer;
   font-family: var(--sans);
 }
-.btn-primary:hover { background: #1f381f; }
+.btn-primary:hover { background: var(--bg-btn-primary-hover); }
 .btn-primary:active { transform: scale(0.98); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn {
@@ -332,8 +376,8 @@ body {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 11px; padding: 3px 9px; border-radius: 999px;
 }
-.status-pill.ok  { background: #0d2a15; color: var(--ok); }
-.status-pill.low { background: #2a1f08; color: var(--low); }
+.status-pill.ok  { background: var(--status-pill-ok-bg); color: var(--ok); }
+.status-pill.low { background: var(--status-pill-low-bg); color: var(--low); }
 .status-pill.out { background: var(--bg-status-out); color: var(--out); }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; 
                background: currentColor; }

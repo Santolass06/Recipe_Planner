@@ -68,6 +68,50 @@ impl Unit {
         }
     }
 
+    /// Factor to convert one unit of `self` into its group's base unit
+    /// (gram for weight, milliliter for volume, piece for count). Returns
+    /// `None` for descriptive units with no fixed physical size (pinch,
+    /// bunch, clove, slice) — those can't be converted against another
+    /// unit in the same group without knowing the specific ingredient.
+    pub fn to_base_factor(self) -> Option<f64> {
+        match self {
+            Unit::Gram => Some(1.0),
+            Unit::Kilogram => Some(1000.0),
+            Unit::Milligram => Some(0.001),
+            Unit::Ounce => Some(28.3495),
+            Unit::Pound => Some(453.592),
+            Unit::Milliliter => Some(1.0),
+            Unit::Liter => Some(1000.0),
+            Unit::FluidOunce => Some(29.5735),
+            Unit::Cup => Some(236.588),
+            Unit::Pint => Some(473.176),
+            Unit::Quart => Some(946.353),
+            Unit::Gallon => Some(3785.41),
+            Unit::Teaspoon => Some(4.92892),
+            Unit::Tablespoon => Some(14.7868),
+            Unit::Piece => Some(1.0),
+            Unit::Dozen => Some(12.0),
+            Unit::Pinch | Unit::Bunch | Unit::Clove | Unit::Slice => None,
+        }
+    }
+
+    /// Convert a quantity expressed in `self` into the equivalent quantity
+    /// expressed in `target`. Returns `None` if the units aren't in the
+    /// same group or either has no fixed conversion factor — callers
+    /// should fall back to treating the quantity as already being in
+    /// `target`'s unit in that case.
+    pub fn convert_to(self, target: Unit, quantity: f64) -> Option<f64> {
+        if self == target {
+            return Some(quantity);
+        }
+        if self.group() != target.group() {
+            return None;
+        }
+        let from_factor = self.to_base_factor()?;
+        let to_factor = target.to_base_factor()?;
+        Some(quantity * from_factor / to_factor)
+    }
+
     pub fn all() -> &'static [Unit] {
         &[
             Unit::Gram, Unit::Kilogram, Unit::Milligram, Unit::Ounce, Unit::Pound,
@@ -228,7 +272,7 @@ impl StockItem {
 #[ts(export, export_to = "bindings/")]
 pub struct ShoppingItemInput {
     #[validate(range(min = 1))]
-    pub ingredient_id: i64,
+    pub ingredient_id: Option<i64>,
     #[validate(length(min = 1, max = 200))]
     pub ingredient_name: String,
     pub ingredient_unit: Unit,
@@ -251,7 +295,7 @@ pub struct ShoppingItemInput {
 #[ts(export, export_to = "bindings/")]
 pub struct ShoppingItem {
     pub id: i64,
-    pub ingredient_id: i64,
+    pub ingredient_id: Option<i64>,
     pub ingredient_name: String,
     pub ingredient_unit: Unit,
     pub needed_quantity: f64,
@@ -667,7 +711,10 @@ pub struct MealPlanEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct MealPlanWithEntries {
-    #[serde(flatten)]
+    // SEM #[serde(flatten)] — o frontend espera { meal_plan: {...}, entries: [...] }
+    // (aninhado). Com flatten, os campos de MealPlan serializam ao nível de topo
+    // e o frontend crasha com "undefined is not an object (evaluating
+    // 'selectedPlan.meal_plan.name')".
     pub meal_plan: MealPlan,
     pub entries: Vec<MealPlanEntry>,
 }

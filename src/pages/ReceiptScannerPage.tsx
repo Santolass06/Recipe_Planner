@@ -221,14 +221,15 @@ export default function ReceiptScannerPage() {
     let ing = ingredients.find(i => i.name.toLowerCase() === line.name.toLowerCase());
     if (ing) return ing.id;
     try {
-      const newId = await invoke<number>("ingredients_create", {
-        name: line.name,
-        unit: line.unit,
-        default_quantity: line.quantity,
-        min_quantity: 0,
-        price_per_unit: line.price,
-        category: "outros",
+      const newIngredient = await invoke<{ id: number }>("ingredient_create", {
+        input: {
+          name: line.name,
+          unit: line.unit,
+          price_per_unit: line.price,
+          category: "outros",
+        },
       });
+      const newId = newIngredient.id;
       await loadIngredients();
       return newId;
     } catch { throw new Error(`Falha ao criar ingrediente: ${line.name}`); }
@@ -242,16 +243,18 @@ export default function ReceiptScannerPage() {
         const ingId = await findOrCreateIngredient(line);
         const total = line.quantity * line.price;
         await invoke("stock_purchase_add", {
-          ingredientId: ingId,
-          quantity: line.quantity,
-          unit: line.unit,
-          pricePerUnit: line.price,
-          totalPrice: total,
-          isDiscount: line.is_discount,
-          discountPercent: line.discount_percent,
-          purchaseDate: new Date().toISOString().split("T")[0],
-          supplierId: selectedSupplier ? selectedSupplier : null,
-          notes: "Importado via OCR de talão",
+          input: {
+            ingredient_id: ingId,
+            quantity: line.quantity,
+            unit: line.unit,
+            price_per_unit: line.price,
+            total_price: total,
+            is_discount: line.is_discount,
+            discount_percent: line.discount_percent,
+            purchase_date: new Date().toISOString(),
+            supplier_id: selectedSupplier ? selectedSupplier : null,
+            notes: "Importado via OCR de talão",
+          },
         });
       }
       showToast(`${parsedLines.length} compras registadas e stock actualizado`, "ok");

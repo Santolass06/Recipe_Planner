@@ -75,17 +75,21 @@ export default function IngredientsPage() {
     try {
       if (modal === "create") {
         await invoke("ingredient_create", {
-          name: form.name.trim(),
-          unit: form.unit,
-          pricePerUnit: form.price_per_unit,
+          input: {
+            name: form.name.trim(),
+            unit: form.unit,
+            price_per_unit: form.price_per_unit,
+          },
         });
         showToast("Ingrediente criado", "ok");
       } else if (editing) {
         await invoke("ingredient_update", {
           id: editing.id,
-          name: form.name.trim(),
-          unit: form.unit,
-          pricePerUnit: form.price_per_unit,
+          input: {
+            name: form.name.trim(),
+            unit: form.unit,
+            price_per_unit: form.price_per_unit,
+          },
         });
         showToast("Ingrediente actualizado", "ok");
       }

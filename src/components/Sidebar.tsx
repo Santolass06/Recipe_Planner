@@ -2,11 +2,11 @@ import { NavLink } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useI18n } from "../i18n";
 
-type NavItemProps = { icon: ReactNode; label: string; to: string };
+type NavItemProps = { icon: ReactNode; label: string; to: string; end?: boolean };
 
-function NavItem({ icon, label, to }: NavItemProps) {
+function NavItem({ icon, label, to, end }: NavItemProps) {
   return (
-    <NavLink to={to} className={({ isActive }) =>
+    <NavLink to={to} end={end} className={({ isActive }) =>
       "nav-item" + (isActive ? " active" : "")
     }>
       <span className="nav-icon" aria-hidden="true">{icon}</span>
@@ -41,6 +41,7 @@ export default function Sidebar() {
       <nav className="sidebar-scroll" aria-label="Navegação principal">
         <div className="nav-group">
           <p className="nav-group-label">{t("nav.kitchen")}</p>
+          <NavItem to="/" end icon={I.home}   label={t("nav.dashboard")} />
           <NavItem to="/ingredientes" icon={I.leaf}   label={t("nav.ingredients")} />
           <NavItem to="/receitas"     icon={I.book}   label={t("nav.recipes")} />
           <NavItem to="/custos"       icon={I.calc}   label={t("nav.costs")} />

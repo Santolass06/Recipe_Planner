@@ -31,8 +31,8 @@ interface IngredientCost {
   unit: string;
   price_per_unit: number;
   total_cost: number;
-  promo_price_per_unit: number | null;
-  promo_total_cost: number | null;
+  promo_price_per_unit?: number | null;
+  promo_total_cost?: number | null;
 }
 
 interface CostBreakdown {
@@ -70,7 +70,7 @@ export default function CostsPage() {
   const [selectedRecipeId, setSelectedRecipeId] = useState<number | null>(null);
   const [portions, setPortions] = useState<number>(4);
   const [margin, setMargin] = useState<number>(30);
-  const [promoPrices, setPromoPrices] = useState<Record<number, number>>({});
+  const [_promoPrices, setPromoPrices] = useState<Record<number, number>>({});
   const [analysis, setAnalysis] = useState<CostAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
   const { showToast } = useToast();
@@ -89,7 +89,7 @@ export default function CostsPage() {
     } catch (e) {
       showToast("Erro ao carregar dados", "err");
     }
-  }, [showToast, selectedRecipeId]);
+  }, [showToast]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -100,25 +100,36 @@ export default function CostsPage() {
 
     setLoading(true);
     try {
-      const promoArray = Object.entries(promoPrices).map(([id, price]) => ({
-        ingredient_id: parseInt(id),
-        promo_price_per_unit: price,
-      }));
-
-      const result = await invoke<CostAnalysis>("analyze_recipe_cost", {
+      const breakdown = await invoke<CostBreakdown>("cost_calculate", {
         recipeId: selectedRecipeId,
-        marginPercent: margin,
-        promoPrices: promoArray.map(p => [p.ingredient_id, p.promo_price_per_unit]),
       });
 
-      setAnalysis(result);
+      // A margem/lucro é calculada no frontend — o backend devolve só
+      // CostBreakdown (total_cost, cost_per_portion, ingredient_costs).
+      const total_cost = breakdown.total_cost;
+const cost_per_portion = breakdown.cost_per_portion;
+const marginMultiplier = 1 + margin / 100;
+const suggested_price_per_portion = cost_per_portion * marginMultiplier;
+const suggested_price_total = suggested_price_per_portion * portions;
+const profit_per_portion = suggested_price_per_portion - cost_per_portion;
+const profit_total = suggested_price_total - total_cost;
+
+      setAnalysis({
+        breakdown,
+        breakdown_with_promo: null,
+        margin_percent: margin,
+        suggested_price_per_portion,
+        suggested_price_total,
+        profit_per_portion,
+        profit_total,
+      });
     } catch (e) {
       showToast("Erro ao calcular custos", "err");
       setAnalysis(null);
     } finally {
       setLoading(false);
     }
-  }, [selectedRecipeId, recipes, margin, promoPrices, showToast]);
+  }, [selectedRecipeId, recipes, margin, portions, showToast]);
 
   useEffect(() => { calculate(); }, [calculate]);
 

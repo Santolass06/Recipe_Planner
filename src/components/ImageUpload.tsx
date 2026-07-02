@@ -56,8 +56,8 @@ export default function ImageUpload({
   const loadImage = async () => {
     try {
       const images = await invoke<Image[]>("image_get", {
-        entityType,
-        entityId,
+        entityType: entityType,
+        entityId: entityId,
       });
       const primary = images.find(img => img.is_primary) ?? images[0] ?? null;
       setImage(primary);

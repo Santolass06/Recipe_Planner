@@ -159,9 +159,11 @@ export default function MealPlannerPage() {
     setLoading(true);
     try {
       await invoke("meal_plan_create", {
-        name: planForm.name.trim(),
-        start_date: planForm.start_date,
-        end_date: planForm.end_date,
+        input: {
+          name: planForm.name.trim(),
+          start_date: planForm.start_date + "T00:00:00Z",
+          end_date: planForm.end_date + "T00:00:00Z",
+        },
       });
       showToast("Plano criado", "ok");
       setModal(null);
@@ -180,9 +182,11 @@ export default function MealPlannerPage() {
     try {
       await invoke("meal_plan_update", {
         id: selectedPlan.meal_plan.id,
-        name: planForm.name.trim(),
-        start_date: planForm.start_date,
-        end_date: planForm.end_date,
+        input: {
+          name: planForm.name.trim(),
+          start_date: planForm.start_date + "T00:00:00Z",
+          end_date: planForm.end_date + "T00:00:00Z",
+        },
       });
       showToast("Plano actualizado", "ok");
       setModal(null);
@@ -216,11 +220,13 @@ export default function MealPlannerPage() {
     setLoading(true);
     try {
       await invoke("meal_entry_add", {
-        meal_plan_id: selectedPlan.meal_plan.id,
-        recipe_id: entryForm.recipe_id,
-        day_of_week: entryForm.day_of_week,
-        meal_type: entryForm.meal_type,
-        portions: entryForm.portions,
+        mealPlanId: selectedPlan.meal_plan.id,
+        input: {
+          recipe_id: entryForm.recipe_id,
+          day_of_week: entryForm.day_of_week,
+          meal_type: entryForm.meal_type,
+          portions: entryForm.portions,
+        },
       });
       showToast("Entrada adicionada", "ok");
       setEntryForm({ recipe_id: 0, day_of_week: "monday", meal_type: "lunch", portions: 1 });
@@ -239,10 +245,12 @@ export default function MealPlannerPage() {
     try {
       await invoke("meal_entry_update", {
         id: editingEntry.id,
-        recipe_id: entryForm.recipe_id,
-        day_of_week: entryForm.day_of_week,
-        meal_type: entryForm.meal_type,
-        portions: entryForm.portions,
+        input: {
+          recipe_id: entryForm.recipe_id,
+          day_of_week: entryForm.day_of_week,
+          meal_type: entryForm.meal_type,
+          portions: entryForm.portions,
+        },
       });
       showToast("Entrada actualizada", "ok");
       setEntryForm({ recipe_id: 0, day_of_week: "monday", meal_type: "lunch", portions: 1 });
@@ -272,8 +280,8 @@ export default function MealPlannerPage() {
     setLoading(true);
     try {
       const result = await invoke<MealPlanShoppingList>("meal_plan_generate_shopping_list", {
-        plan_id: selectedPlan.meal_plan.id,
-        portions_multiplier: 1,
+        planId: selectedPlan.meal_plan.id,
+        portionsMultiplier: 1,
       });
       showToast(`Lista de compras gerada: ${result.shopping_list.name}`, "ok");
     } catch (e) {

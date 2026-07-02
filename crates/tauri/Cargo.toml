@@ -20,5 +20,8 @@ thiserror = { workspace = true }
 libsql = { workspace = true }
 chrono = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

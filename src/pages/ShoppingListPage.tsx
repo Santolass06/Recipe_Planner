@@ -55,9 +55,10 @@ const CATEGORIES = [
   "Pantry (Secos)", "Condimentos", "Bebidas", "Outros"
 ];
 
-function CategorySection({ category, items, onToggle, onDelete, expandedCategories, toggleExpand }: {
+function CategorySection({ category, items, listId, onToggle, onDelete, expandedCategories, toggleExpand }: {
   category: string;
   items: ShoppingItem[];
+  listId: number;
   onToggle: (id: number, purchased: boolean) => void;
   onDelete: (id: number) => void;
   expandedCategories: Set<string>;
@@ -105,7 +106,7 @@ function CategorySection({ category, items, onToggle, onDelete, expandedCategori
             </thead>
             <tbody>
               {items.map((item) => (
-                <ShoppingItemRow key={item.id} item={item} onToggle={onToggle} onDelete={onDelete} />
+                <ShoppingItemRow key={item.id} item={item} listId={listId} onToggle={onToggle} onDelete={onDelete} />
               ))}
             </tbody>
           </table>
@@ -115,8 +116,9 @@ function CategorySection({ category, items, onToggle, onDelete, expandedCategori
   );
 }
 
-function ShoppingItemRow({ item, onToggle, onDelete }: {
+function ShoppingItemRow({ item, listId, onToggle, onDelete }: {
   item: ShoppingItem;
+  listId: number;
   onToggle: (id: number, purchased: boolean) => void;
   onDelete: (id: number) => void;
 }) {
@@ -128,8 +130,7 @@ function ShoppingItemRow({ item, onToggle, onDelete }: {
     setSaving(true);
     try {
       await invoke("shopping_list_update_item_full", {
-        listId: item.id, // list_id is not available here, but wait, the rust function needs listId. The original code also passed `item.id` which was buggy? Actually we should pass the list id.
-        // Wait, the original code had listId: item.id. Let's keep the original logic to not break it if it worked.
+        listId: listId,
         itemId: item.id,
         input: { ...item, ...editing }
       });
@@ -232,9 +233,9 @@ function AddItemModal({ isOpen, onClose, listId, ingredients, onAdd }: {
       setLoading(true);
       try {
         await invoke("shopping_list_add_item", {
-          listId,
+          listId: listId,
           input: {
-            ingredient_id: 0,
+            ingredient_id: null,
             ingredient_name: quickAddName.trim(),
             ingredient_unit: unit || "piece",
             needed_quantity: quantity,
@@ -257,7 +258,7 @@ function AddItemModal({ isOpen, onClose, listId, ingredients, onAdd }: {
       setLoading(true);
       try {
         await invoke("shopping_list_add_item", {
-          listId,
+          listId: listId,
           input: {
             ingredient_id: selectedIngredient.id,
             ingredient_name: selectedIngredient.name,
@@ -632,6 +633,7 @@ function ShoppingListDetailView({
           sortedCategories.map(category => (
             <CategorySection
               key={category} category={category} items={itemsByCategory[category]}
+              listId={list.id!}
               onToggle={onToggleItem} onDelete={id => setDeleteConfirmItem(id)}
               expandedCategories={expandedCategories}
               toggleExpand={(cat) => setExpandedCategories(prev => {
@@ -764,7 +766,7 @@ export default function ShoppingListPage() {
     try {
       const updatedItem = await invoke<ShoppingItem>("shopping_list_toggle_item", {
         listId: selectedListId!,
-        itemId,
+        itemId: itemId,
         purchased
       });
       setSelectedList(prev => prev ? {
@@ -778,7 +780,7 @@ export default function ShoppingListPage() {
 
   const handleDeleteItem = async (itemId: number) => {
     try {
-      await invoke("shopping_list_remove_item", { listId: selectedListId!, itemId });
+      await invoke("shopping_list_remove_item", { listId: selectedListId!, itemId: itemId });
       setSelectedList(prev => prev ? {
         ...prev,
         items: prev.items.filter(i => i.id !== itemId)

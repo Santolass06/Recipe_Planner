@@ -27,8 +27,12 @@ pub async fn open_db(app_data_dir: Option<PathBuf>) -> LibsqlResult<Database> {
         .build()
         .await?;
 
-    // Enable WAL mode for better concurrency
-    db.connect()?.execute("PRAGMA journal_mode = WAL;", ()).await?;
+    // Enable WAL mode for better concurrency.
+    // PRAGMA journal_mode = WAL devolve uma linha (o modo resultante); o
+    // .execute() do libsql rejeita instruções que devolvem linhas ("Execute
+    // returned rows"), por isso usamos .query() (já usado noutros pontos deste
+    // ficheiro). O modo WAL é aplicado; o Rows devolvido é ignorado.
+    let _ = get_conn(&db).await?.query("PRAGMA journal_mode = WAL;", ()).await?;
 
     // Run migrations
     run_migrations(&db).await?;
@@ -36,9 +40,20 @@ pub async fn open_db(app_data_dir: Option<PathBuf>) -> LibsqlResult<Database> {
     Ok(db)
 }
 
-/// Get a connection from the pool
-pub fn get_conn(db: &Database) -> LibsqlResult<Connection> {
-    db.connect()
+/// Get a connection, waiting for locks instead of failing immediately.
+///
+/// Every db:: function opens its own short-lived `Connection` via
+/// `db.connect()`. `PRAGMA busy_timeout` is a per-connection setting in
+/// SQLite (not persisted to the file), so without setting it here, two
+/// requests landing within the same few milliseconds (e.g. React
+/// StrictMode firing an effect's fetch twice, or two pages loading at
+/// once) would race for the file lock and one would fail outright with
+/// "database is locked" even though nothing was actually wrong — the
+/// user sees a random error toast on a page that otherwise loaded fine.
+pub async fn get_conn(db: &Database) -> LibsqlResult<Connection> {
+    let conn = db.connect()?;
+    let _ = conn.query("PRAGMA busy_timeout = 5000;", ()).await?;
+    Ok(conn)
 }
 
 /// Get data directory for the app (desktop fallback)
@@ -53,7 +68,7 @@ fn get_data_dir() -> std::io::Result<PathBuf> {
 
 /// Run all migrations
 async fn run_migrations(db: &Database) -> LibsqlResult<()> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
 
     // Migration 001: Initial schema
     conn.execute(
@@ -172,7 +187,7 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
         CREATE TABLE IF NOT EXISTS shopping_list_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             shopping_list_id INTEGER NOT NULL,
-            ingredient_id INTEGER NOT NULL,
+            ingredient_id INTEGER,
             ingredient_name TEXT NOT NULL,
             ingredient_unit TEXT NOT NULL,
             needed_quantity REAL NOT NULL,
@@ -339,6 +354,60 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
     conn.execute("CREATE INDEX IF NOT EXISTS idx_receipt_imports_status ON receipt_imports(status);", ()).await?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_receipt_imports_created ON receipt_imports(created_at);", ()).await?;
 
+    // Migration 014: repair shopping_list_items.ingredient_id NOT NULL constraint.
+    // Quick-add (ingredient-less) items need ingredient_id nullable, but
+    // `CREATE TABLE IF NOT EXISTS` above only applies to fresh installs —
+    // existing databases keep the old NOT NULL column, so quick-add fails.
+    // SQLite has no ALTER COLUMN, so recreate the table when needed.
+    repair_shopping_list_items_nullable_ingredient(&conn).await?;
+
+    Ok(())
+}
+
+async fn repair_shopping_list_items_nullable_ingredient(conn: &Connection) -> LibsqlResult<()> {
+    let mut rows = conn.query("PRAGMA table_info(shopping_list_items)", ()).await?;
+    let mut ingredient_id_not_null = false;
+    while let Some(row) = rows.next().await? {
+        let name: String = row.get(1)?;
+        if name == "ingredient_id" {
+            let notnull: i64 = row.get(3)?;
+            ingredient_id_not_null = notnull != 0;
+        }
+    }
+    drop(rows);
+
+    if !ingredient_id_not_null {
+        return Ok(());
+    }
+
+    conn.execute("ALTER TABLE shopping_list_items RENAME TO shopping_list_items_old", ()).await?;
+    conn.execute(
+        r#"
+        CREATE TABLE shopping_list_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            shopping_list_id INTEGER NOT NULL,
+            ingredient_id INTEGER,
+            ingredient_name TEXT NOT NULL,
+            ingredient_unit TEXT NOT NULL,
+            needed_quantity REAL NOT NULL,
+            stock_quantity REAL NOT NULL,
+            to_buy_quantity REAL NOT NULL,
+            category TEXT NOT NULL DEFAULT '',
+            estimated_cost REAL NOT NULL DEFAULT 0,
+            purchased INTEGER NOT NULL DEFAULT 0,
+            purchased_at TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (shopping_list_id) REFERENCES shopping_lists(id) ON DELETE CASCADE,
+            FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE RESTRICT
+        );
+        "#,
+        (),
+    ).await?;
+    conn.execute("INSERT INTO shopping_list_items SELECT * FROM shopping_list_items_old", ()).await?;
+    conn.execute("DROP TABLE shopping_list_items_old", ()).await?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_shopping_list_items_list ON shopping_list_items(shopping_list_id);", ()).await?;
+
     Ok(())
 }
 
@@ -465,7 +534,7 @@ fn row_to_recipe(row: &Row) -> LibsqlResult<Recipe> {
 
 /// Map a libsql Row to RecipeWithIngredients
 async fn row_to_recipe_with_ingredients(db: &Database, recipe: Recipe) -> LibsqlResult<RecipeWithIngredients> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
         "SELECT ri.id, ri.recipe_id, ri.ingredient_id, ri.ingredient_name, ri.quantity, ri.unit,
          i.name, i.unit, i.price_per_unit
@@ -517,65 +586,6 @@ async fn row_to_recipe_with_ingredients(db: &Database, recipe: Recipe) -> Libsql
 
 /// Map a libsql Row to StockItem
 fn row_to_stock_item(row: &Row) -> LibsqlResult<StockItem> {
-    let unit_str: String = row.get(2)?;
-    let unit = match unit_str.as_str() {
-        "gram" => Unit::Gram,
-        "kilogram" => Unit::Kilogram,
-        "milligram" => Unit::Milligram,
-        "ounce" => Unit::Ounce,
-        "pound" => Unit::Pound,
-        "milliliter" => Unit::Milliliter,
-        "liter" => Unit::Liter,
-        "fluid_ounce" => Unit::FluidOunce,
-        "cup" => Unit::Cup,
-        "pint" => Unit::Pint,
-        "quart" => Unit::Quart,
-        "gallon" => Unit::Gallon,
-        "teaspoon" => Unit::Teaspoon,
-        "tablespoon" => Unit::Tablespoon,
-        "piece" => Unit::Piece,
-        "dozen" => Unit::Dozen,
-        "pinch" => Unit::Pinch,
-        "bunch" => Unit::Bunch,
-        "clove" => Unit::Clove,
-        "slice" => Unit::Slice,
-        _ => Unit::Gram,
-    };
-
-    let updated_at_str: String = row.get(5)?;
-    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
-
-    Ok(StockItem {
-        id: row.get(0)?,
-        ingredient_id: row.get(1)?,
-        ingredient_name: row.get(2)?,
-        ingredient_unit: unit,
-        quantity: row.get(3)?,
-        min_quantity: row.get(4)?,
-        updated_at,
-    })
-}
-
-/// Map a libsql Row to ShoppingList
-fn row_to_shopping_list(row: &Row) -> LibsqlResult<ShoppingList> {
-    let created_at_str: String = row.get(2)?;
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
-
-    Ok(ShoppingList {
-        id: Some(row.get(0)?),
-        name: row.get(1)?,
-        items: Vec::new(), // Will be populated separately
-        total_estimated_cost: 0.0, // Will be calculated
-        created_at,
-    })
-}
-
-/// Map a libsql Row to ShoppingItem
-fn row_to_shopping_item(row: &Row) -> LibsqlResult<ShoppingItem> {
     let unit_str: String = row.get(3)?;
     let unit = match unit_str.as_str() {
         "gram" => Unit::Gram,
@@ -601,12 +611,76 @@ fn row_to_shopping_item(row: &Row) -> LibsqlResult<ShoppingItem> {
         _ => Unit::Gram,
     };
 
-    let purchased_at_str: Option<String> = row.get(11)?;
+    // SELECT order: s.id(0), s.ingredient_id(1), i.name(2), i.unit(3),
+    // s.quantity(4), s.min_quantity(5), s.updated_at(6)
+    let updated_at_str: String = row.get(6)?;
+    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+
+    Ok(StockItem {
+        id: row.get(0)?,
+        ingredient_id: row.get(1)?,
+        ingredient_name: row.get(2)?,
+        ingredient_unit: unit,
+        quantity: row.get(4)?,
+        min_quantity: row.get(5)?,
+        updated_at,
+    })
+}
+
+/// Map a libsql Row to ShoppingList
+fn row_to_shopping_list(row: &Row) -> LibsqlResult<ShoppingList> {
+    let created_at_str: String = row.get(2)?;
+    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+
+    Ok(ShoppingList {
+        id: Some(row.get(0)?),
+        name: row.get(1)?,
+        items: Vec::new(), // Will be populated separately
+        total_estimated_cost: 0.0, // Will be calculated
+        created_at,
+    })
+}
+
+/// Map a libsql Row to ShoppingItem
+fn row_to_shopping_item(row: &Row) -> LibsqlResult<ShoppingItem> {
+    // SELECT order: id(0), shopping_list_id(1), ingredient_id(2), ingredient_name(3),
+    // ingredient_unit(4), needed_quantity(5), stock_quantity(6), to_buy_quantity(7),
+    // category(8), estimated_cost(9), purchased(10), notes(11), purchased_at(12), created_at(13)
+    let unit_str: String = row.get(4)?;
+    let unit = match unit_str.as_str() {
+        "gram" => Unit::Gram,
+        "kilogram" => Unit::Kilogram,
+        "milligram" => Unit::Milligram,
+        "ounce" => Unit::Ounce,
+        "pound" => Unit::Pound,
+        "milliliter" => Unit::Milliliter,
+        "liter" => Unit::Liter,
+        "fluid_ounce" => Unit::FluidOunce,
+        "cup" => Unit::Cup,
+        "pint" => Unit::Pint,
+        "quart" => Unit::Quart,
+        "gallon" => Unit::Gallon,
+        "teaspoon" => Unit::Teaspoon,
+        "tablespoon" => Unit::Tablespoon,
+        "piece" => Unit::Piece,
+        "dozen" => Unit::Dozen,
+        "pinch" => Unit::Pinch,
+        "bunch" => Unit::Bunch,
+        "clove" => Unit::Clove,
+        "slice" => Unit::Slice,
+        _ => Unit::Gram,
+    };
+
+    let purchased_at_str: Option<String> = row.get(12)?;
     let purchased_at = purchased_at_str
         .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
         .map(|dt| dt.with_timezone(&Utc));
 
-    let created_at_str: String = row.get(12)?;
+    let created_at_str: String = row.get(13)?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_else(|_| Utc::now());
@@ -649,8 +723,9 @@ fn row_to_category(row: &Row) -> LibsqlResult<Category> {
 
 /// Map a libsql Row to Supplier
 fn row_to_supplier(row: &Row) -> LibsqlResult<Supplier> {
-    let created_at_str: String = row.get(3)?;
-    let updated_at_str: String = row.get(4)?;
+    // SELECT order: id(0), name(1), contact(2), notes(3), created_at(4), updated_at(5)
+    let created_at_str: String = row.get(4)?;
+    let updated_at_str: String = row.get(5)?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_else(|_| Utc::now());
@@ -718,7 +793,7 @@ fn row_to_setting(row: &Row) -> LibsqlResult<Setting> {
 
 /// List all ingredients
 pub async fn ingredients_list(db: &Database) -> LibsqlResult<Vec<Ingredient>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
         "SELECT id, name, unit, price_per_unit, category_id, created_at, updated_at, favorite
          FROM ingredients ORDER BY name",
@@ -734,7 +809,7 @@ pub async fn ingredients_list(db: &Database) -> LibsqlResult<Vec<Ingredient>> {
 
 /// Create ingredient
 pub async fn create_ingredient(db: &Database, input: IngredientInput) -> LibsqlResult<Ingredient> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let unit_str = match input.unit {
         Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
         Unit::Ounce => "ounce", Unit::Pound => "pound",
@@ -766,7 +841,7 @@ pub async fn create_ingredient(db: &Database, input: IngredientInput) -> LibsqlR
 
 /// Update ingredient
 pub async fn update_ingredient(db: &Database, id: i64, input: IngredientInput) -> LibsqlResult<Ingredient> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let unit_str = match input.unit {
         Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
         Unit::Ounce => "ounce", Unit::Pound => "pound",
@@ -797,14 +872,14 @@ pub async fn update_ingredient(db: &Database, id: i64, input: IngredientInput) -
 
 /// Delete ingredient
 pub async fn delete_ingredient(db: &Database, id: i64) -> LibsqlResult<()> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute("DELETE FROM ingredients WHERE id = ?1", params![id]).await?;
     Ok(())
 }
 
 /// Toggle ingredient favorite
 pub async fn toggle_ingredient_favorite(db: &Database, id: i64) -> LibsqlResult<Ingredient> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute(
         "UPDATE ingredients SET favorite = CASE WHEN favorite = 1 THEN 0 ELSE 1 END, updated_at = datetime('now')
          WHERE id = ?1",
@@ -823,7 +898,7 @@ pub async fn toggle_ingredient_favorite(db: &Database, id: i64) -> LibsqlResult<
 
 /// List all recipes
 pub async fn recipes_list(db: &Database) -> LibsqlResult<Vec<RecipeWithIngredients>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
         "SELECT id, name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, image_path, created_at, updated_at
          FROM recipes ORDER BY created_at DESC",
@@ -886,7 +961,7 @@ pub async fn recipes_list(db: &Database) -> LibsqlResult<Vec<RecipeWithIngredien
 
 /// List recipes with pagination
 pub async fn recipes_paginated(db: &Database, page: u32, per_page: u32) -> LibsqlResult<Paginated<Recipe>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let offset = (page - 1) * per_page;
 
     let mut rows = conn.query("SELECT COUNT(*) FROM recipes", ()).await?;
@@ -914,7 +989,7 @@ pub async fn recipes_paginated(db: &Database, page: u32, per_page: u32) -> Libsq
 
 /// Get recipe by ID
 pub async fn get_recipe(db: &Database, id: i64) -> LibsqlResult<Recipe> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
         "SELECT id, name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, image_path, created_at, updated_at
          FROM recipes WHERE id = ?1",
@@ -927,7 +1002,7 @@ pub async fn get_recipe(db: &Database, id: i64) -> LibsqlResult<Recipe> {
 
 /// Create recipe with ingredients
 pub async fn create_recipe(db: &Database, input: RecipeInput) -> LibsqlResult<RecipeWithIngredients> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let tags_json = serde_json::to_string(&input.tags).unwrap_or_else(|_| "[]".to_string());
 
     conn.execute(
@@ -970,7 +1045,7 @@ pub async fn create_recipe(db: &Database, input: RecipeInput) -> LibsqlResult<Re
 
 /// Update recipe
 pub async fn update_recipe(db: &Database, id: i64, input: RecipeInput) -> LibsqlResult<RecipeWithIngredients> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let tags_json = serde_json::to_string(&input.tags).unwrap_or_else(|_| "[]".to_string());
 
     conn.execute(
@@ -1014,7 +1089,7 @@ pub async fn update_recipe(db: &Database, id: i64, input: RecipeInput) -> Libsql
 
 /// Delete recipe
 pub async fn delete_recipe(db: &Database, id: i64) -> LibsqlResult<()> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute("DELETE FROM recipes WHERE id = ?1", params![id]).await?;
     // recipe_ingredients are cascade deleted
     Ok(())
@@ -1022,7 +1097,7 @@ pub async fn delete_recipe(db: &Database, id: i64) -> LibsqlResult<()> {
 
 /// Toggle recipe favorite
 pub async fn toggle_recipe_favorite(db: &Database, id: i64) -> LibsqlResult<Recipe> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute(
         "UPDATE recipes SET favorite = CASE WHEN favorite = 1 THEN 0 ELSE 1 END, updated_at = datetime('now')
          WHERE id = ?1",
@@ -1034,7 +1109,7 @@ pub async fn toggle_recipe_favorite(db: &Database, id: i64) -> LibsqlResult<Reci
 
 /// Clone recipe
 pub async fn clone_recipe(db: &Database, id: i64) -> LibsqlResult<RecipeWithIngredients> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let original = get_recipe(db, id).await?;
 
     let tags_json = serde_json::to_string(&serde_json::from_str::<Vec<String>>(&original.tags).unwrap_or_default())
@@ -1073,7 +1148,7 @@ pub async fn clone_recipe(db: &Database, id: i64) -> LibsqlResult<RecipeWithIngr
 
 /// List stock
 pub async fn stock_list(db: &Database) -> LibsqlResult<Vec<StockItem>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
         "SELECT s.id, s.ingredient_id, i.name, i.unit, s.quantity, s.min_quantity, s.updated_at
          FROM stock s
@@ -1091,7 +1166,7 @@ pub async fn stock_list(db: &Database) -> LibsqlResult<Vec<StockItem>> {
 
 /// Get stock by ingredient ID
 pub async fn get_stock(db: &Database, ingredient_id: i64) -> LibsqlResult<StockItem> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
         "SELECT s.id, s.ingredient_id, i.name, i.unit, s.quantity, s.min_quantity, s.updated_at
          FROM stock s JOIN ingredients i ON s.ingredient_id = i.id
@@ -1105,16 +1180,14 @@ pub async fn get_stock(db: &Database, ingredient_id: i64) -> LibsqlResult<StockI
 
 /// Upsert stock
 pub async fn upsert_stock(db: &Database, input: StockInput) -> LibsqlResult<StockItem> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
-        "SELECT name FROM ingredients WHERE id = ?1", params![input.ingredient_id]
+        "SELECT name, unit FROM ingredients WHERE id = ?1", params![input.ingredient_id]
     ).await?;
-    let ingredient_name: String = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
-    
-    let mut rows = conn.query(
-        "SELECT unit FROM ingredients WHERE id = ?1", params![input.ingredient_id]
-    ).await?;
-    let unit_str: String = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    let ingredient_name: String = row.get(0)?;
+    let unit_str: String = row.get(1)?;
+    drop(rows);
 
     conn.execute(
         "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity, updated_at)
@@ -1124,30 +1197,36 @@ pub async fn upsert_stock(db: &Database, input: StockInput) -> LibsqlResult<Stoc
         params![input.ingredient_id, ingredient_name, unit_str, input.quantity, input.min_quantity],
     ).await?;
 
+    // Release the connection before get_stock opens its own — libsql's
+    // connection pool can deadlock if a second connect() is called while
+    // the first is still held (manifests as an infinite hang in the UI).
+    drop(conn);
     get_stock(db, input.ingredient_id).await
 }
 
 /// Update stock quantity
 pub async fn update_stock_quantity(db: &Database, ingredient_id: i64, quantity: f64) -> LibsqlResult<StockItem> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute(
         "UPDATE stock SET quantity = ?1, updated_at = datetime('now') WHERE ingredient_id = ?2",
         params![quantity, ingredient_id],
     ).await?;
 
+    // Release the connection before get_stock opens its own (pool deadlock).
+    drop(conn);
     get_stock(db, ingredient_id).await
 }
 
 /// Delete stock
 pub async fn delete_stock(db: &Database, ingredient_id: i64) -> LibsqlResult<()> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute("DELETE FROM stock WHERE ingredient_id = ?1", params![ingredient_id]).await?;
     Ok(())
 }
 
 /// List shopping lists
 pub async fn shopping_lists_list(db: &Database) -> LibsqlResult<Vec<ShoppingList>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
         "SELECT id, name, created_at FROM shopping_lists ORDER BY created_at DESC",
         (),
@@ -1162,7 +1241,7 @@ pub async fn shopping_lists_list(db: &Database) -> LibsqlResult<Vec<ShoppingList
 
 /// Get shopping list with items
 pub async fn get_shopping_list(db: &Database, id: i64) -> LibsqlResult<ShoppingList> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
         "SELECT id, name, created_at FROM shopping_lists WHERE id = ?1",
         params![id],
@@ -1192,7 +1271,7 @@ pub async fn get_shopping_list(db: &Database, id: i64) -> LibsqlResult<ShoppingL
 
 /// Create shopping list
 pub async fn create_shopping_list(db: &Database, name: String, items: Vec<ShoppingItem>) -> LibsqlResult<ShoppingList> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute("INSERT INTO shopping_lists (name) VALUES (?1)", params![name]).await?;
     let list_id = conn.last_insert_rowid();
 
@@ -1225,7 +1304,7 @@ pub async fn create_shopping_list_from_recipes(db: &Database, recipe_ids: Vec<i6
 
 /// Update shopping list item
 pub async fn update_shopping_list_item(db: &Database, list_id: i64, item_id: i64, purchased: bool) -> LibsqlResult<ShoppingList> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let purchased_at = if purchased { Some(chrono::Utc::now().to_rfc3339()) } else { None };
     conn.execute(
         "UPDATE shopping_list_items SET purchased = ?1, purchased_at = ?2 WHERE id = ?3 AND shopping_list_id = ?4",
@@ -1237,14 +1316,14 @@ pub async fn update_shopping_list_item(db: &Database, list_id: i64, item_id: i64
 
 /// Delete shopping list
 pub async fn delete_shopping_list(db: &Database, id: i64) -> LibsqlResult<()> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute("DELETE FROM shopping_lists WHERE id = ?1", params![id]).await?;
     Ok(())
 }
 
 /// Update shopping list name
 pub async fn update_shopping_list(db: &Database, id: i64, name: String) -> LibsqlResult<ShoppingList> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute("UPDATE shopping_lists SET name = ?1 WHERE id = ?2", params![name, id]).await?;
     
     let mut rows = conn.query(
@@ -1261,7 +1340,7 @@ pub async fn shopping_list_add_item(
     list_id: i64,
     input: ShoppingItemInput,
 ) -> LibsqlResult<ShoppingItem> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     
     let unit_str = match input.ingredient_unit {
         Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
@@ -1309,7 +1388,7 @@ pub async fn shopping_list_update_item(
     item_id: i64,
     input: ShoppingItemInput,
 ) -> LibsqlResult<ShoppingItem> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
 
     let unit_str = match input.ingredient_unit {
         Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
@@ -1359,7 +1438,7 @@ pub async fn shopping_list_toggle_item(
     item_id: i64,
     purchased: bool,
 ) -> LibsqlResult<ShoppingItem> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let purchased_at = if purchased { Some(chrono::Utc::now().to_rfc3339()) } else { None };
     
     conn.execute(
@@ -1382,7 +1461,7 @@ pub async fn shopping_list_remove_item(
     list_id: i64,
     item_id: i64,
 ) -> LibsqlResult<()> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute(
         "DELETE FROM shopping_list_items WHERE id = ?1 AND shopping_list_id = ?2",
         params![item_id, list_id],
@@ -1396,7 +1475,7 @@ pub async fn shopping_list_reorder_items(
     list_id: i64,
     item_ids: Vec<i64>,
 ) -> LibsqlResult<Vec<ShoppingItem>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     
     // Update sort order using a temporary column or by re-inserting
     // For simplicity, we'll use a sorting index stored in a new column or just return the re-ordered items
@@ -1442,7 +1521,7 @@ pub async fn shopping_list_clear_purchased(
     db: &Database,
     list_id: i64,
 ) -> LibsqlResult<ShoppingList> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute(
         "DELETE FROM shopping_list_items WHERE shopping_list_id = ?1 AND purchased = 1",
         params![list_id],
@@ -1458,22 +1537,91 @@ pub async fn suggest_recipes(db: &Database) -> LibsqlResult<Vec<SuggestedRecipe>
 
 /// Calculate recipe cost
 pub async fn calculate_cost(db: &Database, recipe_id: i64) -> LibsqlResult<CostBreakdown> {
-    // Simplified implementation
+    let conn = get_conn(db).await?;
+
+    // Get recipe portions
+    let mut rows = conn.query(
+        "SELECT portions FROM recipes WHERE id = ?1",
+        params![recipe_id],
+    ).await?;
+    let portions: u32 = rows.next().await?
+        .ok_or_else(|| libsql::Error::QueryReturnedNoRows)?
+        .get(0)?;
+
+    // Get ingredients with their prices (JOIN ingredients for current price).
+    // i.unit is the unit price_per_unit is denominated in, which may differ
+    // from ri.unit (the unit chosen for this recipe line) — e.g. an
+    // ingredient priced per kilogram used as grams in a recipe.
+    let mut rows = conn.query(
+        r#"SELECT ri.ingredient_name, ri.quantity, ri.unit, i.price_per_unit, i.unit
+           FROM recipe_ingredients ri
+           JOIN ingredients i ON ri.ingredient_id = i.id
+           WHERE ri.recipe_id = ?1"#,
+        params![recipe_id],
+    ).await?;
+
+    let mut ingredient_costs = Vec::new();
+    let mut total_cost = 0.0_f64;
+
+    fn parse_unit(unit_str: &str) -> Unit {
+        match unit_str {
+            "gram" => Unit::Gram, "kilogram" => Unit::Kilogram, "milligram" => Unit::Milligram,
+            "ounce" => Unit::Ounce, "pound" => Unit::Pound,
+            "milliliter" => Unit::Milliliter, "liter" => Unit::Liter, "fluid_ounce" => Unit::FluidOunce,
+            "cup" => Unit::Cup, "pint" => Unit::Pint, "quart" => Unit::Quart, "gallon" => Unit::Gallon,
+            "teaspoon" => Unit::Teaspoon, "tablespoon" => Unit::Tablespoon,
+            "piece" => Unit::Piece, "dozen" => Unit::Dozen,
+            "pinch" => Unit::Pinch, "bunch" => Unit::Bunch, "clove" => Unit::Clove, "slice" => Unit::Slice,
+            _ => Unit::Gram,
+        }
+    }
+
+    while let Some(row) = rows.next().await? {
+        let name: String = row.get(0)?;
+        let quantity: f64 = row.get(1)?;
+        let unit = parse_unit(&row.get::<String>(2)?);
+        let price_per_unit: f64 = row.get(3)?;
+        let ingredient_unit = parse_unit(&row.get::<String>(4)?);
+
+        // Convert the recipe line's quantity into the ingredient's priced
+        // unit before multiplying — otherwise "150 g" of an ingredient
+        // priced per kilogram would cost 1000x too much.
+        let quantity_in_ingredient_unit = unit.convert_to(ingredient_unit, quantity).unwrap_or(quantity);
+        let line_cost = quantity_in_ingredient_unit * price_per_unit;
+        total_cost += line_cost;
+
+        // Report price_per_unit re-expressed in the recipe line's own unit
+        // (not the ingredient's stored unit) so the displayed row is
+        // internally consistent: quantity * price_per_unit == total_cost.
+        let display_price_per_unit = if quantity != 0.0 { line_cost / quantity } else { price_per_unit };
+
+        ingredient_costs.push(IngredientCost {
+            name,
+            quantity,
+            unit,
+            price_per_unit: display_price_per_unit,
+            total_cost: line_cost,
+        });
+    }
+
+    let cost_per_portion = if portions > 0 { total_cost / portions as f64 } else { 0.0 };
+
     Ok(CostBreakdown {
-        total_cost: 0.0,
-        cost_per_portion: 0.0,
-        ingredient_costs: Vec::new(),
+        total_cost,
+        cost_per_portion,
+        ingredient_costs,
     })
 }
 
-/// Analyze recipe cost with margin
-pub async fn analyze_cost(db: &Database, recipe_id: i64, margin_percent: f64) -> LibsqlResult<CostBreakdown> {
+/// Analyze recipe cost with margin (returns same breakdown; margin is
+/// computed in the frontend where the CostAnalysis shape lives).
+pub async fn analyze_cost(db: &Database, recipe_id: i64, _margin_percent: f64) -> LibsqlResult<CostBreakdown> {
     calculate_cost(db, recipe_id).await
 }
 
 /// Get setting
 pub async fn get_setting(db: &Database, key: &str) -> LibsqlResult<Option<String>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query("SELECT value FROM settings WHERE key = ?1", params![key]).await?;
     if let Some(row) = rows.next().await? {
         Ok(Some(row.get(0)?))
@@ -1484,7 +1632,7 @@ pub async fn get_setting(db: &Database, key: &str) -> LibsqlResult<Option<String
 
 /// Set setting
 pub async fn set_setting(db: &Database, key: &str, value: &str) -> LibsqlResult<()> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute(
         "INSERT INTO settings (key, value, updated_at) VALUES (?1, ?2, datetime('now'))
          ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')",
@@ -1495,7 +1643,7 @@ pub async fn set_setting(db: &Database, key: &str, value: &str) -> LibsqlResult<
 
 /// Get all settings as a HashMap
 pub async fn get_all_settings(db: &Database) -> LibsqlResult<std::collections::HashMap<String, String>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query("SELECT key, value FROM settings", ()).await?;
     let mut settings = std::collections::HashMap::new();
     while let Some(row) = rows.next().await? {
@@ -1508,14 +1656,412 @@ pub async fn get_all_settings(db: &Database) -> LibsqlResult<std::collections::H
 
 /// Reset all settings to defaults (delete all settings)
 pub async fn reset_to_defaults(db: &Database) -> LibsqlResult<()> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute("DELETE FROM settings", ()).await?;
+    Ok(())
+}
+
+/// Delete ALL data from the database (ingredients, recipes, stock, etc.)
+/// but keep the schema (tables) intact. Used by the "Apagar todos os dados"
+/// button in Settings. Deletes in reverse dependency order to avoid FK issues
+/// (even though FKs are not enforced by default in libsql, this is safer).
+pub async fn delete_all_data(db: &Database) -> LibsqlResult<()> {
+    let conn = get_conn(db).await?;
+    // Child tables first (dependencies), then parent tables
+    conn.execute("DELETE FROM shopping_list_items", ()).await?;
+    conn.execute("DELETE FROM shopping_lists", ()).await?;
+    conn.execute("DELETE FROM meal_plan_entries", ()).await?;
+    conn.execute("DELETE FROM meal_plans", ()).await?;
+    conn.execute("DELETE FROM price_quotes", ()).await?;
+    conn.execute("DELETE FROM stock_purchases", ()).await?;
+    conn.execute("DELETE FROM receipt_imports", ()).await?;
+    conn.execute("DELETE FROM images", ()).await?;
+    conn.execute("DELETE FROM stock", ()).await?;
+    conn.execute("DELETE FROM recipe_ingredients", ()).await?;
+    conn.execute("DELETE FROM recipes", ()).await?;
+    conn.execute("DELETE FROM ingredients", ()).await?;
+    conn.execute("DELETE FROM suppliers", ()).await?;
+    conn.execute("DELETE FROM categories", ()).await?;
+    conn.execute("DELETE FROM settings", ()).await?;
+    Ok(())
+}
+
+/// Seed demo data for testing.
+///
+/// Deliberately includes several recipe lines whose unit differs from the
+/// matching ingredient's priced unit (e.g. a recipe using "gram" for an
+/// ingredient priced "per kilogram") — this exercises the unit-conversion
+/// path in `calculate_cost` as a regression check, not just a happy path.
+/// Also spreads price_quotes/stock_purchases/shopping purchases across the
+/// last ~90 days and includes a meal plan spanning past+future days, so
+/// the reports (Custos, Relatórios) have enough to show.
+pub async fn seed_demo_data(db: &Database) -> LibsqlResult<()> {
+    use std::collections::HashMap;
+
+    // Delete all existing data first
+    delete_all_data(db).await?;
+
+    let conn = get_conn(db).await?;
+    let now = Utc::now();
+    let days_ago = |d: i64| (now - chrono::Duration::days(d)).to_rfc3339();
+
+    // 1. Categories
+    let ingredient_categories: [(&str, &str, &str); 5] = [
+        ("Mercearia", "#e9c46a", "🌾"),
+        ("Laticínios", "#fcbf49", "🧀"),
+        ("Carnes e Peixes", "#d62828", "🥩"),
+        ("Frutas e Legumes", "#2d6a4f", "🥦"),
+        ("Bebidas", "#40916c", "🥤"),
+    ];
+    let mut cat_ids: HashMap<&str, i64> = HashMap::new();
+    for (i, (name, color, icon)) in ingredient_categories.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO categories (name, kind, color, icon, sort_order) VALUES (?1, 'ingredient', ?2, ?3, ?4)",
+            params![*name, *color, *icon, i as i64],
+        ).await?;
+        cat_ids.insert(name, conn.last_insert_rowid());
+    }
+    let recipe_categories: [(&str, &str, &str); 6] = [
+        ("Sopas", "#40916c", "🍲"),
+        ("Saladas", "#52b788", "🥗"),
+        ("Pratos Principais", "#1b4332", "🍖"),
+        ("Acompanhamentos", "#74c69d", "🥔"),
+        ("Sobremesas", "#95d5b2", "🍰"),
+        ("Pequeno-almoço", "#b7e4c7", "🍳"),
+    ];
+    for (i, (name, color, icon)) in recipe_categories.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO categories (name, kind, color, icon, sort_order) VALUES (?1, 'recipe', ?2, ?3, ?4)",
+            params![*name, *color, *icon, i as i64],
+        ).await?;
+    }
+
+    // 2. Suppliers (4, for by_supplier variety)
+    let suppliers: [(&str, &str, &str); 4] = [
+        ("Metro", "912345678", "Fornecedor principal (grosso)"),
+        ("Continente", "continente@continente.pt", "Supermercado local"),
+        ("Fornecedor Local", "925111222", "Produtor da região"),
+        ("Mercado Bio", "bio@mercado.pt", "Produtos biológicos"),
+    ];
+    let mut supplier_ids: Vec<i64> = Vec::new();
+    for (name, contact, notes) in suppliers.iter() {
+        conn.execute(
+            "INSERT INTO suppliers (name, contact, notes) VALUES (?1, ?2, ?3)",
+            params![*name, *contact, *notes],
+        ).await?;
+        supplier_ids.push(conn.last_insert_rowid());
+    }
+
+    // 3. Ingredients — deliberately varied priced units (kg, liter, dozen,
+    // piece), not everything in grams.
+    let ingredients_data: [(&str, &str, f64, &str); 19] = [
+        ("Farinha", "kilogram", 1.20, "Mercearia"),
+        ("Açúcar", "kilogram", 1.10, "Mercearia"),
+        ("Sal", "kilogram", 0.80, "Mercearia"),
+        ("Arroz", "kilogram", 1.30, "Mercearia"),
+        ("Fermento em pó", "piece", 0.50, "Mercearia"),
+        ("Chocolate em pó", "kilogram", 8.50, "Mercearia"),
+        ("Leite", "liter", 0.90, "Laticínios"),
+        ("Ovos", "dozen", 2.20, "Laticínios"),
+        ("Manteiga", "kilogram", 6.00, "Laticínios"),
+        ("Queijo ralado", "kilogram", 9.00, "Laticínios"),
+        ("Frango (peito)", "kilogram", 5.50, "Carnes e Peixes"),
+        ("Carne picada", "kilogram", 6.80, "Carnes e Peixes"),
+        ("Batata", "kilogram", 0.70, "Frutas e Legumes"),
+        ("Cebola", "kilogram", 0.60, "Frutas e Legumes"),
+        ("Alho", "kilogram", 3.00, "Frutas e Legumes"),
+        ("Tomate", "kilogram", 1.50, "Frutas e Legumes"),
+        ("Limão", "piece", 0.30, "Frutas e Legumes"),
+        ("Azeite", "liter", 4.50, "Bebidas"),
+        ("Vinho branco (culinária)", "liter", 3.50, "Bebidas"),
+    ];
+    let mut ing_ids: HashMap<&str, i64> = HashMap::new();
+    for (name, unit, price, cat) in ingredients_data.iter() {
+        let cat_id = cat_ids[cat];
+        conn.execute(
+            "INSERT INTO ingredients (name, unit, price_per_unit, category_id, favorite) VALUES (?1, ?2, ?3, ?4, 0)",
+            params![*name, *unit, *price, cat_id],
+        ).await?;
+        ing_ids.insert(name, conn.last_insert_rowid());
+    }
+
+    // 4. Stock for every ingredient
+    for (name, unit, _price, _cat) in ingredients_data.iter() {
+        let id = ing_ids[name];
+        conn.execute(
+            "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, *name, *unit, 5.0, 1.0],
+        ).await?;
+    }
+
+    // 5. Recipes with ingredient lines. Quantities are in the UNIT USED IN
+    // THE RECIPE, which for most lines here deliberately differs from the
+    // ingredient's priced unit above (e.g. "Farinha" is priced per
+    // kilogram but recipes call for grams) — this is the regression case
+    // for the unit-conversion fix in calculate_cost.
+    let recipes_data: Vec<(&str, &str, u32, &str, u32, u32, Vec<(&str, f64, &str)>)> = vec![
+        (
+            "Bolo de Chocolate", "Sobremesas", 8,
+            "Misturar farinha, chocolate, leite, ovos e manteiga. Cozer a 180ºC durante 40 min.",
+            15, 40,
+            vec![
+                ("Farinha", 200.0, "gram"),
+                ("Chocolate em pó", 150.0, "gram"),
+                ("Leite", 250.0, "milliliter"),
+                ("Ovos", 4.0, "piece"),
+                ("Manteiga", 100.0, "gram"),
+            ],
+        ),
+        (
+            "Sopa de Legumes", "Sopas", 6,
+            "Refogar cebola e alho, juntar batata e água, cozer 25 min e triturar.",
+            10, 30,
+            vec![
+                ("Batata", 500.0, "gram"),
+                ("Cebola", 200.0, "gram"),
+                ("Azeite", 30.0, "milliliter"),
+                ("Sal", 5.0, "gram"),
+            ],
+        ),
+        (
+            "Frango Grelhado com Arroz", "Pratos Principais", 4,
+            "Grelhar o frango temperado, cozer o arroz em água e alho.",
+            15, 25,
+            vec![
+                ("Frango (peito)", 600.0, "gram"),
+                ("Arroz", 300.0, "gram"),
+                ("Azeite", 20.0, "milliliter"),
+                ("Sal", 5.0, "gram"),
+                ("Alho", 2.0, "clove"),
+            ],
+        ),
+        (
+            "Massa à Bolonhesa", "Pratos Principais", 5,
+            "Refogar carne picada com cebola, alho e tomate, servir com massa.",
+            15, 35,
+            vec![
+                ("Carne picada", 500.0, "gram"),
+                ("Tomate", 400.0, "gram"),
+                ("Cebola", 100.0, "gram"),
+                ("Alho", 3.0, "clove"),
+                ("Azeite", 15.0, "milliliter"),
+                ("Queijo ralado", 50.0, "gram"),
+            ],
+        ),
+        (
+            "Salada de Tomate", "Saladas", 4,
+            "Cortar tomate e cebola, temperar com azeite e sal.",
+            10, 0,
+            vec![
+                ("Tomate", 300.0, "gram"),
+                ("Cebola", 50.0, "gram"),
+                ("Azeite", 20.0, "milliliter"),
+                ("Sal", 2.0, "gram"),
+            ],
+        ),
+        (
+            "Omelete de Queijo", "Pequeno-almoço", 2,
+            "Bater os ovos, juntar queijo ralado e cozinhar em lume médio com manteiga.",
+            5, 10,
+            vec![
+                ("Ovos", 3.0, "piece"),
+                ("Queijo ralado", 80.0, "gram"),
+                ("Manteiga", 20.0, "gram"),
+                ("Sal", 1.0, "gram"),
+            ],
+        ),
+        (
+            "Batatas Assadas", "Acompanhamentos", 4,
+            "Cortar as batatas, regar com azeite e alho, assar a 200ºC 40 min.",
+            10, 40,
+            vec![
+                ("Batata", 800.0, "gram"),
+                ("Azeite", 40.0, "milliliter"),
+                ("Alho", 4.0, "clove"),
+                ("Sal", 5.0, "gram"),
+            ],
+        ),
+        (
+            "Limonada", "Bebidas", 4,
+            "Espremer os limões, juntar açúcar e água fria, mexer bem.",
+            10, 0,
+            vec![
+                ("Limão", 4.0, "piece"),
+                ("Açúcar", 100.0, "gram"),
+            ],
+        ),
+        (
+            "Risotto de Frango", "Pratos Principais", 4,
+            "Refogar cebola, juntar arroz, ir molhando com caldo, adicionar frango e vinho branco.",
+            15, 30,
+            vec![
+                ("Arroz", 350.0, "gram"),
+                ("Frango (peito)", 400.0, "gram"),
+                ("Vinho branco (culinária)", 100.0, "milliliter"),
+                ("Queijo ralado", 60.0, "gram"),
+                ("Cebola", 80.0, "gram"),
+            ],
+        ),
+    ];
+
+    let mut recipe_ids: HashMap<&str, i64> = HashMap::new();
+    for (name, category, portions, instructions, prep, cook, ingredients) in recipes_data.iter() {
+        conn.execute(
+            "INSERT INTO recipes (name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags)
+             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, '[]')",
+            params![*name, *category, *portions, *instructions, *prep, *cook],
+        ).await?;
+        let recipe_id = conn.last_insert_rowid();
+        recipe_ids.insert(name, recipe_id);
+
+        for (ing_name, quantity, unit) in ingredients.iter() {
+            let ing_id = ing_ids[ing_name];
+            conn.execute(
+                "INSERT INTO recipe_ingredients (recipe_id, ingredient_id, ingredient_name, quantity, unit) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![recipe_id, ing_id, *ing_name, *quantity, *unit],
+            ).await?;
+        }
+    }
+
+    // 6. Price quotes — spread across the last 90 days, varying slightly
+    // between suppliers for the same ingredient (for report_price_trends).
+    let quoted_ingredients = [
+        "Farinha", "Leite", "Ovos", "Azeite", "Frango (peito)", "Carne picada", "Queijo ralado",
+    ];
+    for ing_name in quoted_ingredients.iter() {
+        let base_price = ingredients_data.iter().find(|(n, ..)| n == ing_name).unwrap().2;
+        let ing_id = ing_ids[ing_name];
+        let quote_offsets = [75_i64, 45, 20, 5];
+        for (i, days) in quote_offsets.iter().enumerate() {
+            let supplier = suppliers[i % suppliers.len()].0;
+            let variation = 1.0 + (i as f64 * 0.05) - 0.1; // some quotes cheaper, some pricier
+            let price = (base_price * variation * 100.0).round() / 100.0;
+            conn.execute(
+                "INSERT INTO price_quotes (ingredient_id, supplier, price_per_unit, is_promo, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![ing_id, supplier, price, (i == quote_offsets.len() - 1) as i64, days_ago(*days)],
+            ).await?;
+        }
+    }
+
+    // 7. Stock purchases — spread across the last 90 days and rotated
+    // across all 4 suppliers, so the Costs report's "by_supplier" (sourced
+    // from stock_purchases, see get_cost_report) has real variety.
+    let purchase_plan: [(&str, f64, i64, usize); 16] = [
+        ("Farinha", 5.0, 85, 0), ("Leite", 6.0, 80, 1), ("Ovos", 3.0, 70, 2),
+        ("Frango (peito)", 4.0, 65, 3), ("Carne picada", 3.0, 55, 0),
+        ("Queijo ralado", 2.0, 50, 1), ("Azeite", 4.0, 40, 2),
+        ("Arroz", 6.0, 35, 3), ("Batata", 8.0, 30, 0), ("Cebola", 4.0, 25, 1),
+        ("Tomate", 5.0, 20, 2), ("Manteiga", 2.0, 15, 3),
+        ("Chocolate em pó", 1.5, 10, 0), ("Vinho branco (culinária)", 2.0, 8, 1),
+        ("Alho", 1.0, 5, 2), ("Limão", 12.0, 2, 3),
+    ];
+    for (ing_name, quantity, days, supplier_idx) in purchase_plan.iter() {
+        let (unit, price_per_unit) = ingredients_data.iter()
+            .find(|(n, ..)| n == ing_name)
+            .map(|(_, u, p, _)| (*u, *p))
+            .unwrap();
+        let ing_id = ing_ids[ing_name];
+        let supplier_id = supplier_ids[*supplier_idx];
+        let total_price = quantity * price_per_unit;
+        conn.execute(
+            "INSERT INTO stock_purchases (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date, supplier_id, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6, ?7, 'Compra demo')",
+            params![ing_id, *quantity, unit, price_per_unit, total_price, days_ago(*days), supplier_id],
+        ).await?;
+    }
+
+    // 8. Meal plan spanning past AND future (so both get_meal_stats,
+    // which only looks backward, and the dashboard's upcoming-meals view,
+    // which only looks forward, have something to show).
+    let plan_start = now - chrono::Duration::days(7);
+    let plan_end = now + chrono::Duration::days(7);
+    conn.execute(
+        "INSERT INTO meal_plans (name, start_date, end_date) VALUES ('Plano Demo (2 Semanas)', ?1, ?2)",
+        params![plan_start.to_rfc3339(), plan_end.to_rfc3339()],
+    ).await?;
+    let plan_id = conn.last_insert_rowid();
+
+    let meal_entries: [(&str, &str, &str, u32); 10] = [
+        ("monday", "breakfast", "Omelete de Queijo", 2),
+        ("monday", "dinner", "Massa à Bolonhesa", 4),
+        ("tuesday", "lunch", "Sopa de Legumes", 4),
+        ("tuesday", "dinner", "Frango Grelhado com Arroz", 4),
+        ("wednesday", "dinner", "Bolo de Chocolate", 8),
+        ("thursday", "lunch", "Risotto de Frango", 4),
+        ("thursday", "dinner", "Salada de Tomate", 2),
+        ("friday", "dinner", "Batatas Assadas", 4),
+        ("saturday", "lunch", "Massa à Bolonhesa", 6),
+        ("sunday", "breakfast", "Limonada", 2),
+    ];
+    for (day_of_week, meal_type, recipe_name, portions) in meal_entries.iter() {
+        let recipe_id = recipe_ids[recipe_name];
+        conn.execute(
+            "INSERT INTO meal_plan_entries (meal_plan_id, recipe_id, recipe_name, day_of_week, meal_type, portions)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![plan_id, recipe_id, *recipe_name, *day_of_week, *meal_type, *portions],
+        ).await?;
+    }
+
+    // 9. Shopping list — name contains "Compras" so get_cost_report's
+    // by_recipe (which filters on the list name) can match it. Mix of
+    // purchased items (with purchased_at spread over the last 90 days, for
+    // get_cost_report's total_spent/by_category) and pending ones.
+    conn.execute(
+        "INSERT INTO shopping_lists (name) VALUES ('Lista de Compras Semanal')",
+        (),
+    ).await?;
+    let list_id = conn.last_insert_rowid();
+
+    let shopping_items: [(&str, f64, i64, &str, bool); 12] = [
+        ("Farinha", 1.0, 60, "Mercearia", true),
+        ("Açúcar", 1.0, 60, "Mercearia", true),
+        ("Leite", 2.0, 45, "Laticínios", true),
+        ("Ovos", 1.0, 45, "Laticínios", true),
+        ("Frango (peito)", 1.5, 30, "Carnes e Peixes", true),
+        ("Queijo ralado", 0.5, 20, "Laticínios", true),
+        ("Azeite", 1.0, 10, "Bebidas", true),
+        ("Batata", 2.0, 0, "Frutas e Legumes", false),
+        ("Cebola", 1.0, 0, "Frutas e Legumes", false),
+        ("Tomate", 1.5, 0, "Frutas e Legumes", false),
+        ("Vinho branco (culinária)", 1.0, 0, "Bebidas", false),
+        ("__none__", 50.0, 0, "Outros", false), // quick-add item, no ingredient_id
+    ];
+    for (ing_name, quantity, days_purchased, category, purchased) in shopping_items.iter() {
+        if *ing_name == "__none__" {
+            conn.execute(
+                "INSERT INTO shopping_list_items (shopping_list_id, ingredient_id, ingredient_name, ingredient_unit, needed_quantity, stock_quantity, to_buy_quantity, category, estimated_cost, purchased)
+                 VALUES (?1, NULL, 'Guardanapos', 'piece', 50.0, 0.0, 50.0, ?2, 0.0, 0)",
+                params![list_id, *category],
+            ).await?;
+            continue;
+        }
+        let ing_id = ing_ids[ing_name];
+        let (unit, price_per_unit) = ingredients_data.iter()
+            .find(|(n, ..)| n == ing_name)
+            .map(|(_, u, p, _)| (*u, *p))
+            .unwrap();
+        let estimated_cost = quantity * price_per_unit;
+        if *purchased {
+            conn.execute(
+                "INSERT INTO shopping_list_items (shopping_list_id, ingredient_id, ingredient_name, ingredient_unit, needed_quantity, stock_quantity, to_buy_quantity, category, estimated_cost, purchased, purchased_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0.0, ?5, ?6, ?7, 1, ?8)",
+                params![list_id, ing_id, *ing_name, unit, *quantity, *category, estimated_cost, days_ago(*days_purchased)],
+            ).await?;
+        } else {
+            conn.execute(
+                "INSERT INTO shopping_list_items (shopping_list_id, ingredient_id, ingredient_name, ingredient_unit, needed_quantity, stock_quantity, to_buy_quantity, category, estimated_cost, purchased)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0.0, ?5, ?6, ?7, 0)",
+                params![list_id, ing_id, *ing_name, unit, *quantity, *category, estimated_cost],
+            ).await?;
+        }
+    }
+
     Ok(())
 }
 
 /// List categories
 pub async fn categories_list(db: &Database, kind: Option<&str>) -> LibsqlResult<Vec<Category>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let query = if let Some(kind) = kind {
         format!("SELECT id, name, kind, color, icon, sort_order FROM categories WHERE kind = '{}' ORDER BY sort_order", kind)
     } else {
@@ -1531,7 +2077,7 @@ pub async fn categories_list(db: &Database, kind: Option<&str>) -> LibsqlResult<
 
 /// Create category
 pub async fn create_category(db: &Database, input: CategoryInput) -> LibsqlResult<Category> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let kind_str = match input.kind {
         CategoryKind::Ingredient => "ingredient",
         CategoryKind::Recipe => "recipe",
@@ -1548,7 +2094,7 @@ pub async fn create_category(db: &Database, input: CategoryInput) -> LibsqlResul
 
 /// Update category
 pub async fn update_category(db: &Database, id: i64, input: CategoryInput) -> LibsqlResult<Category> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let kind_str = match input.kind {
         CategoryKind::Ingredient => "ingredient",
         CategoryKind::Recipe => "recipe",
@@ -1564,14 +2110,14 @@ pub async fn update_category(db: &Database, id: i64, input: CategoryInput) -> Li
 
 /// Delete category
 pub async fn delete_category(db: &Database, id: i64) -> LibsqlResult<()> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute("DELETE FROM categories WHERE id = ?1", params![id]).await?;
     Ok(())
 }
 
 /// List suppliers
 pub async fn suppliers_list(db: &Database) -> LibsqlResult<Vec<Supplier>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query("SELECT id, name, contact, notes, created_at, updated_at FROM suppliers ORDER BY name", ()).await?;
     let mut suppliers = Vec::new();
     while let Some(row) = rows.next().await? {
@@ -1582,7 +2128,7 @@ pub async fn suppliers_list(db: &Database) -> LibsqlResult<Vec<Supplier>> {
 
 /// Create supplier
 pub async fn create_supplier(db: &Database, input: SupplierInput) -> LibsqlResult<Supplier> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute(
         "INSERT INTO suppliers (name, contact, notes) VALUES (?1, ?2, ?3)",
         params![input.name, input.contact, input.notes],
@@ -1595,7 +2141,7 @@ pub async fn create_supplier(db: &Database, input: SupplierInput) -> LibsqlResul
 
 /// Update supplier
 pub async fn update_supplier(db: &Database, id: i64, input: SupplierInput) -> LibsqlResult<Supplier> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute(
         "UPDATE suppliers SET name = ?1, contact = ?2, notes = ?3, updated_at = datetime('now') WHERE id = ?4",
         params![input.name, input.contact, input.notes, id],
@@ -1607,14 +2153,14 @@ pub async fn update_supplier(db: &Database, id: i64, input: SupplierInput) -> Li
 
 /// Delete supplier
 pub async fn delete_supplier(db: &Database, id: i64) -> LibsqlResult<()> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute("DELETE FROM suppliers WHERE id = ?1", params![id]).await?;
     Ok(())
 }
 
 /// List price quotes for ingredient
 pub async fn price_quotes_list(db: &Database, ingredient_id: i64) -> LibsqlResult<Vec<PriceQuote>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
         "SELECT id, ingredient_id, supplier, price_per_unit, valid_from, valid_to, is_promo, created_at
          FROM price_quotes WHERE ingredient_id = ?1 ORDER BY valid_from DESC",
@@ -1629,7 +2175,7 @@ pub async fn price_quotes_list(db: &Database, ingredient_id: i64) -> LibsqlResul
 
 /// Create price quote
 pub async fn create_price_quote(db: &Database, input: PriceQuoteInput) -> LibsqlResult<PriceQuote> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute(
         "INSERT INTO price_quotes (ingredient_id, supplier, price_per_unit, valid_from, valid_to, is_promo)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -1643,14 +2189,14 @@ pub async fn create_price_quote(db: &Database, input: PriceQuoteInput) -> Libsql
 
 /// Delete price quote
 pub async fn delete_price_quote(db: &Database, id: i64) -> LibsqlResult<()> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute("DELETE FROM price_quotes WHERE id = ?1", params![id]).await?;
     Ok(())
 }
 
 /// Get supplier by ID
 pub async fn supplier_get(db: &Database, id: i64) -> LibsqlResult<Supplier> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
         "SELECT id, name, contact, notes, created_at, updated_at FROM suppliers WHERE id = ?1",
         params![id],
@@ -1661,7 +2207,7 @@ pub async fn supplier_get(db: &Database, id: i64) -> LibsqlResult<Supplier> {
 
 /// Update price quote
 pub async fn update_price_quote(db: &Database, id: i64, input: PriceQuoteInput) -> LibsqlResult<PriceQuote> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute(
         "UPDATE price_quotes SET ingredient_id = ?1, supplier = ?2, price_per_unit = ?3, valid_from = ?4, valid_to = ?5, is_promo = ?6 WHERE id = ?7",
         params![input.ingredient_id, input.supplier, input.price_per_unit, input.valid_from.map(|d| d.to_rfc3339()), input.valid_to.map(|d| d.to_rfc3339()), input.is_promo as i32, id],
@@ -1676,7 +2222,7 @@ pub async fn update_price_quote(db: &Database, id: i64, input: PriceQuoteInput) 
 
 /// Get price quote statistics grouped by ingredient
 pub async fn price_quotes_stats(db: &Database) -> LibsqlResult<Vec<PriceQuoteStats>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
         r#"
         SELECT ingredient_id,
@@ -1705,7 +2251,7 @@ pub async fn price_quotes_stats(db: &Database) -> LibsqlResult<Vec<PriceQuoteSta
 
 /// Get all price quotes with ingredient details (for supplier detail view)
 pub async fn price_quotes_all(db: &Database) -> LibsqlResult<Vec<PriceQuoteWithIngredient>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
         r#"
         SELECT pq.id, pq.ingredient_id, pq.supplier, pq.price_per_unit, pq.valid_from, pq.valid_to, pq.is_promo, pq.created_at,
@@ -1907,7 +2453,7 @@ fn row_to_meal_plan_entry(row: &Row) -> LibsqlResult<MealPlanEntry> {
 
 /// Create meal plan
 pub async fn create_meal_plan(db: &Database, input: MealPlanInput) -> LibsqlResult<MealPlan> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute(
         "INSERT INTO meal_plans (name, start_date, end_date) VALUES (?1, ?2, ?3)",
         params![input.name, input.start_date.to_rfc3339(), input.end_date.to_rfc3339()],
@@ -1925,7 +2471,7 @@ pub async fn create_meal_plan(db: &Database, input: MealPlanInput) -> LibsqlResu
 
 /// Get meal plan by ID with entries
 pub async fn get_meal_plan(db: &Database, id: i64) -> LibsqlResult<MealPlanWithEntries> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
         "SELECT id, name, start_date, end_date, created_at, updated_at FROM meal_plans WHERE id = ?1",
         params![id],
@@ -1950,7 +2496,7 @@ pub async fn get_meal_plan(db: &Database, id: i64) -> LibsqlResult<MealPlanWithE
 
 /// List all meal plans
 pub async fn list_meal_plans(db: &Database) -> LibsqlResult<Vec<MealPlan>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
         "SELECT id, name, start_date, end_date, created_at, updated_at FROM meal_plans ORDER BY created_at DESC",
         (),
@@ -1965,7 +2511,7 @@ pub async fn list_meal_plans(db: &Database) -> LibsqlResult<Vec<MealPlan>> {
 
 /// Update meal plan
 pub async fn update_meal_plan(db: &Database, id: i64, input: MealPlanInput) -> LibsqlResult<MealPlan> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute(
         "UPDATE meal_plans SET name = ?1, start_date = ?2, end_date = ?3, updated_at = datetime('now') WHERE id = ?4",
         params![input.name, input.start_date.to_rfc3339(), input.end_date.to_rfc3339(), id],
@@ -1982,7 +2528,7 @@ pub async fn update_meal_plan(db: &Database, id: i64, input: MealPlanInput) -> L
 
 /// Delete meal plan
 pub async fn delete_meal_plan(db: &Database, id: i64) -> LibsqlResult<()> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute("DELETE FROM meal_plans WHERE id = ?1", params![id]).await?;
     // meal_plan_entries are cascade deleted
     Ok(())
@@ -1990,7 +2536,7 @@ pub async fn delete_meal_plan(db: &Database, id: i64) -> LibsqlResult<()> {
 
 /// Add meal plan entry
 pub async fn add_meal_entry(db: &Database, meal_plan_id: i64, input: MealEntryInput) -> LibsqlResult<MealPlanEntry> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
 
     // Get recipe name for denormalization
     let mut rows = conn.query("SELECT name FROM recipes WHERE id = ?1", params![input.recipe_id]).await?;
@@ -2018,7 +2564,7 @@ pub async fn add_meal_entry(db: &Database, meal_plan_id: i64, input: MealEntryIn
 
 /// Update meal plan entry
 pub async fn update_meal_entry(db: &Database, id: i64, input: MealEntryInput) -> LibsqlResult<MealPlanEntry> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
 
     // Get recipe name for denormalization
     let mut rows = conn.query("SELECT name FROM recipes WHERE id = ?1", params![input.recipe_id]).await?;
@@ -2045,7 +2591,7 @@ pub async fn update_meal_entry(db: &Database, id: i64, input: MealEntryInput) ->
 
 /// Delete meal plan entry
 pub async fn delete_meal_entry(db: &Database, id: i64) -> LibsqlResult<()> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute("DELETE FROM meal_plan_entries WHERE id = ?1", params![id]).await?;
     Ok(())
 }
@@ -2064,7 +2610,7 @@ pub async fn generate_shopping_list_from_meal_plan(db: &Database, plan_id: i64, 
         }
 
         // Get recipe ingredients
-        let conn = db.connect()?;
+        let conn = get_conn(db).await?;
         let mut rows = conn.query(
             "SELECT ri.ingredient_id, ri.ingredient_name, ri.quantity, ri.unit, i.price_per_unit, i.category_id
              FROM recipe_ingredients ri
@@ -2109,7 +2655,7 @@ pub async fn generate_shopping_list_from_meal_plan(db: &Database, plan_id: i64, 
     }
 
     // Get stock quantities
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut shopping_items = Vec::new();
     let mut total_estimated_cost = 0.0;
 
@@ -2126,7 +2672,7 @@ pub async fn generate_shopping_list_from_meal_plan(db: &Database, plan_id: i64, 
 
         shopping_items.push(ShoppingItem {
             id: 0, // Will be assigned on insert
-            ingredient_id,
+            ingredient_id: Some(ingredient_id),
             ingredient_name: name,
             ingredient_unit: unit,
             needed_quantity: needed_qty,
@@ -2157,7 +2703,7 @@ pub async fn generate_shopping_list_from_meal_plan(db: &Database, plan_id: i64, 
 
 /// Get dashboard statistics
 pub async fn get_dashboard_stats(db: &Database) -> LibsqlResult<DashboardStats> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
 
     // Low stock count (quantity <= min_quantity and quantity > 0)
     let mut rows = conn.query(
@@ -2191,8 +2737,11 @@ pub async fn get_dashboard_stats(db: &Database) -> LibsqlResult<DashboardStats> 
     let meals_this_week: i64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
 
     // Total stock value (sum of stock qty * price_per_unit)
+    // COALESCE with 0.0 (not 0) so SQLite returns REAL even when stock is
+    // empty (SUM over no rows = NULL -> COALESCE(NULL, 0.0) = 0.0 REAL).
+    // With integer 0, libsql row.get::<f64>() panics ("invalid value type").
     let mut rows = conn.query(
-        "SELECT COALESCE(SUM(s.quantity * i.price_per_unit), 0) FROM stock s JOIN ingredients i ON s.ingredient_id = i.id",
+        "SELECT COALESCE(SUM(s.quantity * i.price_per_unit), 0.0) FROM stock s JOIN ingredients i ON s.ingredient_id = i.id",
         (),
     ).await?;
     let total_stock_value: f64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
@@ -2225,7 +2774,7 @@ pub async fn get_dashboard_stats(db: &Database) -> LibsqlResult<DashboardStats> 
 
 /// Get recent activity
 pub async fn get_recent_activity(db: &Database, limit: u32) -> LibsqlResult<Vec<ActivityItem>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
 
     // We'll create a unified activity feed by querying multiple tables
     // For now, we'll combine recent recipes, stock updates, meal plan entries, and shopping purchases
@@ -2342,7 +2891,7 @@ pub async fn get_recent_activity(db: &Database, limit: u32) -> LibsqlResult<Vec<
 
 /// Get upcoming meals for the next N days
 pub async fn get_upcoming_meals(db: &Database, days: u32) -> LibsqlResult<Vec<MealPlanEntryWithRecipe>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
 
     let mut rows = conn.query(
         r#"
@@ -2421,7 +2970,7 @@ pub async fn get_meal_plan_entries_by_date_range(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
 ) -> LibsqlResult<Vec<MealPlanEntryWithRecipe>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
 
     let start_str = start_date.to_rfc3339();
     let end_str = end_date.to_rfc3339();
@@ -2520,7 +3069,7 @@ pub async fn get_meal_plan_entries_by_month(
 
 /// Get low stock ingredients
 pub async fn get_low_stock_ingredients(db: &Database, threshold: f64) -> LibsqlResult<Vec<StockItemWithIngredient>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
 
     let mut rows = conn.query(
         r#"
@@ -2588,14 +3137,14 @@ pub async fn get_low_stock_ingredients(db: &Database, threshold: f64) -> LibsqlR
 
 /// Get cost report for a date range
 pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostReport> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let start_date = Utc::now() - chrono::Duration::days(days as i64);
     let start_str = start_date.to_rfc3339();
 
     // Total spent from purchased shopping list items
     let mut rows = conn.query(
         r#"
-        SELECT COALESCE(SUM(sli.to_buy_quantity * sli.estimated_cost / NULLIF(sli.to_buy_quantity, 0)), 0)
+        SELECT COALESCE(SUM(sli.to_buy_quantity * sli.estimated_cost / NULLIF(sli.to_buy_quantity, 0)), 0.0)
         FROM shopping_list_items sli
         WHERE sli.purchased = 1
           AND sli.purchased_at IS NOT NULL
@@ -2608,9 +3157,9 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
     // By category (ingredient category)
     let mut rows = conn.query(
         r#"
-        SELECT c.name, COALESCE(SUM(sli.to_buy_quantity * sli.estimated_cost / NULLIF(sli.to_buy_quantity, 0)), 0)
+        SELECT c.name, COALESCE(SUM(sli.to_buy_quantity * sli.estimated_cost / NULLIF(sli.to_buy_quantity, 0)), 0.0) AS total
         FROM shopping_list_items sli
-        JOIN ingredients i ON sli.ingredient_id = i.id
+        LEFT JOIN ingredients i ON sli.ingredient_id = i.id
         LEFT JOIN categories c ON i.category_id = c.id
         WHERE sli.purchased = 1
           AND sli.purchased_at IS NOT NULL
@@ -2635,7 +3184,7 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
     // This is a simplified version - we look at shopping lists created from meal plans
     let mut rows = conn.query(
         r#"
-        SELECT sl.name, COALESCE(SUM(sli.estimated_cost), 0)
+        SELECT sl.name, COALESCE(SUM(sli.estimated_cost), 0.0) AS total
         FROM shopping_list_items sli
         JOIN shopping_lists sl ON sli.shopping_list_id = sl.id
         WHERE sli.purchased = 1
@@ -2662,28 +3211,38 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
         });
     }
 
-    // By supplier (from price quotes used in purchased items)
+    // By supplier — sourced from `stock_purchases` (direct stock purchases,
+    // e.g. via the Stock page or the receipt scanner), NOT from
+    // `shopping_list_items` (which has no supplier link at all). This is a
+    // different data source from total_spent/by_category/by_recipe above,
+    // so its total won't necessarily reconcile with theirs — the frontend
+    // must label this section accordingly. See also the architecture note
+    // about unifying purchase sources.
     let mut rows = conn.query(
         r#"
-        SELECT sli.category, COALESCE(SUM(sli.estimated_cost), 0)
-        FROM shopping_list_items sli
-        WHERE sli.purchased = 1
-          AND sli.purchased_at IS NOT NULL
-          AND date(sli.purchased_at) >= date(?1)
-          AND sli.category != ''
-        GROUP BY sli.category
+        SELECT s.name, COALESCE(SUM(sp.total_price), 0.0) AS total
+        FROM stock_purchases sp
+        JOIN suppliers s ON sp.supplier_id = s.id
+        WHERE date(sp.purchase_date) >= date(?1)
+        GROUP BY s.name
         ORDER BY total DESC
         "#,
         params![start_str],
     ).await?;
-    let mut by_supplier = Vec::new();
+    let mut by_supplier_raw = Vec::new();
+    let mut total_by_supplier = 0.0_f64;
     while let Some(row) = rows.next().await? {
         let supplier: String = row.get(0)?;
         let total: f64 = row.get(1)?;
+        total_by_supplier += total;
+        by_supplier_raw.push((supplier, total));
+    }
+    let mut by_supplier = Vec::new();
+    for (supplier, total) in by_supplier_raw {
         by_supplier.push(SupplierCost {
             supplier,
             total,
-            percentage: if total_spent > 0.0 { (total / total_spent) * 100.0 } else { 0.0 },
+            percentage: if total_by_supplier > 0.0 { (total / total_by_supplier) * 100.0 } else { 0.0 },
         });
     }
 
@@ -2701,7 +3260,7 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
 /// Get waste report for a date range
 /// Note: We don't have explicit waste tracking, so we estimate from stock reductions not linked to recipes
 pub async fn get_waste_report(db: &Database, days: u32) -> LibsqlResult<WasteReport> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let start_date = Utc::now() - chrono::Duration::days(days as i64);
     let start_str = start_date.to_rfc3339();
 
@@ -2730,7 +3289,7 @@ pub async fn get_waste_report(db: &Database, days: u32) -> LibsqlResult<WasteRep
 /// Get stock trends for a date range
 /// Returns snapshots of stock levels over time
 pub async fn get_stock_trends(db: &Database, days: u32) -> LibsqlResult<Vec<StockSnapshot>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let start_date = Utc::now() - chrono::Duration::days(days as i64);
     let start_str = start_date.to_rfc3339();
 
@@ -2792,7 +3351,7 @@ pub async fn get_stock_trends(db: &Database, days: u32) -> LibsqlResult<Vec<Stoc
 
 /// Get meal statistics for a date range
 pub async fn get_meal_stats(db: &Database, days: u32) -> LibsqlResult<MealStats> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let end_date = Utc::now();
     let start_date = end_date - chrono::Duration::days(days as i64);
     let start_str = start_date.to_rfc3339();
@@ -2905,7 +3464,7 @@ pub async fn get_meal_stats(db: &Database, days: u32) -> LibsqlResult<MealStats>
 
 /// Get price trends for an ingredient over a date range
 pub async fn get_price_trends(db: &Database, ingredient_id: i64, days: u32) -> LibsqlResult<Vec<PricePoint>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let start_date = Utc::now() - chrono::Duration::days(days as i64);
     let start_str = start_date.to_rfc3339();
 
@@ -3028,7 +3587,7 @@ pub async fn image_upload(db: &Database, input: ImageUploadInput) -> LibsqlResul
     let path = save_base64_image(&input.base64, input.entity_type.as_str(), input.entity_id).await
         .map_err(|e| libsql::Error::Misuse(e))?;
     
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     
     // If this is primary, unset other primary images for this entity
     if true { // Always set as primary for now, or add is_primary to input
@@ -3055,7 +3614,7 @@ pub async fn image_upload(db: &Database, input: ImageUploadInput) -> LibsqlResul
 
 /// Delete image
 pub async fn image_delete(db: &Database, id: i64) -> LibsqlResult<()> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     
     // Get path first to delete file
     let mut rows = conn.query("SELECT path FROM images WHERE id = ?1", params![id]).await?;
@@ -3073,7 +3632,7 @@ pub async fn image_delete(db: &Database, id: i64) -> LibsqlResult<()> {
 
 /// Set image as primary
 pub async fn image_set_primary(db: &Database, id: i64) -> LibsqlResult<Image> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     
     // Get the image first
     let mut rows = conn.query(
@@ -3108,7 +3667,7 @@ pub async fn image_set_primary(db: &Database, id: i64) -> LibsqlResult<Image> {
 
 /// Get images for an entity
 pub async fn image_get(db: &Database, entity_type: ImageEntityType, entity_id: i64) -> LibsqlResult<Vec<Image>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
         "SELECT id, entity_type, entity_id, path, mime_type, is_primary, created_at FROM images WHERE entity_type = ?1 AND entity_id = ?2 ORDER BY is_primary DESC, created_at DESC",
         params![entity_type.as_str(), entity_id],
@@ -3306,7 +3865,7 @@ fn row_to_stock_purchase(row: &Row) -> LibsqlResult<StockPurchase> {
 
 /// Add stock purchase (records purchase history, updates stock quantity only)
 pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> LibsqlResult<StockPurchase> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     
     let unit_str = match input.unit {
         Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
@@ -3393,7 +3952,7 @@ pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> Lib
 
 /// List stock purchases for an ingredient
 pub async fn stock_purchases_list(db: &Database, ingredient_id: i64) -> LibsqlResult<Vec<StockPurchase>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     let mut rows = conn.query(
         r#"
         SELECT sp.id, sp.ingredient_id, i.name, i.unit, sp.quantity, sp.unit, sp.price_per_unit, sp.total_price,
@@ -3416,7 +3975,7 @@ pub async fn stock_purchases_list(db: &Database, ingredient_id: i64) -> LibsqlRe
 
 /// Delete stock purchase (does NOT revert stock quantity - manual adjustment needed)
 pub async fn stock_purchase_delete(db: &Database, id: i64) -> LibsqlResult<()> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute("DELETE FROM stock_purchases WHERE id = ?1", params![id]).await?;
     Ok(())
 }
@@ -3489,7 +4048,7 @@ pub async fn receipt_scan(db: &Database, input: ReceiptScanInput) -> LibsqlResul
         .map_err(|e| libsql::Error::Misuse(e))?;
     
     // Create import record
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     conn.execute(
         "INSERT INTO receipt_imports (image_path, status) VALUES (?1, 'scanned')",
         params![image_path.clone()],
@@ -3684,7 +4243,7 @@ pub async fn receipt_parse(db: &Database, raw_text: String) -> LibsqlResult<Vec<
 
 /// Confirm receipt import - creates stock purchases and ingredients
 pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> LibsqlResult<Vec<StockPurchase>> {
-    let conn = db.connect()?;
+    let conn = get_conn(db).await?;
     
     // Get the import record
     let mut rows = conn.query(

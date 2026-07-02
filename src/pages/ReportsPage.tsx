@@ -389,7 +389,7 @@ const UNIT_LABELS: Record<string, string> = {
 
 
 function CostsTab({ costReport, days }: { costReport: CostReport | null; days: number }) {
-  if (!costReport) return <div className="empty" style={{ minHeight: 200 }}>Carregando...</div>;
+  if (!costReport || costReport.total_spent === 0) return <div className="empty" style={{ minHeight: 200, color: "var(--text-3)" }}>Sem dados</div>;
 
   const categoryChartData = costReport.by_category.slice(0, 8).map((c) => ({ category: c.category, total: c.total }));
   const supplierChartData = costReport.by_supplier.slice(0, 8).map((s) => ({ supplier: s.supplier, total: s.total }));
@@ -436,6 +436,9 @@ function CostsTab({ costReport, days }: { costReport: CostReport | null; days: n
         </div>
         <div className="card" style={{ padding: "var(--space-4)" }}>
           <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Por Fornecedor</h3>
+          <p className="text-3" style={{ marginBottom: "var(--space-3)", fontSize: "12px" }}>
+            Baseado em compras registadas no Stock/Scanner — pode não somar ao Total Gasto acima (fontes diferentes).
+          </p>
           <PieChart data={supplierChartData} labelKey="supplier" valueKey="total" width={300} height={250} />
         </div>
       </div>
@@ -471,23 +474,7 @@ function CostsTab({ costReport, days }: { costReport: CostReport | null; days: n
 }
 
 function WasteTab({ wasteReport, days }: { wasteReport: WasteReport | null; days: number }) {
-  if (!wasteReport) return <div className="empty" style={{ minHeight: 200 }}>Carregando...</div>;
-
-  if (wasteReport.total_wasted_value === 0) {
-    return (
-      <div className="card" style={{ padding: "var(--space-8)", textAlign: "center" }}>
-        <EmptyState
-          icon={
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--text-4)" strokeWidth="1.5" style={{ marginBottom: "var(--space-4)", opacity: 0.5 }}>
-              <polyline points="16 2 22 8 16 14"/><line x1="22" y1="8" x2="8" y2="8"/>
-            </svg>
-          }
-          title="Sem dados de desperdício"
-          body="Não existe rastreamento de desperdício automático. Para usar esta funcionalidade, seria necessário registar perdas de stock manualmente ou ter histórico de stock."
-        />
-      </div>
-    );
-  }
+  if (!wasteReport || wasteReport.total_wasted_value === 0) return <div className="empty" style={{ minHeight: 200, color: "var(--text-3)" }}>Sem dados</div>;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
@@ -545,7 +532,7 @@ function StockTrendsTab({ stockTrends, loading }: { stockTrends: StockSnapshot[]
       <div className="card" style={{ padding: "var(--space-4)" }}>
         <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Evolução do Valor do Stock</h3>
         {topIngredients.length === 0 ? (
-          <div className="empty" style={{ minHeight: 200 }}>Sem dados de stock</div>
+          <div className="empty" style={{ minHeight: 200 }}>Sem dados</div>
         ) : (
           <div style={{ height: 300, position: "relative" }}>
             <svg viewBox="0 0 100 300" preserveAspectRatio="none" style={{ width: "100%", height: "100%" }}>
@@ -591,7 +578,7 @@ function StockTrendsTab({ stockTrends, loading }: { stockTrends: StockSnapshot[]
 }
 
 function MealsTab({ mealStats, days }: { mealStats: MealStats | null; days: number }) {
-  if (!mealStats) return <div className="empty" style={{ minHeight: 200 }}>Carregando...</div>;
+  if (!mealStats || mealStats.total_meals === 0) return <div className="empty" style={{ minHeight: 200, color: "var(--text-3)" }}>Sem dados</div>;
 
   const mealTypeChartData = mealStats.by_meal_type.map((m) => ({
     type: MEAL_TYPE_LABELS[m.meal_type] ?? m.meal_type,
@@ -721,7 +708,7 @@ function PricesTab({
                 <line x1="16" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/>
               </svg>
             }
-            title="Sem histórico de preços"
+            title="Sem dados"
             body="Adicione cotações de preços para ver a evolução"
           />
         ) : (
@@ -810,7 +797,7 @@ export default function ReportsPage() {
         }
         case "prices": {
           if (priceTrendIngredientId) {
-            const data = await invoke<PricePoint[]>("report_price_trends", { ingredient_id: priceTrendIngredientId, days });
+            const data = await invoke<PricePoint[]>("report_price_trends", { ingredientId: priceTrendIngredientId, days });
             setPriceTrends(data);
           }
           break;
