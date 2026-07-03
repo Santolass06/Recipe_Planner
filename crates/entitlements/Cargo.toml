@@ -1,7 +1,0 @@
-[package]
-name = "mise-entitlements"
-edition.workspace = true
-version.workspace = true
-
-[dependencies]
-serde = { workspace = true }

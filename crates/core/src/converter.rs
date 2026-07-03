@@ -1,4 +1,4 @@
-use crate::{Unit, UnitGroup};
+use crate::Unit;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

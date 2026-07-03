@@ -1,0 +1,27 @@
+[package]
+name = "mise-tauri"
+edition = "2021"
+version.workspace = true
+
+[dependencies]
+mise-core = { path = "../core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+specta = { workspace = true }
+ts-rs = { workspace = true }
+thiserror = { workspace = true }
+libsql = { workspace = true }
+chrono = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

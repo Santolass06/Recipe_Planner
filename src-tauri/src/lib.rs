@@ -1,149 +1,150 @@
-use mise_data::{
-    db::open_local,
-    ingredient_repo::SqliteIngredientRepo,
-    IngredientInput, IngredientRepo,
-};
-use mise_core::Unit;
-use mise_entitlements::{is_allowed, AccountType, Feature};
-use std::sync::Arc;
-use tauri::{Manager, State};
-use tokio::sync::Mutex;
-
-pub struct AppState {
-    pub ingredients: Arc<Mutex<SqliteIngredientRepo>>,
-}
-
-#[tauri::command]
-fn ping() -> String { "pong".to_string() }
-
-#[tauri::command]
-fn feature_allowed(account: AccountType, feature: Feature) -> bool {
-    is_allowed(account, feature)
-}
-
-#[tauri::command]
-async fn ingredients_list(
-    state: State<'_, AppState>,
-) -> Result<Vec<mise_core::Ingredient>, String> {
-    state.ingredients.lock().await
-        .list().await
-        .map_err(|e| e.to_string())
-}
-
-fn parse_unit_str(s: &str) -> mise_core::Unit {
-    match s {
-        "gram" => mise_core::Unit::Gram,
-        "kilogram" => mise_core::Unit::Kilogram,
-        "milligram" => mise_core::Unit::Milligram,
-        "ounce" => mise_core::Unit::Ounce,
-        "pound" => mise_core::Unit::Pound,
-        "milliliter" => mise_core::Unit::Milliliter,
-        "liter" => mise_core::Unit::Liter,
-        "fluid_ounce" => mise_core::Unit::FluidOunce,
-        "cup" => mise_core::Unit::Cup,
-        "pint" => mise_core::Unit::Pint,
-        "quart" => mise_core::Unit::Quart,
-        "gallon" => mise_core::Unit::Gallon,
-        "teaspoon" => mise_core::Unit::Teaspoon,
-        "tablespoon" => mise_core::Unit::Tablespoon,
-        "piece" => mise_core::Unit::Piece,
-        "dozen" => mise_core::Unit::Dozen,
-        "pinch" => mise_core::Unit::Pinch,
-        "bunch" => mise_core::Unit::Bunch,
-        "clove" => mise_core::Unit::Clove,
-        "slice" => mise_core::Unit::Slice,
-        "centimeter" => mise_core::Unit::Centimeter,
-        "celsius" => mise_core::Unit::Celsius,
-        "fahrenheit" => mise_core::Unit::Fahrenheit,
-        _ => mise_core::Unit::Gram,
-    }
-}
-
-#[tauri::command]
-async fn ingredient_create(
-    state: State<'_, AppState>,
-    name: String,
-    unit: String,
-    price_per_unit: f64,
-) -> Result<mise_core::Ingredient, String> {
-    let unit = parse_unit_str(&unit);
-    state.ingredients.lock().await
-        .create(IngredientInput { name, unit, price_per_unit })
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn ingredient_delete(
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<(), String> {
-    state.ingredients.lock().await
-        .delete(id).await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn ingredient_update(
-    state: State<'_, AppState>,
-    id: i64,
-    name: String,
-    unit: String,
-    price_per_unit: f64,
-) -> Result<mise_core::Ingredient, String> {
-    let unit = parse_unit_str(&unit);
-    state.ingredients.lock().await
-        .update(id, IngredientInput { name, unit, price_per_unit })
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn unit_convert(
-    value: f64,
-    from: String,
-    to: String,
-) -> Result<f64, String> {
-    use mise_core::{convert, ConversionResult};
-    match convert(value, parse_unit_str(&from), parse_unit_str(&to)) {
-        ConversionResult::Ok(v) => Ok(v),
-        ConversionResult::NeedsDensity => Err("needs_density".into()),
-        ConversionResult::Incompatible => Err("incompatible".into()),
-    }
-}
+use mise_core::*;
+use mise_tauri;
+use mise_tauri::AppDb;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
-            let data_dir = app.path()
-                .app_data_dir()
-                .expect("sem app data dir");
-            std::fs::create_dir_all(&data_dir).ok();
-            let db_path = data_dir.join("mise.db")
-                .to_string_lossy()
-                .to_string();
-            tauri::async_runtime::block_on(async {
-                let conn = open_local(&db_path)
-                    .await
-                    .expect("falha ao abrir base de dados");
-                let repo = SqliteIngredientRepo { conn };
-                app.manage(AppState {
-                    ingredients: Arc::new(Mutex::new(repo)),
-                });
-            });
-            Ok(())
+            // Initialize database and state via mise-tauri.
+            // Run SYNCHRONOUSLY and blocking via block_on (NOT spawn) so that
+            // app.manage(db) inside initialize_app_state FINISHES before
+            // setup() returns — and therefore before any invoke_handler can be
+            // called by the frontend. Previously this ran in a spawned task
+            // that raced the first invoke(), causing "state not managed for
+            // field `db`" errors on every DB command.
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::block_on(async move {
+                mise_tauri::initialize_app_state(&app_handle).await
+            })
+            .map_err(|e| {
+                // Treat the Result as a real error: log the full message and
+                // propagate out of setup() so Tauri aborts startup cleanly
+                // instead of opening a window with no managed state.
+                eprintln!("Failed to initialize app state: {}", e);
+                Box::<dyn std::error::Error>::from(e)
+            })
         })
         .invoke_handler(tauri::generate_handler![
-            ping,
-            feature_allowed,
-            ingredients_list,
-            ingredient_create,
-            ingredient_delete,
-            ingredient_update,
-            unit_convert,
+            mise_tauri::commands::get_system_theme,
+            // Ingredients
+            mise_tauri::commands::ingredients_list,
+            mise_tauri::commands::ingredient_create,
+            mise_tauri::commands::ingredient_update,
+            mise_tauri::commands::ingredient_delete,
+            mise_tauri::commands::ingredient_toggle_favorite,
+            // Recipes
+            mise_tauri::commands::recipes_list,
+            mise_tauri::commands::recipes_paginated,
+            mise_tauri::commands::recipe_get,
+            mise_tauri::commands::recipe_create,
+            mise_tauri::commands::recipe_update,
+            mise_tauri::commands::recipe_delete,
+            mise_tauri::commands::recipe_toggle_favorite,
+            mise_tauri::commands::recipe_clone,
+            // Stock
+            mise_tauri::commands::stock_list,
+            mise_tauri::commands::stock_upsert,
+            mise_tauri::commands::stock_delete,
+            mise_tauri::commands::stock_get,
+            mise_tauri::commands::stock_update_quantity,
+            // Shopping
+            mise_tauri::commands::shopping_lists_list,
+            mise_tauri::commands::shopping_list_get,
+            mise_tauri::commands::shopping_list_create,
+            mise_tauri::commands::shopping_list_create_from_recipes,
+            mise_tauri::commands::shopping_list_update_item,
+            mise_tauri::commands::shopping_list_delete,
+            // Suggester
+            mise_tauri::commands::suggester_suggest,
+            // Cost
+            mise_tauri::commands::cost_calculate,
+            mise_tauri::commands::cost_analyze,
+            // Settings
+            mise_tauri::commands::settings_get,
+            mise_tauri::commands::settings_set,
+            // Categories
+            mise_tauri::commands::categories_list,
+            mise_tauri::commands::category_create,
+            mise_tauri::commands::category_update,
+            mise_tauri::commands::category_delete,
+            // Suppliers
+            mise_tauri::commands::suppliers_list,
+            mise_tauri::commands::supplier_create,
+            mise_tauri::commands::supplier_update,
+            mise_tauri::commands::supplier_delete,
+            // Price quotes
+            mise_tauri::commands::price_quotes_list,
+            mise_tauri::commands::price_quote_create,
+            mise_tauri::commands::price_quote_delete,
+            // Import/Export
+            mise_tauri::commands::export_data,
+            mise_tauri::commands::import_data,
+            // Dashboard
+            mise_tauri::commands::dashboard_stats,
+            mise_tauri::commands::dashboard_recent_activity,
+            mise_tauri::commands::dashboard_upcoming_meals,
+            mise_tauri::commands::dashboard_low_stock,
+            // Meal Planner
+            mise_tauri::commands::meal_plans_list,
+            mise_tauri::commands::meal_plan_get,
+            mise_tauri::commands::meal_plan_create,
+            mise_tauri::commands::meal_plan_update,
+            mise_tauri::commands::meal_plan_delete,
+            mise_tauri::commands::meal_plan_entries_by_date_range,
+            mise_tauri::commands::meal_plan_entries_by_month,
+            mise_tauri::commands::meal_plan_generate_shopping_list,
+            mise_tauri::commands::meal_entry_add,
+            mise_tauri::commands::meal_entry_update,
+            mise_tauri::commands::meal_entry_delete,
+            // Reports
+            mise_tauri::commands::report_cost,
+            mise_tauri::commands::report_waste,
+            mise_tauri::commands::report_stock_trends,
+            mise_tauri::commands::report_meal_stats,
+            mise_tauri::commands::report_price_trends,
+            // Suppliers (extras)
+            mise_tauri::commands::supplier_get,
+            mise_tauri::commands::price_quotes_all,
+            mise_tauri::commands::price_quotes_stats,
+            mise_tauri::commands::price_quote_update,
+            // Shopping (items) — Lote 2
+            mise_tauri::commands::shopping_list_update,
+            mise_tauri::commands::shopping_list_add_item,
+            mise_tauri::commands::shopping_list_update_item_full,
+            mise_tauri::commands::shopping_list_toggle_item,
+            mise_tauri::commands::shopping_list_remove_item,
+            mise_tauri::commands::shopping_list_reorder_items,
+            mise_tauri::commands::shopping_list_clear_purchased,
+            mise_tauri::commands::shopping_list_group_by_category,
+            // Stock purchases — Lote 2
+            mise_tauri::commands::stock_purchase_add,
+            mise_tauri::commands::stock_purchases_list,
+            mise_tauri::commands::stock_purchase_delete,
+            // Settings (extras) — Lote 2
+            mise_tauri::commands::settings_get_all,
+            mise_tauri::commands::settings_reset,
+            // Images — Lote 2
+            mise_tauri::commands::image_upload,
+            mise_tauri::commands::image_delete,
+            mise_tauri::commands::image_set_primary,
+            mise_tauri::commands::image_get,
+            mise_tauri::commands::image_search_proxy,
+            // Receipts (OCR) — Lote 2 (backend only; frontend ReceiptScannerPage fora de scope)
+            mise_tauri::commands::receipt_scan,
+            mise_tauri::commands::receipt_parse,
+            mise_tauri::commands::receipt_confirm,
+            // Data management — Lote 3
+            #[cfg(debug_assertions)]
+            mise_tauri::commands::seed_demo_data,
+            #[cfg(debug_assertions)]
+            mise_tauri::commands::delete_all_data,
         ])
         .run(tauri::generate_context!())
-        .expect("erro ao arrancar a aplicação Tauri");
+        .expect("error while running tauri application");
 }

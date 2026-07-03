@@ -1,6 +1,6 @@
 [package]
 name = "mise"
-edition.workspace = true
+edition = "2021"
 version.workspace = true
 description = "mise — gestão de receitas e custos para cozinhas"
 
@@ -14,9 +14,12 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
 mise-core = { path = "../crates/core" }
-mise-data = { path = "../crates/data" }
-mise-entitlements = { path = "../crates/entitlements" }
+mise-tauri = { path = "../crates/tauri" }
 tokio = { workspace = true }
