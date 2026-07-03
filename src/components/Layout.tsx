@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import Modal from "./ui/Modal";
+import { PageHeaderProvider, usePageHeaderContext } from "./PageHeaderContext";
+import { useI18n } from "../i18n";
+import { applyTheme, currentTheme } from "../theme";
 
 const SHORTCUTS = [
   { keys: "Ctrl+K / Cmd+K", action: "Focar barra de pesquisa" },
@@ -13,7 +16,68 @@ const SHORTCUTS = [
   { keys: "G depois C", action: "Ir para Compras" },
 ];
 
-export default function Layout() {
+function pad(n: number) {
+  return n.toString().padStart(2, "0");
+}
+
+function formatClock(d: Date) {
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const date = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+  return `${time} ${date}`;
+}
+
+function Topbar() {
+  const { title, subtitle, actions } = usePageHeaderContext();
+  const { language, setLanguage } = useI18n();
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [now, setNow] = useState(() => new Date());
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setTheme(currentTheme());
+    const onFocusSearch = () => searchRef.current?.focus();
+    window.addEventListener("mise:focus-search", onFocusSearch);
+    return () => window.removeEventListener("mise:focus-search", onFocusSearch);
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const toggleTheme = async () => {
+    const next = theme === "light" ? "dark" : "light";
+    localStorage.setItem("mise-theme", next);
+    await applyTheme(next);
+    setTheme(next);
+  };
+
+  return (
+    <header className="topbar">
+      <div style={{ flexShrink: 0 }}>
+        <h1 className="topbar-title">{title}</h1>
+        {subtitle && <div className="topbar-sub">{subtitle}</div>}
+      </div>
+      <div style={{ flex: 1, minWidth: 16 }} />
+      <div className="topbar-search">
+        <span className="ms" style={{ fontSize: 18, color: "var(--ink-3)" }} aria-hidden="true">search</span>
+        <input ref={searchRef} placeholder={language === "pt" ? "Procurar em tudo…" : "Search everything…"} />
+        <span className="kbd-hint">⌘K</span>
+      </div>
+      <div className="mono topbar-clock" aria-label="Data e hora atuais">{formatClock(now)}</div>
+      <div className="seg">
+        <button className={language === "pt" ? "active" : ""} onClick={() => setLanguage("pt")}>PT</button>
+        <button className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>EN</button>
+      </div>
+      <button className="icon-btn" title="Tema" onClick={toggleTheme}>
+        <span className="ms" style={{ fontSize: 19 }} aria-hidden="true">{theme === "light" ? "dark_mode" : "light_mode"}</span>
+      </button>
+      {actions}
+    </header>
+  );
+}
+
+function LayoutInner() {
   const navigate = useNavigate();
   const [showHelp, setShowHelp] = useState(false);
   const [gPressed, setGPressed] = useState(false);
@@ -22,7 +86,6 @@ export default function Layout() {
     let gTimeout: ReturnType<typeof setTimeout>;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if user is typing in an input or textarea
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
@@ -38,7 +101,6 @@ export default function Layout() {
         window.dispatchEvent(new CustomEvent("mise:focus-search"));
         e.preventDefault();
       } else if (e.key === "Escape") {
-        // Let modals handle their own escape listener, but we can close help here
         setShowHelp(false);
       } else if (e.key.toLowerCase() === "g" && !e.ctrlKey && !e.metaKey) {
         setGPressed(true);
@@ -50,7 +112,7 @@ export default function Layout() {
         else if (key === "r") navigate("/receitas");
         else if (key === "a") navigate("/armazem");
         else if (key === "c") navigate("/compras");
-        
+
         setGPressed(false);
       }
     };
@@ -66,7 +128,10 @@ export default function Layout() {
     <div className="app">
       <Sidebar />
       <main className="main">
-        <Outlet />
+        <Topbar />
+        <div className="main-scroll scr">
+          <Outlet />
+        </div>
       </main>
 
       <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Atalhos de teclado">
@@ -80,5 +145,13 @@ export default function Layout() {
         </div>
       </Modal>
     </div>
+  );
+}
+
+export default function Layout() {
+  return (
+    <PageHeaderProvider>
+      <LayoutInner />
+    </PageHeaderProvider>
   );
 }

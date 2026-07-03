@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../lib/devInvoke";
 import { useToast } from "../components/ui/Toast";
+import PageHeader from "../components/ui/PageHeader";
 import IngredientAvatar from "../components/IngredientAvatar";
 import ImageUpload from "../components/ImageUpload";
 
@@ -31,6 +32,10 @@ const UNIT_LABELS: Record<string, string> = {
   centimeter: "cm — Centímetro", celsius: "°C — Celsius",
   fahrenheit: "°F — Fahrenheit",
 };
+
+const UNIT_SHORT: Record<string, string> = Object.fromEntries(
+  Object.entries(UNIT_LABELS).map(([k, v]) => [k, v.split(" — ")[0]])
+);
 
 const EMPTY_FORM = { name: "", unit: "gram", price_per_unit: 0 };
 
@@ -119,16 +124,20 @@ export default function IngredientsPage() {
 
   return (
     <div className="content">
-      {/* Header */}
-      <div className="content-header">
-        <div>
-          <h1 className="content-title">Ingredientes</h1>
-          <p className="content-sub mono">{ingredients.length} ingredientes</p>
-        </div>
-        <div className="search-bar" role="search" aria-label="Pesquisar ingredientes">
-          <svg className="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-          </svg>
+      <PageHeader
+        title="Ingredientes"
+        subtitle={`Inventário · ${ingredients.length} ${ingredients.length === 1 ? "item" : "itens"}`}
+        actions={
+          <button className="btn-primary" onClick={openCreate}>
+            <span className="ms" style={{ fontSize: 18 }} aria-hidden="true">add</span>
+            Novo ingrediente
+          </button>
+        }
+      />
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "var(--space-4)" }}>
+        <div className="search-bar" role="search" aria-label="Pesquisar ingredientes" style={{ maxWidth: 320 }}>
+          <span className="ms" style={{ fontSize: 18, color: "var(--ink-3)" }} aria-hidden="true">search</span>
           <input
             placeholder="Pesquisar ingredientes…"
             value={search}
@@ -136,136 +145,125 @@ export default function IngredientsPage() {
             aria-label="Pesquisar"
           />
         </div>
-        <button className="btn btn-primary" onClick={openCreate}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
-            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-          </svg>
-          Novo ingrediente
-        </button>
+        <div style={{ flex: 1 }} />
+        <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          {filtered.length} {filtered.length === 1 ? "ingrediente" : "ingredientes"}
+        </span>
       </div>
 
-      {/* Empty state */}
       {filtered.length === 0 && (
         <div className="empty" role="status">
-          <svg className="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true">
-            <path d="M2 22 16 8M16 3s0 7-8 13"/>
-          </svg>
+          <span className="ms" style={{ fontSize: 44, color: "var(--ink-3)" }} aria-hidden="true">search_off</span>
           <p className="empty-title">{search ? "Sem resultados" : "Sem ingredientes"}</p>
-          <p className="empty-desc">
+          <p style={{ fontSize: 13, color: "var(--ink-2)" }}>
             {search ? "Tenta outra pesquisa." : "Adiciona o primeiro ingrediente para começar."}
           </p>
           {!search && (
-            <button className="btn btn-primary" onClick={openCreate}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
-                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-              </svg>
+            <button className="btn-primary" onClick={openCreate} style={{ marginTop: 8 }}>
+              <span className="ms" style={{ fontSize: 18 }} aria-hidden="true">add</span>
               Adicionar ingrediente
             </button>
           )}
         </div>
       )}
 
-      {/* Grid */}
       {filtered.length > 0 && (
-        <div className="ingredient-grid" role="list" aria-label="Lista de ingredientes">
-          {filtered.map(ing => (
-            <article key={ing.id} className="ingredient-card" role="listitem">
-              <IngredientAvatar name={ing.name} />
-              <div className="ingredient-info">
-                <p className="ingredient-name">{ing.name}</p>
-                <p className="ingredient-meta mono">{UNIT_LABELS[ing.unit] ?? ing.unit}</p>
-              </div>
-              <p className="ingredient-price mono">{ing.price_per_unit.toFixed(2)} €</p>
-
-              {confirmDelete === ing.id ? (
-                <div className="confirm-inline" role="alert" aria-live="polite">
-                  <span>Eliminar “{ing.name}”?</span>
-                  <button
-                    className="btn-icon danger"
-                    onClick={() => handleDelete(ing.id)}
-                    aria-label="Confirmar eliminação"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
-                      <polyline points="20 6 9 17 4 12"/>
-                    </svg>
-                  </button>
-                  <button
-                    className="btn-icon"
-                    onClick={() => setConfirmDelete(null)}
-                    aria-label="Cancelar"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
-                      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                    </svg>
-                  </button>
-                </div>
-              ) : (
-                <div className="ingredient-actions" role="group" aria-label="Ações do ingrediente">
-                  <button
-                    className="btn-icon"
-                    onClick={() => openEdit(ing)}
-                    title="Editar"
-                    aria-label={`Editar ${ing.name}`}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                    </svg>
-                  </button>
-                  <button
-                    className="btn-icon danger"
-                    onClick={() => setConfirmDelete(ing.id)}
-                    title="Eliminar"
-                    aria-label={`Eliminar ${ing.name}`}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <polyline points="3 6 5 6 21 6"/>
-                      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                      <path d="M10 11v6M14 11v6"/>
-                      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-                    </svg>
-                  </button>
-                </div>
-              )}
-            </article>
-          ))}
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th style={{ width: 40 }}></th>
+                  <th>Nome</th>
+                  <th>Unidade</th>
+                  <th style={{ textAlign: "right" }}>Preço</th>
+                  <th style={{ width: 100, textAlign: "right" }}>Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(ing => (
+                  <tr key={ing.id}>
+                    <td><IngredientAvatar name={ing.name} /></td>
+                    <td style={{ fontWeight: 500 }}>{ing.name}</td>
+                    <td className="mono" style={{ color: "var(--ink-2)" }}>{UNIT_SHORT[ing.unit] ?? ing.unit}</td>
+                    <td className="mono" style={{ textAlign: "right" }}>{ing.price_per_unit.toFixed(2)} €</td>
+                    <td>
+                      {confirmDelete === ing.id ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }} role="alert">
+                          <button
+                            className="btn-icon danger"
+                            onClick={() => handleDelete(ing.id)}
+                            aria-label="Confirmar eliminação"
+                            title="Confirmar"
+                          >
+                            <span className="ms" style={{ fontSize: 16 }} aria-hidden="true">check</span>
+                          </button>
+                          <button
+                            className="btn-icon"
+                            onClick={() => setConfirmDelete(null)}
+                            aria-label="Cancelar"
+                            title="Cancelar"
+                          >
+                            <span className="ms" style={{ fontSize: 16 }} aria-hidden="true">close</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }} role="group" aria-label="Ações do ingrediente">
+                          <button
+                            className="btn-icon"
+                            onClick={() => openEdit(ing)}
+                            title="Editar"
+                            aria-label={`Editar ${ing.name}`}
+                          >
+                            <span className="ms" style={{ fontSize: 16 }} aria-hidden="true">edit</span>
+                          </button>
+                          <button
+                            className="btn-icon danger"
+                            onClick={() => setConfirmDelete(ing.id)}
+                            title="Eliminar"
+                            aria-label={`Eliminar ${ing.name}`}
+                          >
+                            <span className="ms" style={{ fontSize: 16 }} aria-hidden="true">delete</span>
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
-      {/* Modal */}
       {modal && (
         <div className="modal-backdrop" onClick={closeModal} role="dialog" aria-modal="true" aria-labelledby="modal-title">
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <header className="modal-header">
-              <h2 id="modal-title" className="modal-title">
+            <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+              <h2 id="modal-title" className="modal-title" style={{ margin: 0 }}>
                 {modal === "create" ? "Novo ingrediente" : "Editar ingrediente"}
               </h2>
-              <button className="modal-close" onClick={closeModal} aria-label="Fechar">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
+              <button className="btn-icon" onClick={closeModal} aria-label="Fechar">
+                <span className="ms" style={{ fontSize: 18 }} aria-hidden="true">close</span>
               </button>
             </header>
-            <div className="modal-body">
+            <div>
               <div className="field">
-                <label className="field-label" htmlFor="name">Nome</label>
+                <label htmlFor="name">Nome</label>
                 <input
                   id="name"
-                  className="input"
                   autoFocus
                   value={form.name}
                   onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                   onKeyDown={e => e.key === "Enter" && !e.shiftKey && handleSave()}
                   placeholder="ex: Arroz arbório"
-                  aria-describedby="name-hint"
                 />
               </div>
 
               <div className="field">
-                <label className="field-label" htmlFor="unit">Unidade</label>
+                <label htmlFor="unit">Unidade</label>
                 <select
                   id="unit"
-                  className="select"
                   value={form.unit}
                   onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}
                 >
@@ -280,11 +278,10 @@ export default function IngredientsPage() {
               </div>
 
               <div className="field">
-                <label className="field-label" htmlFor="price">Preço por unidade (€)</label>
+                <label htmlFor="price">Preço por unidade (€)</label>
                 <input
                   id="price"
                   type="number"
-                  className="input input-num"
                   min="0"
                   step="0.01"
                   value={form.price_per_unit}
@@ -297,7 +294,7 @@ export default function IngredientsPage() {
               </div>
 
               <div className="field">
-                <label className="field-label">Imagem do ingrediente</label>
+                <label>Imagem do ingrediente</label>
                 <ImageUpload
                   entityType="ingredient"
                   entityId={editing?.id ?? 0}
@@ -307,7 +304,7 @@ export default function IngredientsPage() {
             <footer className="modal-footer">
               <button className="btn btn-secondary" onClick={closeModal}>Cancelar</button>
               <button
-                className="btn btn-primary"
+                className="btn-primary"
                 onClick={handleSave}
                 disabled={loading || !form.name.trim()}
               >

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../lib/devInvoke";
 import { useToast } from "../components/ui/Toast";
+import PageHeader from "../components/ui/PageHeader";
+import EmptyState from "../components/ui/EmptyState";
 
 interface RecipeIngredient {
   ingredient_id: number;
@@ -66,13 +68,16 @@ const UNIT_LABELS: Record<string, string> = {
   fahrenheit: "°F — Fahrenheit",
 };
 
+const shortUnit = (unit: string) => (UNIT_LABELS[unit] ?? unit).split(" — ")[0];
+
+const eur = (n: number) => `€${n.toFixed(2)}`;
+
 export default function CostsPage() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [_ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [selectedRecipeId, setSelectedRecipeId] = useState<number | null>(null);
   const [portions, setPortions] = useState<number>(4);
   const [margin, setMargin] = useState<number>(30);
-  const [_promoPrices, setPromoPrices] = useState<Record<number, number>>({});
   const [analysis, setAnalysis] = useState<CostAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
   const { showToast } = useToast();
@@ -109,12 +114,12 @@ export default function CostsPage() {
       // A margem/lucro é calculada no frontend — o backend devolve só
       // CostBreakdown (total_cost, cost_per_portion, ingredient_costs).
       const total_cost = breakdown.total_cost;
-const cost_per_portion = breakdown.cost_per_portion;
-const marginMultiplier = 1 + margin / 100;
-const suggested_price_per_portion = cost_per_portion * marginMultiplier;
-const suggested_price_total = suggested_price_per_portion * portions;
-const profit_per_portion = suggested_price_per_portion - cost_per_portion;
-const profit_total = suggested_price_total - total_cost;
+      const cost_per_portion = breakdown.cost_per_portion;
+      const marginMultiplier = 1 + margin / 100;
+      const suggested_price_per_portion = cost_per_portion * marginMultiplier;
+      const suggested_price_total = suggested_price_per_portion * portions;
+      const profit_per_portion = suggested_price_per_portion - cost_per_portion;
+      const profit_total = suggested_price_total - total_cost;
 
       setAnalysis({
         breakdown,
@@ -135,305 +140,207 @@ const profit_total = suggested_price_total - total_cost;
 
   useEffect(() => { calculate(); }, [calculate]);
 
-  const handlePortionsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = parseInt(e.target.value) || 1;
-    setPortions(val);
-  };
+  const incPortions = () => setPortions(p => Math.min(999, p + 1));
+  const decPortions = () => setPortions(p => Math.max(1, p - 1));
 
   const handleMarginChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = parseFloat(e.target.value) || 0;
-    setMargin(val);
-  };
-
-  const handlePromoChange = (ingredientId: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseFloat(e.target.value);
-    if (isNaN(val) || val <= 0) {
-      setPromoPrices(prev => { const n = { ...prev }; delete n[ingredientId]; return n; });
-    } else {
-      setPromoPrices(prev => ({ ...prev, [ingredientId]: val }));
-    }
-  };
-
-  const clearPromo = (ingredientId: number) => {
-    setPromoPrices(prev => { const n = { ...prev }; delete n[ingredientId]; return n; });
+    setMargin(isNaN(val) ? 0 : val);
   };
 
   if (!selectedRecipeId || !analysis) {
     return (
       <div className="content">
-        <div className="content-header">
-          <div>
-            <h1 className="content-title">Análise de Custos</h1>
-            <p className="content-sub mono">Seleciona uma receita para analisar</p>
+        <PageHeader title="Análise de Custos" subtitle="Seleciona uma receita para analisar" />
+        {recipes.length > 0 && (
+          <div style={{ display: "flex", gap: "7px", flexWrap: "wrap", marginBottom: "18px" }}>
+            {recipes.map(r => (
+              <button
+                key={r.id}
+                className={`tab-item${r.id === selectedRecipeId ? " active" : ""}`}
+                onClick={() => setSelectedRecipeId(r.id)}
+              >
+                {r.name}
+              </button>
+            ))}
           </div>
-          <div style={{ maxWidth: 300 }}>
-            <select className="select" style={{ width: "100%" }} 
-              value={selectedRecipeId ?? ""} 
-              onChange={e => setSelectedRecipeId(e.target.value ? parseInt(e.target.value) : null)}
-            >
-              <option value="">Seleciona receita…</option>
-              {recipes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-          </div>
-        </div>
-        <div className="empty" role="status" style={{ minHeight: 300 }}>
-          <svg className="empty-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true">
-            <rect x="4" y="4" width="16" height="16" rx="2"/>
-            <line x1="8" y1="12" x2="16" y2="12"/>
-            <line x1="12" y1="8" x2="12" y2="16"/>
-          </svg>
-          <p className="empty-title">Nenhuma análise disponível</p>
-          <p className="empty-desc">Cria uma receita na página de Receitas e seleciona-a aqui.</p>
-        </div>
+        )}
+        <EmptyState
+          icon={
+            <span className="ms" style={{ fontSize: 40, color: "var(--ink-3)" }}>calculate</span>
+          }
+          title="Nenhuma análise disponível"
+          body="Cria uma receita na página de Receitas e seleciona-a aqui."
+        />
       </div>
     );
   }
 
   const selectedRecipe = recipes.find(r => r.id === selectedRecipeId)!;
+  const { breakdown } = analysis;
+  const hasApprox = breakdown.ingredient_costs.some(ic => ic.is_approximate);
+  const approxSum = breakdown.ingredient_costs
+    .filter(ic => ic.is_approximate)
+    .reduce((s, ic) => s + ic.total_cost, 0);
+  const approxPct = breakdown.total_cost > 0 ? (approxSum / breakdown.total_cost) * 100 : 0;
+  const foodCostPct = analysis.suggested_price_per_portion > 0
+    ? (breakdown.cost_per_portion / analysis.suggested_price_per_portion) * 100
+    : 0;
 
   return (
     <div className="content">
-      {/* Header */}
-      <div className="content-header">
-        <div style={{ flex: 1 }}>
-          <h1 className="content-title">Análise de Custos</h1>
-          <p className="content-sub mono">{selectedRecipe.name} • {selectedRecipe.portions} doses base</p>
-        </div>
-        <div style={{ maxWidth: 350 }}>
-          <select className="select" style={{ width: "100%" }} 
-            value={selectedRecipeId ?? ""} 
-            onChange={e => setSelectedRecipeId(e.target.value ? parseInt(e.target.value) : null)}
+      <PageHeader
+        title="Análise de Custos"
+        subtitle={`${selectedRecipe.name} • ${selectedRecipe.portions} doses base`}
+      />
+
+      {/* Recipe switcher chips */}
+      <div style={{ display: "flex", gap: "7px", flexWrap: "wrap", marginBottom: "18px" }}>
+        {recipes.map(r => (
+          <button
+            key={r.id}
+            className={`tab-item${r.id === selectedRecipeId ? " active" : ""}`}
+            onClick={() => setSelectedRecipeId(r.id)}
           >
-            <option value="">Seleciona receita…</option>
-            {recipes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-          </select>
-        </div>
+            {r.name}
+          </button>
+        ))}
       </div>
 
-      {/* Controls */}
-      <div className="card" style={{ padding: "var(--space-4) var(--space-5)", marginBottom: "var(--space-5)" }}>
-        <div className="field-row" style={{ flexWrap: "wrap", gap: "var(--space-4)", alignItems: "flex-end" }}>
-          <div className="field" style={{ flex: 1, minWidth: 180 }}>
-            <label className="field-label" htmlFor="portions">Porções</label>
-            <input id="portions" type="number" className="input input-num" min="1" max="999"
-              value={portions} onChange={handlePortionsChange} />
+      <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: "16px", alignItems: "start" }}>
+        {/* Breakdown card */}
+        <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "14px", overflow: "hidden" }}>
+          <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: "var(--serif)", fontSize: "18px", fontWeight: 600, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {selectedRecipe.name}
+              </div>
+              <div className="mono" style={{ fontSize: "10.5px", color: "var(--ink-3)", marginTop: "3px" }}>
+                Discriminado para {portions} porções {loading && "· a calcular…"}
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "2px", background: "var(--inset)", border: "1px solid var(--line)", borderRadius: "9px", padding: "3px", flexShrink: 0 }}>
+              <button
+                onClick={decPortions}
+                aria-label="Diminuir porções"
+                style={{ width: 26, height: 26, border: "none", background: "var(--surface)", borderRadius: 6, cursor: "pointer", color: "var(--ink)", fontSize: 16 }}
+              >
+                −
+              </button>
+              <span className="mono" style={{ minWidth: 44, textAlign: "center", fontSize: "12.5px", fontWeight: 600, color: "var(--ink)" }}>
+                {portions}
+              </span>
+              <button
+                onClick={incPortions}
+                aria-label="Aumentar porções"
+                style={{ width: 26, height: 26, border: "none", background: "var(--surface)", borderRadius: 6, cursor: "pointer", color: "var(--ink)", fontSize: 16 }}
+              >
+                +
+              </button>
+            </div>
           </div>
-          <div className="field" style={{ flex: 1, minWidth: 180 }}>
-            <label className="field-label" htmlFor="margin">Margem (%)</label>
-            <input id="margin" type="number" className="input input-num" min="0" max="500" step="1"
-              value={margin} onChange={handleMarginChange} />
+
+          <div style={{ display: "grid", gridTemplateColumns: "1.7fr 1fr 90px", gap: "10px", padding: "9px 20px", borderBottom: "1px solid var(--line)", background: "var(--inset)" }}>
+            <span className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)" }}>Ingrediente</span>
+            <span className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)", textAlign: "right" }}>Qtd.</span>
+            <span className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)", textAlign: "right" }}>Custo</span>
           </div>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: "var(--space-2)" }}>
-            <button className="btn btn-primary" onClick={calculate} disabled={loading}>
-              {loading ? "A calcular…" : "Recalcular"}
-            </button>
+
+          {breakdown.ingredient_costs.length === 0 ? (
+            <div style={{ padding: "24px 20px" }}>
+              <p className="text-3" style={{ margin: 0, fontSize: "13px" }}>Sem ingredientes nesta receita.</p>
+            </div>
+          ) : (
+            breakdown.ingredient_costs.map((ic, idx) => (
+              <div key={idx} style={{ display: "grid", gridTemplateColumns: "1.7fr 1fr 90px", gap: "10px", padding: "10px 20px", borderBottom: "1px solid var(--line-2)", alignItems: "center" }}>
+                <span style={{ fontSize: "13px", color: "var(--ink)" }}>{ic.name}</span>
+                <span className="mono" style={{ fontSize: "12px", color: "var(--ink-2)", textAlign: "right" }}>
+                  {ic.quantity} {shortUnit(ic.unit)}
+                </span>
+                <span style={{ textAlign: "right" }}>
+                  {ic.is_approximate ? (
+                    <span
+                      className="mono"
+                      title={ic.approximation_note ?? "Custo aproximado"}
+                      style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--approx)", borderBottom: "1px dotted var(--approx)", cursor: "help" }}
+                    >
+                      ≈ {eur(ic.total_cost)}
+                    </span>
+                  ) : (
+                    <span className="mono" style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--ink)" }}>
+                      {eur(ic.total_cost)}
+                    </span>
+                  )}
+                </span>
+              </div>
+            ))
+          )}
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", background: "var(--inset)" }}>
+            <span style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>Total da receita</span>
+            <span className="mono" style={{ fontSize: "16px", fontWeight: 600, color: "var(--ink)" }}>{eur(breakdown.total_cost)}</span>
           </div>
+        </div>
+
+        {/* Summary + margin */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ background: "var(--ember)", borderRadius: "14px", padding: "20px", color: "var(--ember-ink)" }}>
+            <div className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".8px", opacity: 0.85 }}>Custo por porção</div>
+            <div className="mono" style={{ fontSize: "40px", fontWeight: 600, lineHeight: 1, marginTop: "8px" }}>
+              {eur(breakdown.cost_per_portion)}
+            </div>
+            <div style={{ display: "flex", gap: "20px", marginTop: "16px", paddingTop: "14px", borderTop: "1px solid rgba(255,255,255,.22)" }}>
+              <div>
+                <div className="mono" style={{ fontSize: "9px", opacity: 0.8, textTransform: "uppercase" }}>Food-cost</div>
+                <div className="mono" style={{ fontSize: "16px", fontWeight: 600, marginTop: "2px" }}>{foodCostPct.toFixed(0)}%</div>
+              </div>
+              <div>
+                <div className="mono" style={{ fontSize: "9px", opacity: 0.8, textTransform: "uppercase" }}>Preço sug.</div>
+                <div className="mono" style={{ fontSize: "16px", fontWeight: 600, marginTop: "2px" }}>{eur(analysis.suggested_price_per_portion)}</div>
+              </div>
+              <div>
+                <div className="mono" style={{ fontSize: "9px", opacity: 0.8, textTransform: "uppercase" }}>Margem</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: "1px", marginTop: "2px" }}>
+                  <input
+                    type="number"
+                    className="mono"
+                    value={margin}
+                    onChange={handleMarginChange}
+                    aria-label="Margem (%)"
+                    min={0}
+                    max={500}
+                    step={1}
+                    style={{
+                      width: "34px", fontSize: "16px", fontWeight: 600, background: "transparent",
+                      border: "none", borderBottom: "1px dotted rgba(255,255,255,.6)", color: "var(--ember-ink)",
+                      padding: 0, outline: "none",
+                    }}
+                  />
+                  <span className="mono" style={{ fontSize: "16px", fontWeight: 600 }}>%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {hasApprox && (
+            <div style={{ background: "var(--approx-soft)", border: "1px solid var(--approx)", borderRadius: "14px", padding: "16px 18px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "9px" }}>
+                <span className="ms" style={{ fontSize: 20, color: "var(--approx)" }}>rule</span>
+                <span style={{ fontWeight: 600, fontSize: "13.5px", color: "var(--ink)" }}>Contém custos aproximados</span>
+              </div>
+              <div style={{ fontSize: "12.5px", color: "var(--ink-2)", lineHeight: 1.5, marginTop: "9px" }}>
+                Alguns ingredientes usam conversões inexatas (contagem→peso, «q.b.»). Os valores marcados com ≈ são estimativas — passa o rato para ver o motivo.
+              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "12px", paddingTop: "11px", borderTop: "1px solid var(--approx)" }}>
+                <span className="mono" style={{ fontSize: "11px", color: "var(--approx)" }}>≈ do total é estimado</span>
+                <span className="mono" style={{ fontSize: "13px", fontWeight: 600, color: "var(--approx)" }}>
+                  {eur(approxSum)} · {approxPct.toFixed(1)}%
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
-
-      {/* Summary Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "var(--space-4)", marginBottom: "var(--space-5)" }}>
-        <div className="card" style={{ padding: "var(--space-4)", borderLeft: "4px solid var(--brand)" }}>
-          <p className="text-3 mono">Custo Total</p>
-          <p className="text-1 mono" style={{ fontSize: "28px", fontWeight: 600, color: "var(--brand)" }}>
-            {analysis.breakdown.total_cost.toFixed(2)} €
-          </p>
-          <p className="text-3 mono" style={{ marginTop: "var(--space-1)" }}>
-            {analysis.breakdown.cost_per_portion.toFixed(2)} € / dose
-          </p>
-        </div>
-        <div className="card" style={{ padding: "var(--space-4)", borderLeft: "4px solid var(--ok)" }}>
-          <p className="text-3 mono">Preço Sugerido</p>
-          <p className="text-1 mono" style={{ fontSize: "28px", fontWeight: 600, color: "var(--ok)" }}>
-            {analysis.suggested_price_per_portion.toFixed(2)} €
-          </p>
-          <p className="text-3 mono" style={{ marginTop: "var(--space-1)" }}>
-            {analysis.suggested_price_total.toFixed(2)} € total
-          </p>
-        </div>
-        <div className="card" style={{ padding: "var(--space-4)", borderLeft: "4px solid var(--warn)" }}>
-          <p className="text-3 mono">Lucro por Dose</p>
-          <p className="text-1 mono" style={{ fontSize: "28px", fontWeight: 600, color: "var(--warn)" }}>
-            {analysis.profit_per_portion.toFixed(2)} €
-          </p>
-          <p className="text-3 mono" style={{ marginTop: "var(--space-1)" }}>
-            Margem: {margin}%
-          </p>
-        </div>
-        {analysis.breakdown_with_promo && (
-          <div className="card" style={{ padding: "var(--space-4)", borderLeft: "4px solid var(--info)" }}>
-            <p className="text-3 mono">Com Promoções</p>
-            <p className="text-1 mono" style={{ fontSize: "28px", fontWeight: 600, color: "var(--info)" }}>
-              {analysis.breakdown_with_promo.total_cost.toFixed(2)} €
-            </p>
-            <p className="text-3 mono" style={{ marginTop: "var(--space-1)" }}>
-              Poupança: {(analysis.breakdown.total_cost - analysis.breakdown_with_promo.total_cost).toFixed(2)} €
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* Ingredient Cost Breakdown Table */}
-      <div className="card" style={{ marginBottom: "var(--space-5)" }}>
-        <div className="field-row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-4)", flexWrap: "wrap", gap: "var(--space-3)" }}>
-          <h2 className="text-3" style={{ fontSize: "16px", fontWeight: 600 }}>Detalhe por Ingrediente</h2>
-        </div>
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Ingrediente</th>
-                <th className="mono">Qtd</th>
-                <th className="mono">Unid.</th>
-                <th className="mono">Preço Base</th>
-                <th className="mono">Custo Base</th>
-                <th className="mono">Preço Promo</th>
-                <th className="mono">Custo Promo</th>
-              </tr>
-            </thead>
-            <tbody>
-              {analysis.breakdown.ingredient_costs.map((ic, idx) => (
-                <tr key={idx}>
-                  <td>
-                    {ic.name}
-                    {ic.is_approximate && (
-                      <span
-                        title={ic.approximation_note ?? "Custo aproximado"}
-                        style={{ marginLeft: "var(--space-1)", color: "var(--warn)", cursor: "help" }}
-                      >
-                        ≈
-                      </span>
-                    )}
-                  </td>
-                  <td className="mono">{ic.quantity}</td>
-                  <td>{UNIT_LABELS[ic.unit] ?? ic.unit}</td>
-                  <td className="mono">{ic.price_per_unit.toFixed(4)} €</td>
-                  <td className="mono">{ic.total_cost.toFixed(2)} €</td>
-                  <td>
-                    <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
-                      <input
-                        type="number"
-                        className="input input-num"
-                        style={{ width: 100 }}
-                        min="0.0001"
-                        step="0.0001"
-                        value={ic.promo_price_per_unit ?? ""}
-                        onChange={e => handlePromoChange(analysis.breakdown.ingredient_costs.findIndex(x => x === ic), e)}
-                        placeholder="Promo"
-                      />
-                      {ic.promo_price_per_unit && (
-                        <button className="btn-icon" onClick={() => clearPromo(analysis.breakdown.ingredient_costs.findIndex(x => x === ic))} aria-label="Limpar promoção">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                          </svg>
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                  <td className="mono">
-                    {ic.promo_total_cost !== undefined && ic.promo_total_cost !== null 
-                      ? ic.promo_total_cost.toFixed(2) + " €" 
-                      : "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr style={{ background: "var(--elevated)", fontWeight: 600 }}>
-                <td>TOTAL</td>
-                <td></td>
-                <td></td>
-                <td></td>
-                <td className="mono">{analysis.breakdown.total_cost.toFixed(2)} €</td>
-                <td></td>
-                <td className="mono">
-                  {analysis.breakdown_with_promo 
-                    ? analysis.breakdown_with_promo.total_cost.toFixed(2) + " €"
-                    : "—"}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-        {analysis.breakdown.ingredient_costs.some(ic => ic.is_approximate) && (
-          <p className="text-3" style={{ marginTop: "var(--space-3)", fontSize: "12px" }}>
-            <span style={{ color: "var(--warn)" }}>≈</span> custo estimado — a receita usa uma unidade (ex: dente, pitada) sem peso fixo universal para este ingrediente.
-          </p>
-        )}
-      </div>
-
-      {/* SVG Chart: Cost vs Profit */}
-      <div className="card" style={{ padding: "var(--space-4)" }}>
-        <h2 className="text-3" style={{ fontSize: "16px", fontWeight: 600, marginBottom: "var(--space-4)" }}>
-          Custo vs Lucro (por dose)
-        </h2>
-        <div style={{ height: 200, display: "flex", alignItems: "flex-end", gap: "var(--space-3)", justifyContent: "center", paddingBottom: "var(--space-3)" }}>
-          <div style={{ flex: 1, maxWidth: 120, display: "flex", flexDirection: "column", alignItems: "center" }}>
-            <div 
-              className="chart-bar-cost"
-              style={{ 
-                width: "100%", 
-                background: "var(--danger)", 
-                borderRadius: "var(--radius-sm) var(--radius-sm) 0 0",
-                transition: "height 0.3s ease",
-                minHeight: "20px"
-              }}
-            />
-            <span className="text-3 mono" style={{ marginTop: "var(--space-2)", color: "var(--danger)" }}>
-              {analysis.breakdown.cost_per_portion.toFixed(2)} €
-            </span>
-            <span className="text-4">Custo</span>
-          </div>
-          <div style={{ flex: 1, maxWidth: 120, display: "flex", flexDirection: "column", alignItems: "center" }}>
-            <div 
-              className="chart-bar-profit"
-              style={{ 
-                width: "100%", 
-                background: "var(--ok)", 
-                borderRadius: "var(--radius-sm) var(--radius-sm) 0 0",
-                transition: "height 0.3s ease",
-                minHeight: "20px"
-              }}
-            />
-            <span className="text-3 mono" style={{ marginTop: "var(--space-2)", color: "var(--ok)" }}>
-              {analysis.profit_per_portion.toFixed(2)} €
-            </span>
-            <span className="text-4">Lucro</span>
-          </div>
-          <div style={{ flex: 1, maxWidth: 120, display: "flex", flexDirection: "column", alignItems: "center" }}>
-            <div 
-              className="chart-bar-price"
-              style={{ 
-                width: "100%", 
-                background: "var(--brand)", 
-                borderRadius: "var(--radius-sm) var(--radius-sm) 0 0",
-                transition: "height 0.3s ease",
-                minHeight: "20px"
-              }}
-            />
-            <span className="text-3 mono" style={{ marginTop: "var(--space-2)", color: "var(--brand)" }}>
-              {analysis.suggested_price_per_portion.toFixed(2)} €
-            </span>
-            <span className="text-4">Preço Venda</span>
-          </div>
-        </div>
-        <div style={{ display: "flex", justifyContent: "center", gap: "var(--space-6)", marginTop: "var(--space-4)", flexWrap: "wrap" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-            <div style={{ width: 12, height: 12, background: "var(--danger)", borderRadius: "var(--radius-sm)" }}></div>
-            <span className="text-3">Custo</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-            <div style={{ width: 12, height: 12, background: "var(--ok)", borderRadius: "var(--radius-sm)" }}></div>
-            <span className="text-3">Lucro</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-            <div style={{ width: 12, height: 12, background: "var(--brand)", borderRadius: "var(--radius-sm)" }}></div>
-            <span className="text-3">Preço Venda</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Toast */}
     </div>
   );
 }

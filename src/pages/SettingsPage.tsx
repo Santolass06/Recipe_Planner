@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useToast } from "../components/ui/Toast";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../lib/devInvoke";
 import { useI18n } from "../i18n";
 import { applyTheme } from "../theme";
 
@@ -65,6 +65,7 @@ const DEFAULTS = {
   general: {
     language: "pt",
     theme: "system",
+    density: "cozy",
     date_format: "DD/MM/YYYY",
   },
   units: {
@@ -92,6 +93,40 @@ const THEMES = [
   { value: "dark", label: "Escuro" },
   { value: "system", label: "Sistema" },
 ];
+
+const DENSITIES = [
+  { value: "compact", label: "Compacta" },
+  { value: "cozy", label: "Equilibrada" },
+  { value: "comfy", label: "Confortável" },
+];
+
+const DENSITY_ATTR_KEY = "mise-density";
+
+function applyDensity(value: string) {
+  if (value && value !== "cozy") {
+    document.documentElement.setAttribute("data-density", value);
+  } else {
+    document.documentElement.removeAttribute("data-density");
+  }
+}
+
+/** Segmented control matching the `.seg` styles in theme.css (used by the topbar's PT/EN toggle). */
+function Seg({ options, value, onChange }: { options: { value: string; label: string }[]; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="seg">
+      {options.map(o => (
+        <button
+          key={o.value}
+          type="button"
+          className={value === o.value ? "active" : ""}
+          onClick={() => onChange(o.value)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const DATE_FORMATS = [
   { value: "DD/MM/YYYY", label: "DD/MM/YYYY" },
@@ -165,6 +200,17 @@ export default function SettingsPage() {
     loadSettings();
   }, [loadSettings]);
 
+  // Apply the persisted density (or the value already saved via settings_set)
+  // to <html data-density> once the real settings have loaded, mirroring how
+  // theme.ts applies data-theme. This attribute isn't set anywhere else yet,
+  // so wire it here rather than in a shared file.
+  useEffect(() => {
+    if (loading) return;
+    const stored = localStorage.getItem(DENSITY_ATTR_KEY);
+    applyDensity(stored ?? getSetting("density", "general"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
+
   const getSetting = (key: string, category: keyof typeof DEFAULTS): string => {
     const categorySettings = settings[category];
     if (categorySettings) {
@@ -197,7 +243,11 @@ export default function SettingsPage() {
         localStorage.setItem("mise-theme", values.theme);
         await applyTheme(values.theme);
       }
-      
+      if (values.density) {
+        localStorage.setItem(DENSITY_ATTR_KEY, values.density);
+        applyDensity(values.density);
+      }
+
       showToast("Definições guardadas", "ok");
     } catch (e) {
       showToast("Erro ao guardar definições", "err");
@@ -322,31 +372,36 @@ export default function SettingsPage() {
         {/* Settings Content */}
         <div className="settings-content">
           {activeCategory === "general" && (
-            <SettingsSection title="Geral" description="Idioma, tema e formato de data">
+            <SettingsSection title="Geral" description="Idioma, tema, densidade e formato de data">
               <div className="settings-group">
-                <label >Idioma</label>
-                <select
-                  className="select"
+                <label>Idioma</label>
+                <Seg
+                  options={LANGUAGES}
                   value={getSetting("language", "general")}
-                  onChange={e => saveCategorySettings("general", { language: e.target.value })}
-                >
-                  {LANGUAGES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-                </select>
+                  onChange={v => saveCategorySettings("general", { language: v })}
+                />
               </div>
 
               <div className="settings-group">
-                <label >Tema</label>
-                <select
-                  className="select"
+                <label>Tema</label>
+                <Seg
+                  options={THEMES}
                   value={getSetting("theme", "general")}
-                  onChange={e => saveCategorySettings("general", { theme: e.target.value })}
-                >
-                  {THEMES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                </select>
+                  onChange={v => saveCategorySettings("general", { theme: v })}
+                />
               </div>
 
               <div className="settings-group">
-                <label >Formato de data</label>
+                <label>Densidade</label>
+                <Seg
+                  options={DENSITIES}
+                  value={getSetting("density", "general")}
+                  onChange={v => saveCategorySettings("general", { density: v })}
+                />
+              </div>
+
+              <div className="settings-group">
+                <label>Formato de data</label>
                 <select
                   className="select"
                   value={getSetting("date_format", "general")}
@@ -439,9 +494,7 @@ export default function SettingsPage() {
                     Baixa um ficheiro JSON com todos os teus ingredientes, receitas e definições.
                   </p>
                   <button className="btn" onClick={handleExport} disabled={saving}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                    </svg>
+                    <span className="ms" style={{ fontSize: 18 }} aria-hidden="true">download</span>
                     Exportar JSON
                   </button>
                 </div>
@@ -468,6 +521,7 @@ export default function SettingsPage() {
                       onClick={handleImport}
                       disabled={saving || !importFile}
                     >
+                      <span className="ms" style={{ fontSize: 18 }} aria-hidden="true">upload</span>
                       Importar JSON
                     </button>
                   </div>
@@ -495,8 +549,8 @@ export default function SettingsPage() {
 
           {activeCategory === "sync" && (
             <SettingsSection title="Sincronização" description="Configuração de sincronização na nuvem (Turso/libSQL)">
-              <div className="settings-group">
-                <label >Turso Database URL</label>
+              <div className="field">
+                <label>Turso Database URL</label>
                 <input
                   type="text"
                   className="input"
@@ -506,8 +560,8 @@ export default function SettingsPage() {
                 />
               </div>
 
-              <div className="settings-group">
-                <label >Auth Token</label>
+              <div className="field">
+                <label>Auth Token</label>
                 <input
                   type="password"
                   className="input"

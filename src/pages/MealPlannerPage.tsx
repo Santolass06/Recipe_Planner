@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, Fragment } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useState, useEffect, useCallback } from "react";
+import { invoke } from "../lib/devInvoke";
 import { useToast } from "../components/ui/Toast";
 import Modal from "../components/ui/Modal";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
@@ -92,6 +92,15 @@ const DAY_LABELS: Record<DayOfWeek, string> = {
 
 const MEAL_LABELS: Record<MealType, string> = {
   breakfast: "Pequeno-almoço", lunch: "Almoço", dinner: "Jantar", snack: "Lanche"
+};
+
+const DAY_LABELS_SHORT: Record<DayOfWeek, string> = {
+  monday: "Seg", tuesday: "Ter", wednesday: "Qua",
+  thursday: "Qui", friday: "Sex", saturday: "Sáb", sunday: "Dom"
+};
+
+const MEAL_COLORS: Record<MealType, string> = {
+  breakfast: "var(--amber)", lunch: "var(--green)", dinner: "var(--ember)", snack: "var(--approx)"
 };
 
 export default function MealPlannerPage() {
@@ -342,8 +351,8 @@ export default function MealPlannerPage() {
         title="Planeamento Semanal"
         subtitle="Organiza as tuas refeições da semana"
         actions={
-          <button className="btn btn-secondary" onClick={() => openPlanModal("create")}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <button className="btn-primary" onClick={() => openPlanModal("create")}>
+            <span className="ms" style={{ fontSize: 16 }}>add</span>
             Novo Plano
           </button>
         }
@@ -523,40 +532,39 @@ function PlanList({
   setConfirmDelete: (id: number) => void;
 }) {
   return (
-    <div className="card" style={{ padding: "32px", margin: "0 auto", maxWidth: "640px" }}>
-      <h2 className="text-2" style={{ margin: "0 0 20px", fontSize: "18px", fontWeight: 600 }}>Os Teus Planos</h2>
+    <div className="card" style={{ padding: "28px", margin: "0 auto", maxWidth: "760px" }}>
+      <h2 className="section-title" style={{ marginBottom: "18px" }}>Os Teus Planos</h2>
       {mealPlans.length === 0 ? (
         <EmptyState
-          icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>}
+          icon={<span className="ms" style={{ fontSize: 32 }}>calendar_month</span>}
           title="Nenhum plano ainda"
           body="Cria o teu primeiro plano de refeições semanal"
           action={
-            <button className="btn btn-primary" onClick={() => openPlanModal("create")}>
+            <button className="btn-primary" onClick={() => openPlanModal("create")}>
+              <span className="ms" style={{ fontSize: 16 }}>add</span>
               Criar Plano
             </button>
           }
         />
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "var(--space-3)" }}>
+        <div className="item-grid">
           {mealPlans.map(plan => (
-            <div key={plan.id} className="card" style={{ padding: "var(--space-4)", display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
-                  <h3 className="text-2" style={{ fontSize: "16px" }}>{plan.name}</h3>
-                  <p className="text-3 mono" style={{ fontSize: "12px" }}>
-                    {new Date(plan.start_date).toLocaleDateString("pt-PT")} - {new Date(plan.end_date).toLocaleDateString("pt-PT")}
-                  </p>
-                </div>
+            <div key={plan.id} className="item-card" style={{ flexDirection: "column", alignItems: "stretch", cursor: "default" }}>
+              <div>
+                <h3 className="item-name">{plan.name}</h3>
+                <p className="item-meta">
+                  {new Date(plan.start_date).toLocaleDateString("pt-PT")} – {new Date(plan.end_date).toLocaleDateString("pt-PT")}
+                </p>
               </div>
-              <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
-                <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={() => loadPlan(plan.id)}>
+              <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
+                <button className="btn-primary btn-sm" style={{ flex: 1 }} onClick={() => loadPlan(plan.id)}>
                   Abrir
                 </button>
-                <button className="btn btn-secondary btn-sm" onClick={() => openPlanModal("edit", { meal_plan: plan, entries: [] })}>
+                <button className="btn btn-sm" onClick={() => openPlanModal("edit", { meal_plan: plan, entries: [] })}>
                   Editar
                 </button>
-                <button className="btn btn-danger btn-sm" onClick={() => setConfirmDelete(plan.id)}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/></svg>
+                <button className="btn-icon danger" onClick={() => setConfirmDelete(plan.id)} aria-label="Eliminar plano">
+                  <span className="ms" style={{ fontSize: 16 }}>delete</span>
                 </button>
               </div>
             </div>
@@ -586,116 +594,121 @@ function WeeklyGrid({
   openEntryModal: (day: DayOfWeek, meal: MealType, entry?: MealPlanEntry) => void;
   handleEntryDelete: (id: number) => void;
 }) {
+  const startTime = new Date(selectedPlan.meal_plan.start_date).getTime();
+
   return (
     <>
-      <div className="card" style={{ marginBottom: "var(--space-4)", padding: "var(--space-4)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "var(--space-3)" }}>
+      <div className="card" style={{ marginBottom: "16px", padding: "16px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
           <div>
             <h2 className="content-title" style={{ fontSize: "20px" }}>{selectedPlan.meal_plan.name}</h2>
             <p className="content-sub mono">
-              {new Date(selectedPlan.meal_plan.start_date).toLocaleDateString("pt-PT", { weekday: "long", day: "numeric", month: "long" })} -
-              {new Date(selectedPlan.meal_plan.end_date).toLocaleDateString("pt-PT", { weekday: "long", day: "numeric", month: "long" })}
+              {new Date(selectedPlan.meal_plan.start_date).toLocaleDateString("pt-PT", { day: "numeric", month: "long" })} – {new Date(selectedPlan.meal_plan.end_date).toLocaleDateString("pt-PT", { day: "numeric", month: "long" })}
             </p>
           </div>
-          <div style={{ display: "flex", gap: "var(--space-2)" }}>
-            <button className="btn btn-primary" onClick={handleGenerateShoppingList} disabled={loading}>
-              {loading ? "A gerar…" : (
-                <>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2.5l2.5 11.5L8 21l8-1.5V5.5L4.55 3.5H3.55"/></svg>
-                  Gerar Lista de Compras
-                </>
-              )}
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button className="btn-icon" onClick={() => setSelectedPlan(null)} aria-label="Voltar aos planos">
+              <span className="ms" style={{ fontSize: 18 }}>arrow_back</span>
             </button>
-            <button className="btn btn-secondary" onClick={() => openPlanModal("edit", selectedPlan)}>
+            <button className="btn" onClick={() => openPlanModal("edit", selectedPlan)}>
               Editar Plano
-            </button>
-            <button className="btn btn-secondary" onClick={() => setSelectedPlan(null)}>
-              Voltar
             </button>
           </div>
         </div>
       </div>
 
-      <div className="card" style={{ overflow: "auto" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "80px repeat(7, minmax(120px, 1fr))" }}>
-          <div className="field-row" style={{ padding: "var(--space-2)", background: "var(--elevated)", borderRight: "1px solid var(--border)", fontWeight: 600, fontSize: "12px" }}>
-            Refeição
-          </div>
+      <div className="card" style={{ padding: 0, overflow: "auto" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "132px repeat(7, minmax(120px, 1fr))", gap: "1px", background: "var(--line-2)" }}>
+          <div style={{ background: "var(--inset)", padding: "12px 14px" }} />
           {DAYS.map(day => (
-            <div key={day} className="field-row" style={{ padding: "var(--space-2)", background: "var(--elevated)", borderRight: "1px solid var(--border)", textAlign: "center", fontWeight: 600, fontSize: "13px" }}>
-              <div>{DAY_LABELS[day]}</div>
-              <div className="mono text-4" style={{ fontSize: "11px" }}>
-                {new Date(selectedPlan.meal_plan.start_date).getTime() + DAYS.indexOf(day) * 86400000 > 0 &&
-                  new Date(new Date(selectedPlan.meal_plan.start_date).getTime() + DAYS.indexOf(day) * 86400000).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit" })}
+            <div key={day} style={{ background: "var(--inset)", padding: "12px 8px", textAlign: "center" }}>
+              <div className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>
+                {DAY_LABELS_SHORT[day]}
+              </div>
+              <div className="mono" style={{ fontSize: "16px", fontWeight: 600, color: "var(--ink)", marginTop: "2px" }}>
+                {new Date(startTime + DAYS.indexOf(day) * 86400000).toLocaleDateString("pt-PT", { day: "2-digit" })}
               </div>
             </div>
           ))}
-          {MEAL_TYPES.map(meal => (
-            <Fragment key={meal}>
-              <div className="field-row" style={{ padding: "var(--space-2)", background: "var(--surface)", borderRight: "1px solid var(--border)", fontWeight: 500, fontSize: "12px", color: "var(--brand)" }}>
-                {MEAL_LABELS[meal]}
-              </div>
-              {DAYS.map(day => {
-                const entry = getEntry(day, meal);
-                return (
-                  <div
-                    key={`${day}-${meal}`}
-                    style={{
-                      minHeight: 100,
-                      borderRight: "1px solid var(--border)",
-                      borderBottom: "1px solid var(--border)",
-                      background: entry ? "var(--brand-muted)" : "transparent",
-                      padding: "var(--space-2)",
-                      cursor: "pointer",
-                      transition: "background var(--fast)",
-                    }}
-                    onClick={() => openEntryModal(day, meal, entry)}
-                    onMouseEnter={e => { if (!entry) e.currentTarget.style.background = "var(--surface)"; }}
-                    onMouseLeave={e => { if (!entry) e.currentTarget.style.background = "transparent"; }}
-                  >
-                    {entry ? (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                          <span className="text-2" style={{ fontSize: "12px", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                            {entry.recipe_name}
-                          </span>
-                          <span className="mono text-4" style={{ fontSize: "10px", color: "var(--brand)" }}>
-                            {entry.portions}x
-                          </span>
-                        </div>
-                        <div style={{ display: "flex", gap: "var(--space-1)" }}>
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            style={{ padding: "2px 6px", fontSize: "10px", height: "22px", flex: 1 }}
-                            onClick={e => { e.stopPropagation(); openEntryModal(day, meal, entry); }}
-                          >
-                            Editar
-                          </button>
-                          <button
-                            className="btn btn-danger btn-sm"
-                            style={{ padding: "2px 6px", fontSize: "10px", height: "22px" }}
-                            onClick={e => { e.stopPropagation(); handleEntryDelete(entry.id); }}
-                          >
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/></svg>
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text-4)", fontSize: "12px" }}>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </Fragment>
-          ))}
         </div>
+        {MEAL_TYPES.map(meal => (
+          <div
+            key={meal}
+            style={{ display: "grid", gridTemplateColumns: "132px repeat(7, minmax(120px, 1fr))", gap: "6px", padding: "6px", borderTop: "1px solid var(--line-2)" }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0 10px" }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: MEAL_COLORS[meal], flexShrink: 0 }} />
+              <span style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--ink)" }}>{MEAL_LABELS[meal]}</span>
+            </div>
+            {DAYS.map(day => {
+              const entry = getEntry(day, meal);
+              return entry ? (
+                <div
+                  key={`${day}-${meal}`}
+                  style={{
+                    background: "var(--surface)",
+                    borderLeft: `3px solid ${MEAL_COLORS[meal]}`,
+                    borderRadius: "7px",
+                    padding: "8px 9px",
+                    minHeight: 52,
+                    cursor: "pointer",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    gap: "4px",
+                  }}
+                  onClick={() => openEntryModal(day, meal, entry)}
+                >
+                  <div>
+                    <div style={{ fontSize: "11.5px", fontWeight: 600, color: "var(--ink)", lineHeight: 1.2 }}>
+                      {entry.recipe_name}
+                    </div>
+                    <div className="mono" style={{ fontSize: "9.5px", color: "var(--ink-3)", marginTop: "3px" }}>
+                      {entry.portions} por.
+                    </div>
+                  </div>
+                  <button
+                    className="btn-icon danger"
+                    style={{ width: 20, height: 20, alignSelf: "flex-end" }}
+                    onClick={e => { e.stopPropagation(); handleEntryDelete(entry.id); }}
+                    aria-label="Eliminar entrada"
+                  >
+                    <span className="ms" style={{ fontSize: 13 }}>delete</span>
+                  </button>
+                </div>
+              ) : (
+                <div
+                  key={`${day}-${meal}`}
+                  style={{
+                    background: "transparent",
+                    border: "1px dashed var(--line)",
+                    borderRadius: "7px",
+                    minHeight: 52,
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    color: "var(--ink-3)",
+                  }}
+                  onClick={() => openEntryModal(day, meal)}
+                >
+                  <span className="ms" style={{ fontSize: 16 }}>add</span>
+                </div>
+              );
+            })}
+          </div>
+        ))}
       </div>
 
-      <div className="card" style={{ marginTop: "var(--space-4)", padding: "var(--space-4)" }}>
-        <h3 className="text-2" style={{ marginBottom: "var(--space-3)" }}>Resumo</h3>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-4)", fontSize: "13px" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "14px" }}>
+        <button className="btn-primary" onClick={handleGenerateShoppingList} disabled={loading}>
+          <span className="ms" style={{ fontSize: 18 }}>shopping_cart</span>
+          {loading ? "A gerar…" : "Gerar lista de compras"}
+        </button>
+      </div>
+
+      <div className="card" style={{ marginTop: "16px", padding: "16px" }}>
+        <h3 className="section-title">Resumo</h3>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", fontSize: "13px" }}>
           <span className="mono"><strong>{selectedPlan.entries.length}</strong> refeições planeadas</span>
           <span className="mono"><strong>{[...new Set(selectedPlan.entries.map(e => e.recipe_id))].length}</strong> receitas diferentes</span>
           <span className="mono"><strong>{selectedPlan.entries.reduce((sum, e) => sum + e.portions, 0)}</strong> porções no total</span>

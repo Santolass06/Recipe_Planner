@@ -18,12 +18,12 @@ export async function applyTheme(saved: string | null) {
   if (saved === "light") {
     document.documentElement.setAttribute("data-theme", "light");
   } else if (saved === "system") {
-    if (await systemPrefersDark()) {
-      document.documentElement.removeAttribute("data-theme");
-    } else {
-      document.documentElement.setAttribute("data-theme", "light");
-    }
+    document.documentElement.setAttribute("data-theme", (await systemPrefersDark()) ? "dark" : "light");
   } else {
-    document.documentElement.removeAttribute("data-theme");
+    document.documentElement.setAttribute("data-theme", "dark");
   }
+}
+
+export function currentTheme(): "light" | "dark" {
+  return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
 }

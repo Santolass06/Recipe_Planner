@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../lib/devInvoke";
 
 import Modal from "../components/ui/Modal";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
@@ -65,51 +65,35 @@ function CategorySection({ category, items, listId, onToggle, onDelete, expanded
   toggleExpand: (category: string) => void;
 }) {
   const isExpanded = expandedCategories.has(category);
-  
+  const purchasedCount = items.filter(i => i.purchased).length;
+
   return (
-    <div className="category-section" style={{ borderBottom: "1px solid var(--border)" }}>
+    <div style={{ borderBottom: "1px solid var(--line-2)" }}>
       <button
-        className="category-header"
         onClick={() => toggleExpand(category)}
         style={{
-          width: "100%", padding: "var(--space-3) var(--space-4)", background: "var(--elevated)",
+          width: "100%", padding: "12px 18px", background: "var(--inset)",
           border: "none", textAlign: "left", cursor: "pointer", display: "flex",
           alignItems: "center", justifyContent: "space-between", fontWeight: 600, textTransform: "capitalize",
+          color: "var(--ink)", fontSize: "13px", fontFamily: "var(--sans)",
         }}
       >
         <span style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)", transition: "transform var(--fast)" }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: "var(--ink-3)", transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)", transition: "transform var(--fast)" }}>
             <polyline points="6 9 12 15 18 9"/>
           </svg>
           {category || "Sem categoria"}
         </span>
-        <span className="mono" style={{ color: "var(--text-3)" }}>
-          {items.length} itens {items.filter(i => i.purchased).length > 0 && `• ${items.filter(i => i.purchased).length} comprados`}
+        <span className="mono" style={{ fontSize: "11px", color: "var(--ink-3)" }}>
+          {items.length} itens {purchasedCount > 0 && `• ${purchasedCount} comprados`}
         </span>
       </button>
-      
+
       {isExpanded && (
-        <div className="table-wrap" style={{ borderTop: "none" }}>
-          <table className="table" style={{ width: "100%" }}>
-            <thead>
-              <tr style={{ background: "var(--elevated)" }}>
-                <th style={{ width: "40px", textAlign: "center" }}>&nbsp;</th>
-                <th style={{ width: "50%" }}>Item</th>
-                <th style={{ width: "15%", textAlign: "center" }}>Qtd</th>
-                <th style={{ width: "15%", textAlign: "center" }}>Stock</th>
-                <th style={{ width: "10%" }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                    <path d="M3 12h18M3 6h18M3 18h18"/>
-                  </svg>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <ShoppingItemRow key={item.id} item={item} listId={listId} onToggle={onToggle} onDelete={onDelete} />
-              ))}
-            </tbody>
-          </table>
+        <div>
+          {items.map((item) => (
+            <ShoppingItemRow key={item.id} item={item} listId={listId} onToggle={onToggle} onDelete={onDelete} />
+          ))}
         </div>
       )}
     </div>
@@ -142,71 +126,86 @@ function ShoppingItemRow({ item, listId, onToggle, onDelete }: {
     }
   };
 
+  const inputStyle = { background: "var(--inset)", border: "1px solid var(--line)", borderRadius: "8px", color: "var(--ink)", fontFamily: "var(--sans)", padding: "6px 9px", outline: "none" as const };
+
+  if (editing) {
+    return (
+      <div style={{ padding: "13px 18px", borderBottom: "1px solid var(--line-2)" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+          <input type="text" value={editing.ingredient_name || item.ingredient_name} onChange={(e) => setEditing({ ...editing!, ingredient_name: e.target.value })} style={{ ...inputStyle, fontSize: "13px" }} autoFocus />
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
+            <select value={editing.ingredient_unit || item.ingredient_unit} onChange={(e) => setEditing({ ...editing!, ingredient_unit: e.target.value })} style={{ fontSize: "12px", minWidth: "120px" }}>
+              {Object.entries(UNIT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+            </select>
+            <input type="number" step="0.01" min="0" value={editing?.needed_quantity ?? item.needed_quantity} onChange={(e) => setEditing({ ...editing!, needed_quantity: parseFloat(e.target.value) || 0 })} className="mono" style={{ ...inputStyle, fontSize: "12px", width: "80px" }} />
+            <input type="text" value={editing?.category || item.category} onChange={(e) => setEditing({ ...editing!, category: e.target.value })} style={{ ...inputStyle, fontSize: "12px", width: "120px" }} placeholder="Categoria" />
+            <input type="text" value={editing?.notes || item.notes || ""} onChange={(e) => setEditing({ ...editing!, notes: e.target.value })} style={{ ...inputStyle, fontSize: "12px", flex: 1 }} placeholder="Notas" />
+          </div>
+          <div style={{ display: "flex", gap: "var(--space-1)" }}>
+            <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving} style={{ height: "28px" }}>{saving ? "..." : "OK"}</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setEditing(null)} style={{ height: "28px" }}>Cancelar</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const unitLabel = UNIT_LABELS[item.ingredient_unit] ?? item.ingredient_unit;
+
   return (
-    <tr style={{ opacity: item.purchased ? 0.5 : 1 }}>
-      <td style={{ width: "40px", textAlign: "center", padding: "var(--space-2)" }}>
-        <input
-          type="checkbox"
-          checked={item.purchased}
-          onChange={(e) => onToggle(item.id, e.target.checked)}
-          style={{ width: 18, height: 18, accentColor: "var(--brand)" }}
-        />
-      </td>
-      <td style={{ padding: "var(--space-2) var(--space-3)" }}>
-        {editing ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
-            <input type="text" value={editing.ingredient_name || item.ingredient_name} onChange={(e) => setEditing({ ...editing!, ingredient_name: e.target.value })} className="input" style={{ fontSize: "13px" }} autoFocus />
-            <div style={{ display: "flex", gap: "var(--space-2)" }}>
-              <select value={editing.ingredient_unit || item.ingredient_unit} onChange={(e) => setEditing({ ...editing!, ingredient_unit: e.target.value })} className="select" style={{ fontSize: "12px", minWidth: "120px" }}>
-                {Object.entries(UNIT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-              </select>
-              <input type="number" step="0.01" min="0" value={editing?.needed_quantity ?? item.needed_quantity} onChange={(e) => setEditing({ ...editing!, needed_quantity: parseFloat(e.target.value) || 0 })} className="input input-num" style={{ fontSize: "12px", width: "80px" }} />
-              <input type="text" value={editing?.category || item.category} onChange={(e) => setEditing({ ...editing!, category: e.target.value })} className="input" style={{ fontSize: "12px", width: "120px" }} placeholder="Categoria" />
-              <input type="text" value={editing?.notes || item.notes || ""} onChange={(e) => setEditing({ ...editing!, notes: e.target.value })} className="input" style={{ fontSize: "12px", flex: 1 }} placeholder="Notas" />
-            </div>
-            <div style={{ display: "flex", gap: "var(--space-1)" }}>
-              <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving} style={{ height: "28px" }}>{saving ? "..." : "OK"}</button>
-              <button className="btn btn-secondary btn-sm" onClick={() => setEditing(null)} style={{ height: "28px" }}>Cancelar</button>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-              <span style={{ fontWeight: 500 }}>{item.ingredient_name}</span>
-              <span className="text-4 mono" style={{ color: "var(--text-3)" }}>({UNIT_LABELS[item.ingredient_unit] ?? item.ingredient_unit})</span>
-            </div>
-            {item.notes && <span className="text-4 mono" style={{ color: "var(--text-4)" }}>💬 {item.notes}</span>}
-          </>
-        )}
-      </td>
-      <td className="mono" style={{ textAlign: "center", padding: "var(--space-2)" }}>
-        {editing ? (
-          <input type="number" step="0.01" min="0" value={editing?.needed_quantity ?? item.needed_quantity} onChange={(e) => setEditing({ ...editing!, needed_quantity: parseFloat(e.target.value) || 0 })} className="input input-num" style={{ width: "70px" }} />
-        ) : (
-          <>
-            {item.needed_quantity}
-            {item.purchased && <span className="text-4" style={{ marginLeft: "var(--space-2)", color: "var(--ok)" }}>✓</span>}
-          </>
-        )}
-      </td>
-      <td className="mono" style={{ textAlign: "center", padding: "var(--space-2)" }}>
-        <span style={{ textDecoration: item.purchased ? "line-through" : "none", color: item.stock_quantity === 0 ? "var(--danger)" : "var(--text-2)" }}>
-          {item.stock_quantity}
-        </span>
-      </td>
-      <td style={{ textAlign: "center", padding: "var(--space-2)" }}>
-        {!editing && (
-          <div style={{ display: "flex", gap: "var(--space-1)", justifyContent: "center" }}>
-            <button className="btn-icon" onClick={() => setEditing({})} title="Editar" style={{ width: "32px", height: "32px" }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-            </button>
-            <button className="btn-icon danger" onClick={() => onDelete(item.id)} title="Eliminar" style={{ width: "32px", height: "32px" }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-            </button>
-          </div>
-        )}
-      </td>
-    </tr>
+    <div
+      style={{
+        display: "flex", alignItems: "center", gap: "14px", padding: "13px 18px",
+        borderBottom: "1px solid var(--line-2)",
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => onToggle(item.id, !item.purchased)}
+        aria-pressed={item.purchased}
+        title={item.purchased ? "Marcar como não comprado" : "Marcar como comprado"}
+        style={{
+          width: 20, height: 20, borderRadius: 6, flexShrink: 0, padding: 0, cursor: "pointer",
+          display: "grid", placeItems: "center",
+          border: item.purchased ? "1.5px solid var(--green)" : "1.5px solid var(--line)",
+          background: item.purchased ? "var(--green)" : "transparent",
+        }}
+      >
+        {item.purchased && <span className="ms" style={{ fontSize: 15, color: "#fff" }}>check</span>}
+      </button>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: "13.5px", fontWeight: 500,
+          color: item.purchased ? "var(--ink-3)" : "var(--ink)",
+          textDecoration: item.purchased ? "line-through" : "none",
+        }}>
+          {item.ingredient_name}
+        </div>
+        <div className="mono" style={{ fontSize: "10.5px", color: "var(--ink-3)", marginTop: "2px" }}>
+          {(item.category || "Sem categoria")}
+          {item.notes ? ` · ${item.notes}` : ""}
+          {item.stock_quantity > 0 && ` · stock ${item.stock_quantity}`}
+        </div>
+      </div>
+
+      <span className="mono" style={{ fontSize: "12px", color: "var(--ink-2)", whiteSpace: "nowrap" }}>
+        {item.needed_quantity} {unitLabel}
+      </span>
+
+      <span className="mono" style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)", minWidth: "64px", textAlign: "right" }}>
+        {item.estimated_cost.toFixed(2)} €
+      </span>
+
+      <div style={{ display: "flex", gap: "var(--space-1)" }}>
+        <button className="btn-icon" onClick={() => setEditing({})} title="Editar" style={{ width: "28px", height: "28px" }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+        <button className="btn-icon danger" onClick={() => onDelete(item.id)} title="Eliminar" style={{ width: "28px", height: "28px" }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -617,7 +616,22 @@ function ShoppingListDetailView({
         </div>
       </div>
 
-      <div className="card" style={{ overflow: "hidden" }}>
+      <div style={{ display: "flex", gap: "14px", marginBottom: "16px" }}>
+        <div style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "13px", padding: "15px 18px" }}>
+          <div className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)" }}>Em falta</div>
+          <div className="mono" style={{ fontSize: "26px", fontWeight: 600, color: "var(--ember)", marginTop: "6px" }}>{list.items.length - totalPurchased}</div>
+        </div>
+        <div style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "13px", padding: "15px 18px" }}>
+          <div className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)" }}>No carrinho</div>
+          <div className="mono" style={{ fontSize: "26px", fontWeight: 600, color: "var(--green)", marginTop: "6px" }}>{totalPurchased}</div>
+        </div>
+        <div style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "13px", padding: "15px 18px" }}>
+          <div className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)" }}>Progresso</div>
+          <div className="mono" style={{ fontSize: "26px", fontWeight: 600, color: "var(--ink)", marginTop: "6px" }}>{totalPurchased}/{list.items.length}</div>
+        </div>
+      </div>
+
+      <div className="card" style={{ overflow: "hidden", padding: 0 }}>
         {sortedCategories.length === 0 ? (
           <EmptyState
             icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true" width="48" height="48"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2.5l2.5 11.5L8 21l8-1.5V5.5L4.55 3.5H3.55"/></svg>}

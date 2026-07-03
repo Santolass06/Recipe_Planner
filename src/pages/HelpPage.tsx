@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../lib/devInvoke";
 import PageHeader from "../components/ui/PageHeader";
 
 // WebKitGTK bloqueia <a href> externos — abrir via plugin opener
@@ -62,7 +62,10 @@ export default function HelpPage() {
       <PageHeader title="Ajuda" subtitle="Guia rápido da aplicação" />
 
       <div className="card" style={{ padding: "var(--space-5)", marginBottom: "var(--space-5)" }}>
-        <h2 className="text-2" style={{ marginBottom: "var(--space-3)" }}>Bem-vindo ao mise</h2>
+        <h2 style={{ fontFamily: "var(--serif)", fontSize: 20, fontWeight: 500, color: "var(--ink)", marginBottom: "var(--space-3)", display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+          <span className="ms" style={{ fontSize: 20, color: "var(--ember)" }}>soup_kitchen</span>
+          Bem-vindo ao mise
+        </h2>
         <p className="text-3" style={{ lineHeight: 1.6 }}>
           O mise é um gestor profissional de cozinha: receitas, ingredientes, custos,
           stock, listas de compras, planeamento semanal, relatórios e fornecedores.
@@ -73,7 +76,7 @@ export default function HelpPage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "var(--space-4)", marginBottom: "var(--space-5)" }}>
         {SECTIONS.map((s) => (
           <div key={s.title} className="card" style={{ padding: "var(--space-4)" }}>
-            <h3 className="text-2" style={{ marginBottom: "var(--space-3)" }}>{s.title}</h3>
+            <h3 className="mono" style={{ fontSize: 12, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--ink-2)", marginBottom: "var(--space-3)" }}>{s.title}</h3>
             <ul style={{ margin: 0, paddingLeft: "var(--space-5)", display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
               {s.items.map((it, i) => (
                 <li key={i} className="text-3" style={{ lineHeight: 1.5 }}>{it}</li>
@@ -84,7 +87,10 @@ export default function HelpPage() {
       </div>
 
       <div className="card" style={{ padding: "var(--space-5)" }}>
-        <h2 className="text-2" style={{ marginBottom: "var(--space-4)" }}>Links úteis</h2>
+        <h2 style={{ fontFamily: "var(--serif)", fontSize: 20, fontWeight: 500, color: "var(--ink)", marginBottom: "var(--space-4)", display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+          <span className="ms" style={{ fontSize: 20, color: "var(--ember)" }}>link</span>
+          Links úteis
+        </h2>
         <div className="settings-links">
           <a
             href="https://github.com/Santolass06/Recipe_Planner"
@@ -92,6 +98,7 @@ export default function HelpPage() {
             rel="noopener noreferrer"
             onClick={(e) => { e.preventDefault(); openExternal("https://github.com/Santolass06/Recipe_Planner"); }}
           >
+            <span className="ms" style={{ fontSize: 18, marginRight: "var(--space-2)" }}>code</span>
             Repositório no GitHub
           </a>
           <a
@@ -100,6 +107,7 @@ export default function HelpPage() {
             rel="noopener noreferrer"
             onClick={(e) => { e.preventDefault(); openExternal("https://tauri.app"); }}
           >
+            <span className="ms" style={{ fontSize: 18, marginRight: "var(--space-2)" }}>menu_book</span>
             Documentação Tauri
           </a>
           <a
@@ -108,6 +116,7 @@ export default function HelpPage() {
             rel="noopener noreferrer"
             onClick={(e) => { e.preventDefault(); openExternal("https://react.dev"); }}
           >
+            <span className="ms" style={{ fontSize: 18, marginRight: "var(--space-2)" }}>menu_book</span>
             Documentação React
           </a>
         </div>

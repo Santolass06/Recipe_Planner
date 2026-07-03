@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../lib/devInvoke";
 import { useToast } from "../components/ui/Toast";
 import { createWorker } from "tesseract.js";
+import PageHeader from "../components/ui/PageHeader";
 
 interface Ingredient {
   id: number;
@@ -57,6 +58,7 @@ export default function ReceiptScannerPage() {
   const [ocrProgress, setOcrProgress] = useState<string>("Aguardar imagem…");
   const { showToast } = useToast();
   const [showResults, setShowResults] = useState(false);
+  const [importSummary, setImportSummary] = useState<{ count: number; total: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const workerRef = useRef<any>(null);
 
@@ -258,6 +260,10 @@ export default function ReceiptScannerPage() {
         });
       }
       showToast(`${parsedLines.length} compras registadas e stock actualizado`, "ok");
+      setImportSummary({
+        count: parsedLines.length,
+        total: parsedLines.reduce((s, l) => s + l.quantity * l.price, 0),
+      });
       setParsedLines([]);
       setShowResults(false);
       setImage(null);
@@ -276,158 +282,248 @@ export default function ReceiptScannerPage() {
     setShowResults(false);
     setSelectedSupplier("");
     setOcrProgress("Aguardar imagem…");
+    setImportSummary(null);
   };
+
+  const goBackToExtract = () => {
+    setShowResults(false);
+  };
+
+  // Step index for the indicator bar: 0 upload, 1 extract, 2 review, 3 confirm.
+  const currentStep = importSummary ? 3 : showResults ? 2 : image ? 1 : 0;
+  const STEP_META = [
+    { label: "Carregar", icon: "upload_file" },
+    { label: "Extração", icon: "document_scanner" },
+    { label: "Revisão", icon: "edit_note" },
+    { label: "Confirmar", icon: "task_alt" },
+  ];
+
+  const matchMeta = (confidence: number): { color: string; icon: string; label: string } =>
+    confidence > 0.7
+      ? { color: "var(--green)", icon: "check_circle", label: "Reconhecido" }
+      : confidence > 0.4
+      ? { color: "var(--amber)", icon: "add_circle", label: "Novo item" }
+      : { color: "var(--red)", icon: "help", label: "Verificar" };
+
+  const reviewTotal = parsedLines.reduce((s, l) => s + l.quantity * l.price, 0);
+  const reviewNewCount = parsedLines.filter(l => l.confidence <= 0.7).length;
 
   return (
     <div className="content">
-      <div className="content-header">
-        <div>
-          <h1 className="content-title">Scanner de Talões</h1>
-          <p className="content-sub">OCR local via Tesseract.js</p>
-        </div>
-        <span className="spacer" />
-        <button className="btn" onClick={resetAll} disabled={!image && parsedLines.length === 0}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
-          </svg>
-          Novo scan
-        </button>
+      <PageHeader
+        title="Scanner de Talões"
+        subtitle="OCR local via Tesseract.js"
+        actions={
+          <button className="btn" onClick={resetAll} disabled={!image && parsedLines.length === 0 && !importSummary}>
+            <span className="ms" style={{ fontSize: 16 }} aria-hidden="true">refresh</span>
+            Novo scan
+          </button>
+        }
+      />
+
+      {/* step indicator */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: "14px 20px", marginBottom: 20 }}>
+        {STEP_META.map((s, i) => (
+          <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 6, flex: i < STEP_META.length - 1 ? "0 0 auto" : "0 0 auto" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+              <span
+                style={{
+                  width: 30, height: 30, borderRadius: "50%", display: "grid", placeItems: "center", flexShrink: 0,
+                  background: i < currentStep ? "var(--green)" : i === currentStep ? "var(--ember)" : "var(--inset)",
+                  color: i <= currentStep ? "#fff" : "var(--ink-3)",
+                  border: i === currentStep || i < currentStep ? "none" : "1px solid var(--line)",
+                }}
+              >
+                <span className="ms" style={{ fontSize: 17 }} aria-hidden="true">{s.icon}</span>
+              </span>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: i <= currentStep ? "var(--ink)" : "var(--ink-3)", whiteSpace: "nowrap" }}>{s.label}</span>
+            </div>
+            {i < STEP_META.length - 1 && <div style={{ flex: 1, height: 1, background: "var(--line)", minWidth: 14 }} />}
+          </div>
+        ))}
       </div>
 
-      {!image && !showResults && (
-        <div className="card" style={{ maxWidth: "480px", margin: "40px auto 0", border: "2px dashed var(--border-mid)", borderRadius: "var(--radius-lg)", padding: "40px 24px", textAlign: "center", color: "var(--text-2)" }}>
-          <div style={{ width: 32, height: 32, margin: "0 auto 16px" }}>
-            <svg className="empty-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-            </svg>
+      {/* step 3: confirm — checked first, since after import image/showResults are already reset */}
+      {importSummary ? (
+        <div className="card" style={{ borderRadius: 16, padding: 48, textAlign: "center" }}>
+          <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--green-soft)", display: "grid", placeItems: "center", margin: "0 auto" }}>
+            <span className="ms" style={{ fontSize: 34, color: "var(--green)" }} aria-hidden="true">task_alt</span>
           </div>
-          <h2 className="empty-title">Carrega um talão ou tirar foto</h2>
-          <p className="empty-desc" style={{ margin: "12px 0 20px", lineHeight: 1.6 }}>Suporta JPG, PNG, WebP. O OCR corre localmente no browser via Tesseract.js (português).</p>
-          <div style={{ display: "flex", flexDirection: "row", gap: "8px", justifyContent: "center", marginTop: "24px" }}>
-            <label className="btn" style={{ cursor: "pointer" }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          <div style={{ fontFamily: "var(--serif)", fontSize: 24, color: "var(--ink)", marginTop: 16 }}>Compra importada</div>
+          <div style={{ fontSize: 13.5, color: "var(--ink-2)", marginTop: 6 }}>{importSummary.count} itens adicionados ao stock e histórico</div>
+          <div style={{ display: "flex", gap: 14, justifyContent: "center", marginTop: 26, flexWrap: "wrap" }}>
+            <div style={{ background: "var(--inset)", borderRadius: 12, padding: "14px 22px" }}>
+              <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", color: "var(--ink-3)" }}>Importados</div>
+              <div className="mono" style={{ fontSize: 22, fontWeight: 600, color: "var(--ink)", marginTop: 3 }}>{importSummary.count}</div>
+            </div>
+            <div style={{ background: "var(--inset)", borderRadius: 12, padding: "14px 22px" }}>
+              <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", color: "var(--ink-3)" }}>Gasto</div>
+              <div className="mono" style={{ fontSize: 22, fontWeight: 600, color: "var(--ember)", marginTop: 3 }}>{importSummary.total.toFixed(2)} €</div>
+            </div>
+            <div style={{ background: "var(--inset)", borderRadius: 12, padding: "14px 22px" }}>
+              <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", color: "var(--ink-3)" }}>Stock</div>
+              <div className="mono" style={{ fontSize: 22, fontWeight: 600, color: "var(--green)", marginTop: 3 }}>✓</div>
+            </div>
+          </div>
+          <button className="btn" onClick={resetAll} style={{ marginTop: 28 }}>Digitalizar outro</button>
+        </div>
+      ) : !image && !showResults ? (
+        /* step 0: upload */
+        <div className="card" style={{ border: "2px dashed var(--line)", borderRadius: 16, padding: 56, textAlign: "center" }}>
+          <div style={{ width: 64, height: 64, borderRadius: 16, background: "var(--ember-soft)", display: "grid", placeItems: "center", margin: "0 auto" }}>
+            <span className="ms" style={{ fontSize: 32, color: "var(--ember)" }} aria-hidden="true">photo_camera</span>
+          </div>
+          <div style={{ fontFamily: "var(--serif)", fontSize: 22, color: "var(--ink)", marginTop: 18 }}>Fotografa ou carrega o talão</div>
+          <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6, maxWidth: 380, marginLeft: "auto", marginRight: "auto", lineHeight: 1.5 }}>
+            Extraímos os itens automaticamente. Revê e corrige antes de importar para o stock. Suporta JPG, PNG, WebP — o OCR corre localmente no browser (português).
+          </div>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 22 }}>
+            <label className="btn-primary" style={{ cursor: "pointer" }}>
+              <span className="ms" style={{ fontSize: 19 }} aria-hidden="true">upload</span>
               Escolher ficheiro
               <input type="file" ref={fileInputRef} accept="image/*" onChange={handleFileSelect} style={{ display: "none" }} />
             </label>
-            <button className="btn" onClick={handleCameraCapture}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="12" r="4"/></svg>
-              Tirar foto
+            <button className="btn-secondary" style={{ height: 42, padding: "0 20px", borderRadius: 10, fontWeight: 600, fontSize: 13.5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7 }} onClick={handleCameraCapture}>
+              <span className="ms" style={{ fontSize: 19 }} aria-hidden="true">photo_camera</span>
+              Usar câmara
             </button>
           </div>
-          <p className="text-3 text-muted" style={{ margin: "12px 0 0", fontSize: "11px", color: "var(--text-3)", lineHeight: 1.6 }}>Desktop: usa "Escolher ficheiro". Mobile: "Tirar foto" abre a câmara traseira.</p>
+          <p style={{ margin: "16px 0 0", fontSize: 11, color: "var(--ink-3)", lineHeight: 1.6 }}>Desktop: usa "Escolher ficheiro". Mobile: "Usar câmara" abre a câmara traseira.</p>
         </div>
-      )}
-
-      {image && !showResults && (
-        <div className="card">
-          <div style={{ textAlign: "center", marginBottom: "var(--space-4)" }}>
-            <img src={image} alt="Talão carregado" style={{ maxWidth: "100%", maxHeight: "400px", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-sm)" }} />
+      ) : image && !showResults ? (
+        /* step 1: extract */
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr", gap: 18 }}>
+          <div style={{ border: "1px solid var(--line)", borderRadius: 14, minHeight: 320, display: "flex", alignItems: "center", justifyContent: "center", padding: 14, position: "relative", background: "var(--inset)", overflow: "hidden" }}>
+            <span className="mono" style={{ position: "absolute", top: 14, left: 14, fontSize: 10, color: "var(--ink-3)", background: "var(--surface)", padding: "3px 8px", borderRadius: 6, zIndex: 1 }}>
+              TALÃO · {(imageFile?.name || "receipt.jpg").toUpperCase()}
+            </span>
+            <img src={image!} alt="Talão carregado" style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 10, objectFit: "contain" }} />
           </div>
-          <p className="text-3 text-muted" style={{ textAlign: "center", marginBottom: "var(--space-4)" }}>{ocrProgress}</p>
-          <div className="flex-center" style={{ gap: "var(--space-3)" }}>
-            <button className="btn btn-primary" onClick={runOCR} disabled={processing}>
-              {processing ? (
-                <> <svg className="animate-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="12" cy="12" r="10" strokeOpacity="0.2"/><path d="M12 2a10 10 0 0 1 10 10" strokeOpacity="1"/></svg> A processar… </> ) : (
-                <> <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg> Extrair texto (OCR) </> )}
-            </button>
-            <button className="btn btn-secondary" onClick={resetAll}>Cancelar</button>
-          </div>
-          {processing && <div className="flex-center" style={{ marginTop: "var(--space-3)" }}><span className="text-3 text-muted">{ocrProgress}</span></div>}
-        </div>
-      )}
-
-      {showResults && parsedLines.length > 0 && (
-        <div className="card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-4)" }}>
-            <h2 className="title-3">{parsedLines.length} itens detectados — revê e confirma</h2>
-            <span className="badge badge-info">Edita qualquer campo antes de importar</span>
-          </div>
-
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th style={{ width: "30%" }}>Ingrediente</th>
-                  <th className="mono" style={{ width: "12%" }}>Qtd</th>
-                  <th style={{ width: "12%" }}>Unidade</th>
-                  <th className="mono" style={{ width: "12%" }}>Preço (€)</th>
-                  <th style={{ width: "14%" }}>Promoção</th>
-                  <th style={{ width: "10%" }}>Confiança</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {parsedLines.map((line, idx) => (
-                  <tr key={idx}>
-                    <td>
-                      <input
-                        className="input"
-                        value={line.name}
-                        onChange={e => updateLine(idx, "name", e.target.value)}
-                        placeholder="Nome do ingrediente"
-                      />
-                    </td>
-                    <td className="mono">
-                      <input type="number" className="input input-num" min="0.01" step="0.01" value={line.quantity} onChange={e => updateLine(idx, "quantity", parseFloat(e.target.value) || 0)} />
-                    </td>
-                    <td>
-                      <select className="select" value={line.unit} onChange={e => updateLine(idx, "unit", e.target.value)}>
-                        {Object.entries(UNIT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                      </select>
-                    </td>
-                    <td className="mono">
-                      <input type="number" className="input input-num" min="0" step="0.01" value={line.price} onChange={e => updateLine(idx, "price", parseFloat(e.target.value) || 0)} />
-                    </td>
-                    <td>
-                      <label style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-                        <input type="checkbox" checked={line.is_discount} onChange={e => updateLine(idx, "is_discount", e.target.checked)} />
-                        {line.is_discount && (
-                          <input type="number" className="input input-num" style={{ width: "60px" }} min="0" max="100" value={line.discount_percent} onChange={e => updateLine(idx, "discount_percent", parseInt(e.target.value) || 0)} placeholder="%" />
-                        )}
-                      </label>
-                    </td>
-                    <td className="mono">
-                      <span className={line.confidence > 0.7 ? "badge badge-success" : line.confidence > 0.4 ? "badge badge-warn" : "badge badge-danger"}>
-                        {Math.round(line.confidence * 100)}%
-                      </span>
-                    </td>
-                    <td>
-                      <button className="btn-icon danger" onClick={() => setParsedLines(l => l.filter((_, i) => i !== idx))} title="Remover" aria-label="Remover linha">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="field" style={{ marginTop: "var(--space-4)" }}>
-            <label className="field-label" htmlFor="receipt-supplier">Fornecedor (opcional)</label>
-            <select id="receipt-supplier" className="select" value={selectedSupplier} onChange={e => setSelectedSupplier(e.target.value ? parseInt(e.target.value) : "")}>
-              <option value="">— Nenhum —</option>
-              {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </div>
-
-          <div className="flex-center" style={{ gap: "var(--space-3)", marginTop: "var(--space-6)" }}>
-            <button className="btn btn-primary" onClick={confirmImport} disabled={processing} style={{ minWidth: "220px" }}>
-              {processing ? "A importar…" : "Confirmar e importar para stock"}
-            </button>
-            <button className="btn btn-secondary" onClick={resetAll}>Cancelar e limpar</button>
+          <div className="card">
+            <div style={{ display: "flex", alignItems: "center", gap: 8, color: processing ? "var(--ember)" : "var(--ink-2)" }}>
+              <span className="ms" style={{ fontSize: 19 }} aria-hidden="true">{processing ? "hourglass_top" : "document_scanner"}</span>
+              <span style={{ fontWeight: 600, fontSize: 13.5 }}>{processing ? "A extrair texto…" : "Pronto para extrair texto"}</span>
+            </div>
+            <div className="mono" style={{ fontSize: 11.5, color: "var(--ink-2)", lineHeight: 1.9, marginTop: 14, background: "var(--inset)", borderRadius: 10, padding: 14 }}>
+              {ocrProgress}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+              <button className="btn" onClick={resetAll}>Cancelar</button>
+              <button className="btn-primary" onClick={runOCR} disabled={processing} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                {processing ? (
+                  <span className="ms animate-spin" style={{ fontSize: 18 }} aria-hidden="true">progress_activity</span>
+                ) : (
+                  <span className="ms" style={{ fontSize: 18 }} aria-hidden="true">arrow_forward</span>
+                )}
+                {processing ? "A processar…" : "Extrair texto (OCR)"}
+              </button>
+            </div>
           </div>
         </div>
-      )}
+      ) : showResults && parsedLines.length > 0 ? (
+        /* step 2: review */
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 10, background: "var(--amber-soft)" }}>
+            <span className="ms" style={{ fontSize: 19, color: "var(--amber)" }} aria-hidden="true">edit_note</span>
+            <span style={{ fontSize: 13, color: "var(--ink)", fontWeight: 500, flex: 1 }}>Confirma os itens extraídos. Alguns precisam de atenção.</span>
+            <span className="mono" style={{ fontSize: 11, color: "var(--amber)", fontWeight: 600 }}>{reviewNewCount} a verificar</span>
+          </div>
 
-      {showResults && parsedLines.length === 0 && image && (
-        <div className="card" style={{ textAlign: "center", padding: "var(--space-8)" }}>
-          <svg className="empty-icon" style={{ marginBottom: "var(--space-4)" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+          <div style={{ display: "grid", gridTemplateColumns: "1.7fr 90px 90px 100px 1fr 90px 36px", gap: 10, padding: "9px 18px", borderBottom: "1px solid var(--line)", background: "var(--inset)" }}>
+            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>Nome</span>
+            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>Qtd.</span>
+            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>Unidade</span>
+            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)", textAlign: "right" }}>Preço</span>
+            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>Correspondência</span>
+            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>Promoção</span>
+            <span></span>
+          </div>
+
+          {parsedLines.map((line, idx) => {
+            const m = matchMeta(line.confidence);
+            return (
+              <div key={idx} style={{ display: "grid", gridTemplateColumns: "1.7fr 90px 90px 100px 1fr 90px 36px", gap: 10, padding: "9px 18px", borderBottom: "1px solid var(--line-2)", alignItems: "center" }}>
+                <input
+                  value={line.name}
+                  onChange={e => updateLine(idx, "name", e.target.value)}
+                  placeholder="Nome do ingrediente"
+                  style={{ border: "1px solid var(--line)", background: "var(--inset)", borderRadius: 7, height: 34, padding: "0 10px", fontFamily: "var(--sans)", fontSize: 13, color: "var(--ink)", width: "100%" }}
+                />
+                <input
+                  type="number" min="0.01" step="0.01" value={line.quantity}
+                  onChange={e => updateLine(idx, "quantity", parseFloat(e.target.value) || 0)}
+                  className="mono"
+                  style={{ border: "1px solid var(--line)", background: "var(--inset)", borderRadius: 7, height: 34, padding: "0 8px", fontSize: 12.5, color: "var(--ink)", width: "100%" }}
+                />
+                <select
+                  value={line.unit} onChange={e => updateLine(idx, "unit", e.target.value)}
+                  className="mono"
+                  style={{ border: "1px solid var(--line)", background: "var(--inset)", borderRadius: 7, height: 34, padding: "0 6px", fontSize: 11.5, color: "var(--ink)", width: "100%" }}
+                >
+                  {Object.entries(UNIT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+                <div style={{ display: "flex", alignItems: "center", gap: 3, justifyContent: "flex-end" }}>
+                  <span className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>€</span>
+                  <input
+                    type="number" min="0" step="0.01" value={line.price}
+                    onChange={e => updateLine(idx, "price", parseFloat(e.target.value) || 0)}
+                    className="mono"
+                    style={{ border: "1px solid var(--line)", background: "var(--inset)", borderRadius: 7, height: 34, padding: "0 8px", fontSize: 12.5, color: "var(--ink)", width: 66, textAlign: "right" }}
+                  />
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span className="ms" style={{ fontSize: 17, color: m.color }} aria-hidden="true">{m.icon}</span>
+                  <span style={{ fontSize: 11.5, color: m.color, fontWeight: 500 }}>{m.label}</span>
+                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <input type="checkbox" checked={line.is_discount} onChange={e => updateLine(idx, "is_discount", e.target.checked)} />
+                  {line.is_discount && (
+                    <input
+                      type="number" min="0" max="100" value={line.discount_percent}
+                      onChange={e => updateLine(idx, "discount_percent", parseInt(e.target.value) || 0)}
+                      placeholder="%"
+                      className="mono"
+                      style={{ border: "1px solid var(--line)", background: "var(--inset)", borderRadius: 7, height: 28, padding: "0 6px", fontSize: 11, color: "var(--ink)", width: 44 }}
+                    />
+                  )}
+                </label>
+                <button
+                  onClick={() => setParsedLines(l => l.filter((_, i) => i !== idx))}
+                  title="Remover" aria-label="Remover linha"
+                  style={{ width: 30, height: 30, border: "none", background: "transparent", borderRadius: 7, cursor: "pointer", color: "var(--ink-3)", display: "grid", placeItems: "center" }}
+                >
+                  <span className="ms" style={{ fontSize: 18 }} aria-hidden="true">close</span>
+                </button>
+              </div>
+            );
+          })}
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", background: "var(--inset)", gap: 14, flexWrap: "wrap" }}>
+            <button className="btn" onClick={goBackToExtract}>← Voltar</button>
+            <div className="field" style={{ margin: 0, minWidth: 200 }}>
+              <select value={selectedSupplier} onChange={e => setSelectedSupplier(e.target.value ? parseInt(e.target.value) : "")} style={{ height: 38 }}>
+                <option value="">Fornecedor — Nenhum —</option>
+                {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <span className="mono" style={{ fontSize: 12, color: "var(--ink-2)" }}>{parsedLines.length} ingredientes · {reviewTotal.toFixed(2)} €</span>
+              <button className="btn-primary" onClick={confirmImport} disabled={processing} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span className="ms" style={{ fontSize: 17 }} aria-hidden="true">check</span>
+                {processing ? "A importar…" : "Importar para stock"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* step 2 (empty result) */
+        <div className="empty">
+          <span className="ms" style={{ fontSize: 40, color: "var(--ink-3)" }} aria-hidden="true">search_off</span>
           <h2 className="empty-title">Nenhum item detectado</h2>
-          <p className="empty-desc">O OCR não encontrou linhas com padrão preço/quantidade reconhecível. Tenta uma foto mais nítida ou edita manualmente.</p>
-          <button className="btn btn-primary" onClick={resetAll} style={{ marginTop: "var(--space-4)" }}>Tentar outra imagem</button>
+          <p style={{ color: "var(--ink-2)", fontSize: 13, maxWidth: 380 }}>O OCR não encontrou linhas com padrão preço/quantidade reconhecível. Tenta uma foto mais nítida ou edita manualmente.</p>
+          <button className="btn-primary" onClick={resetAll} style={{ marginTop: 8 }}>Tentar outra imagem</button>
         </div>
       )}
-
     </div>
   );
 }

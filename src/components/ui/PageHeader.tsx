@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { usePageHeaderContext } from "../PageHeaderContext";
 
 interface PageHeaderProps {
   title: string;
@@ -7,16 +8,20 @@ interface PageHeaderProps {
   search?: ReactNode;
 }
 
+/**
+ * Registers title/subtitle/actions with the persistent topbar (rendered by
+ * Layout) instead of drawing its own header block — the mise design keeps
+ * page chrome (title, search, language/theme toggles) fixed above the
+ * scrolling content. `search`, when a page needs its own filter UI beyond the
+ * topbar's global search box, still renders inline.
+ */
 export default function PageHeader({ title, subtitle, actions, search }: PageHeaderProps) {
-  return (
-    <div className="content-header">
-      <div>
-        <h1 className="content-title">{title}</h1>
-        {subtitle && <p className="content-sub mono">{subtitle}</p>}
-      </div>
-      <div className="spacer" />
-      {search && <div>{search}</div>}
-      {actions && <div>{actions}</div>}
-    </div>
-  );
+  const { setHeader } = usePageHeaderContext();
+
+  useEffect(() => {
+    setHeader({ title, subtitle, actions });
+  }, [title, subtitle, actions, setHeader]);
+
+  if (!search) return null;
+  return <div style={{ marginBottom: "var(--space-4)" }}>{search}</div>;
 }

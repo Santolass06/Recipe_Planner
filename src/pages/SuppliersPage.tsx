@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../lib/devInvoke";
 import IngredientAvatar from "../components/IngredientAvatar";
 import Modal from "../components/ui/Modal";
 import { useToast } from "../components/ui/Toast";
@@ -51,9 +51,23 @@ const EMPTY_QUOTE_FORM = {
   is_promo: false,
 };
 
-function formatDate(dateStr?: string | null) {
+function formatRelative(dateStr?: string | null) {
   if (!dateStr) return "—";
-  return new Date(dateStr).toLocaleDateString("pt-PT");
+  const days = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
+  if (days <= 0) return "hoje";
+  if (days === 1) return "há 1 dia";
+  return `há ${days} dias`;
+}
+
+const ICON_COLORS = [
+  "var(--avatar-1-fg)", "var(--avatar-2-fg)", "var(--avatar-3-fg)", "var(--avatar-4-fg)",
+  "var(--avatar-5-fg)", "var(--avatar-6-fg)", "var(--avatar-7-fg)", "var(--avatar-8-fg)",
+];
+
+function iconColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+  return ICON_COLORS[Math.abs(h) % ICON_COLORS.length];
 }
 
 export default function SuppliersPage() {
@@ -261,22 +275,14 @@ export default function SuppliersPage() {
           ) : undefined}
         />
       ) : (
-        <>
-          <SupplierTable 
-            suppliers={filtered} 
-            onEdit={openEditSupplier} 
-            onCreateQuote={openCreateQuote} 
-            onDelete={(sup: SupplierWithQuotes) => setConfirmDelete({ type: "supplier", id: sup.id, name: sup.name })} 
-          />
-          <SupplierMobileCards 
-            suppliers={filtered} 
-            onEdit={openEditSupplier} 
-            onCreateQuote={openCreateQuote} 
-            onDelete={(sup: SupplierWithQuotes) => setConfirmDelete({ type: "supplier", id: sup.id, name: sup.name })}
-            onEditQuote={openEditQuote}
-            onDeleteQuote={(quote: PriceQuote) => setConfirmDelete({ type: "quote", id: quote.id, name: quote.ingredient_name })}
-          />
-        </>
+        <SupplierCards
+          suppliers={filtered}
+          onEdit={openEditSupplier}
+          onCreateQuote={openCreateQuote}
+          onDelete={(sup: SupplierWithQuotes) => setConfirmDelete({ type: "supplier", id: sup.id, name: sup.name })}
+          onEditQuote={openEditQuote}
+          onDeleteQuote={(quote: PriceQuote) => setConfirmDelete({ type: "quote", id: quote.id, name: quote.ingredient_name })}
+        />
       )}
 
       <Modal
@@ -339,70 +345,7 @@ export default function SuppliersPage() {
 
 // Subcomponents
 
-function SupplierTable({ suppliers, onEdit, onCreateQuote, onDelete }: {
-  suppliers: SupplierWithQuotes[];
-  onEdit: (sup: SupplierWithQuotes) => void;
-  onCreateQuote: (supplierId: number) => void;
-  onDelete: (sup: SupplierWithQuotes) => void;
-}) {
-  return (
-    <div className="table-container" role="region" aria-label="Lista de fornecedores" tabIndex={0}>
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th scope="col">Fornecedor</th>
-            <th scope="col">Contacto</th>
-            <th scope="col">Notas</th>
-            <th scope="col">Cotações</th>
-            <th scope="col"><span className="visually-hidden">Ações</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          {suppliers.map(sup => (
-            <tr key={sup.id}>
-              <td>
-                <div className="supplier-name-cell">
-                  <IngredientAvatar name={sup.name} size={32} />
-                  <span>{sup.name}</span>
-                </div>
-              </td>
-              <td className="mono">{sup.contact || "—"}</td>
-              <td className="text-3">{sup.notes || "—"}</td>
-              <td>
-                <span className="badge">{sup.quotes.length}</span>
-              </td>
-              <td>
-                <div className="table-actions" role="group" aria-label={`Ações para ${sup.name}`}>
-                  <button className="btn-icon" onClick={() => onEdit(sup)} title="Editar" aria-label={`Editar ${sup.name}`}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                    </svg>
-                  </button>
-                  <button className="btn-icon" onClick={() => onCreateQuote(sup.id)} title="Adicionar cotação" aria-label={`Adicionar cotação para ${sup.name}`}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                    </svg>
-                  </button>
-                  <button className="btn-icon danger" onClick={() => onDelete(sup)} title="Eliminar" aria-label={`Eliminar ${sup.name}`}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <polyline points="3 6 5 6 21 6"/>
-                      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                      <path d="M10 11v6M14 11v6"/>
-                      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-                    </svg>
-                  </button>
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function SupplierMobileCards({ suppliers, onEdit, onCreateQuote, onDelete, onEditQuote, onDeleteQuote }: {
+function SupplierCards({ suppliers, onEdit, onCreateQuote, onDelete, onEditQuote, onDeleteQuote }: {
   suppliers: SupplierWithQuotes[];
   onEdit: (sup: SupplierWithQuotes) => void;
   onCreateQuote: (supplierId: number) => void;
@@ -411,78 +354,101 @@ function SupplierMobileCards({ suppliers, onEdit, onCreateQuote, onDelete, onEdi
   onDeleteQuote: (quote: PriceQuote) => void;
 }) {
   return (
-    <div className="mobile-cards" role="list" aria-label="Fornecedores">
-      {suppliers.map(sup => (
-        <article key={sup.id} className="mobile-card" role="listitem">
-          <div className="mobile-card-header">
-            <div className="supplier-name-cell">
-              <IngredientAvatar name={sup.name} size={40} />
-              <span>{sup.name}</span>
+    <div
+      role="list"
+      aria-label="Fornecedores"
+      style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", gap: 16 }}
+    >
+      {suppliers.map(sup => {
+        const avgPrice = sup.quotes.length
+          ? sup.quotes.reduce((acc, q) => acc + q.price_per_unit, 0) / sup.quotes.length
+          : null;
+        return (
+          <article key={sup.id} className="item-card" role="listitem" style={{ alignItems: "flex-start", padding: 20 }}>
+            <div
+              style={{
+                width: 44, height: 44, borderRadius: 11, background: "var(--inset)",
+                display: "grid", placeItems: "center", flexShrink: 0,
+              }}
+            >
+              <span className="ms" style={{ fontSize: 23, color: iconColor(sup.name) }}>storefront</span>
             </div>
-            <span className="badge">{sup.quotes.length} cotações</span>
-          </div>
-          {sup.contact && <p className="mobile-card-field mono"><strong>Contacto:</strong> {sup.contact}</p>}
-          {sup.notes && <p className="mobile-card-field text-3"><strong>Notas:</strong> {sup.notes}</p>}
-          <div className="mobile-card-actions" role="group" aria-label={`Ações para ${sup.name}`}>
-            <button className="btn btn-secondary btn-sm" onClick={() => onEdit(sup)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-              </svg>
-              Editar
-            </button>
-            <button className="btn btn-primary btn-sm" onClick={() => onCreateQuote(sup.id)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-              </svg>
-              Nova cotação
-            </button>
-            <button className="btn btn-danger btn-sm" onClick={() => onDelete(sup)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="3 6 5 6 21 6"/>
-                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                <path d="M10 11v6M14 11v6"/>
-                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-              </svg>
-              Eliminar
-            </button>
-          </div>
-          
-          {sup.quotes.length > 0 && (
-            <div className="quotes-sub-list">
-              <p className="quotes-sub-title">Cotações</p>
-              {sup.quotes.map(quote => (
-                <div key={quote.id} className="quote-item">
-                  <div className="quote-main">
-                    <IngredientAvatar name={quote.ingredient_name} size={28} />
-                    <div className="quote-info" style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-                      <span className="quote-name">{quote.ingredient_name}</span>
-                      <span className="quote-meta mono text-3">{quote.ingredient_unit} • {quote.price_per_unit.toFixed(2)} €</span>
-                      {quote.is_promo && <StatusPill status="info" label="Promo" />}
-                    </div>
-                  </div>
-                  <div className="quote-dates text-3 mono">
-                    Válida: {formatDate(quote.valid_from)} — {formatDate(quote.valid_to)}
-                  </div>
-                  <div className="quote-actions">
-                    <button className="btn-icon" onClick={() => onEditQuote(quote)} title="Editar" aria-label={`Editar cotação ${quote.ingredient_name}`}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                      </svg>
-                    </button>
-                    <button className="btn-icon danger" onClick={() => onDeleteQuote(quote)} title="Eliminar" aria-label={`Eliminar cotação ${quote.ingredient_name}`}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-                      </svg>
-                    </button>
+
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>{sup.name}</span>
+                <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)", flexShrink: 0 }}>{formatRelative(sup.updated_at)}</span>
+              </div>
+              {sup.notes && (
+                <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {sup.notes}
+                </div>
+              )}
+              <div className="mono" style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 9 }}>{sup.contact || "—"}</div>
+
+              <div style={{ display: "flex", gap: 16, marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--line-2)" }}>
+                <div>
+                  <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)" }}>Fornece</div>
+                  <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", marginTop: 2 }}>{sup.quotes.length} itens</div>
+                </div>
+                <div>
+                  <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)" }}>Preço médio</div>
+                  <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: "var(--ember)", marginTop: 2 }}>
+                    {avgPrice !== null ? `${avgPrice.toFixed(2)} €` : "—"}
                   </div>
                 </div>
-              ))}
+              </div>
+
+              {sup.quotes.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--line-2)" }}>
+                  {sup.quotes.map(quote => (
+                    <div key={quote.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <IngredientAvatar name={quote.ingredient_name} size={22} />
+                      <span className="mono text-3" style={{ fontSize: 11, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {quote.ingredient_name} · {quote.price_per_unit.toFixed(2)} €/{quote.ingredient_unit}
+                      </span>
+                      {quote.is_promo && <StatusPill status="info" label="Promo" />}
+                      <button className="btn-icon" onClick={() => onEditQuote(quote)} title="Editar cotação" aria-label={`Editar cotação ${quote.ingredient_name}`} style={{ width: 24, height: 24 }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                        </svg>
+                      </button>
+                      <button className="btn-icon danger" onClick={() => onDeleteQuote(quote)} title="Eliminar cotação" aria-label={`Eliminar cotação ${quote.ingredient_name}`} style={{ width: 24, height: 24 }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </article>
-      ))}
+
+            <div className="item-actions" style={{ position: "absolute", top: 14, right: 16 }} role="group" aria-label={`Ações para ${sup.name}`}>
+              <button className="btn-icon" onClick={() => onEdit(sup)} title="Editar" aria-label={`Editar ${sup.name}`}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+              </button>
+              <button className="btn-icon" onClick={() => onCreateQuote(sup.id)} title="Adicionar cotação" aria-label={`Adicionar cotação para ${sup.name}`}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+              </button>
+              <button className="btn-icon danger" onClick={() => onDelete(sup)} title="Eliminar" aria-label={`Eliminar ${sup.name}`}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                  <path d="M10 11v6M14 11v6"/>
+                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                </svg>
+              </button>
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
 }
