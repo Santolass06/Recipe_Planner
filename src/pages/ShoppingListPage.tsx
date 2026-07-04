@@ -7,6 +7,9 @@ import { useToast } from "../components/ui/Toast";
 import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
 import SearchBar from "../components/ui/SearchBar";
+import { useI18n } from "../i18n";
+
+type T = (key: string, params?: Record<string, string | number>) => string;
 
 interface ShoppingItem {
   id: number;
@@ -55,7 +58,7 @@ const CATEGORIES = [
   "Pantry (Secos)", "Condimentos", "Bebidas", "Outros"
 ];
 
-function CategorySection({ category, items, listId, onToggle, onDelete, expandedCategories, toggleExpand }: {
+function CategorySection({ category, items, listId, onToggle, onDelete, expandedCategories, toggleExpand, t }: {
   category: string;
   items: ShoppingItem[];
   listId: number;
@@ -63,6 +66,7 @@ function CategorySection({ category, items, listId, onToggle, onDelete, expanded
   onDelete: (id: number) => void;
   expandedCategories: Set<string>;
   toggleExpand: (category: string) => void;
+  t: T;
 }) {
   const isExpanded = expandedCategories.has(category);
   const purchasedCount = items.filter(i => i.purchased).length;
@@ -82,17 +86,17 @@ function CategorySection({ category, items, listId, onToggle, onDelete, expanded
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: "var(--ink-3)", transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)", transition: "transform var(--fast)" }}>
             <polyline points="6 9 12 15 18 9"/>
           </svg>
-          {category || "Sem categoria"}
+          {category || t("shoppingList.noCategory")}
         </span>
         <span className="mono" style={{ fontSize: "11px", color: "var(--ink-3)" }}>
-          {items.length} itens {purchasedCount > 0 && `• ${purchasedCount} comprados`}
+          {t("shoppingList.categoryItemsLabel", { count: items.length })} {purchasedCount > 0 && t("shoppingList.categoryPurchasedLabel", { count: purchasedCount })}
         </span>
       </button>
 
       {isExpanded && (
         <div>
           {items.map((item) => (
-            <ShoppingItemRow key={item.id} item={item} listId={listId} onToggle={onToggle} onDelete={onDelete} />
+            <ShoppingItemRow key={item.id} item={item} listId={listId} onToggle={onToggle} onDelete={onDelete} t={t} />
           ))}
         </div>
       )}
@@ -100,11 +104,12 @@ function CategorySection({ category, items, listId, onToggle, onDelete, expanded
   );
 }
 
-function ShoppingItemRow({ item, listId, onToggle, onDelete }: {
+function ShoppingItemRow({ item, listId, onToggle, onDelete, t }: {
   item: ShoppingItem;
   listId: number;
   onToggle: (id: number, purchased: boolean) => void;
   onDelete: (id: number) => void;
+  t: T;
 }) {
   const [editing, setEditing] = useState<Partial<ShoppingItem> | null>(null);
   const [saving, setSaving] = useState(false);
@@ -138,12 +143,12 @@ function ShoppingItemRow({ item, listId, onToggle, onDelete }: {
               {Object.entries(UNIT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
             </select>
             <input type="number" step="0.01" min="0" value={editing?.needed_quantity ?? item.needed_quantity} onChange={(e) => setEditing({ ...editing!, needed_quantity: parseFloat(e.target.value) || 0 })} className="mono" style={{ ...inputStyle, fontSize: "12px", width: "80px" }} />
-            <input type="text" value={editing?.category || item.category} onChange={(e) => setEditing({ ...editing!, category: e.target.value })} style={{ ...inputStyle, fontSize: "12px", width: "120px" }} placeholder="Categoria" />
-            <input type="text" value={editing?.notes || item.notes || ""} onChange={(e) => setEditing({ ...editing!, notes: e.target.value })} style={{ ...inputStyle, fontSize: "12px", flex: 1 }} placeholder="Notas" />
+            <input type="text" value={editing?.category || item.category} onChange={(e) => setEditing({ ...editing!, category: e.target.value })} style={{ ...inputStyle, fontSize: "12px", width: "120px" }} placeholder={t("shoppingList.categoryPlaceholder")} />
+            <input type="text" value={editing?.notes || item.notes || ""} onChange={(e) => setEditing({ ...editing!, notes: e.target.value })} style={{ ...inputStyle, fontSize: "12px", flex: 1 }} placeholder={t("shoppingList.notesPlaceholder")} />
           </div>
           <div style={{ display: "flex", gap: "var(--space-1)" }}>
             <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving} style={{ height: "28px" }}>{saving ? "..." : "OK"}</button>
-            <button className="btn btn-secondary btn-sm" onClick={() => setEditing(null)} style={{ height: "28px" }}>Cancelar</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setEditing(null)} style={{ height: "28px" }}>{t("common.cancel")}</button>
           </div>
         </div>
       </div>
@@ -163,7 +168,7 @@ function ShoppingItemRow({ item, listId, onToggle, onDelete }: {
         type="button"
         onClick={() => onToggle(item.id, !item.purchased)}
         aria-pressed={item.purchased}
-        title={item.purchased ? "Marcar como não comprado" : "Marcar como comprado"}
+        title={item.purchased ? t("shoppingList.markUnpurchased") : t("shoppingList.markPurchased")}
         style={{
           width: 20, height: 20, borderRadius: 6, flexShrink: 0, padding: 0, cursor: "pointer",
           display: "grid", placeItems: "center",
@@ -183,9 +188,9 @@ function ShoppingItemRow({ item, listId, onToggle, onDelete }: {
           {item.ingredient_name}
         </div>
         <div className="mono" style={{ fontSize: "10.5px", color: "var(--ink-3)", marginTop: "2px" }}>
-          {(item.category || "Sem categoria")}
+          {(item.category || t("shoppingList.noCategory"))}
           {item.notes ? ` · ${item.notes}` : ""}
-          {item.stock_quantity > 0 && ` · stock ${item.stock_quantity}`}
+          {item.stock_quantity > 0 && ` ${t("shoppingList.stockSuffix", { qty: item.stock_quantity })}`}
         </div>
       </div>
 
@@ -198,10 +203,10 @@ function ShoppingItemRow({ item, listId, onToggle, onDelete }: {
       </span>
 
       <div style={{ display: "flex", gap: "var(--space-1)" }}>
-        <button className="btn-icon" onClick={() => setEditing({})} title="Editar" style={{ width: "28px", height: "28px" }}>
+        <button className="btn-icon" onClick={() => setEditing({})} title={t("common.edit")} style={{ width: "28px", height: "28px" }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         </button>
-        <button className="btn-icon danger" onClick={() => onDelete(item.id)} title="Eliminar" style={{ width: "28px", height: "28px" }}>
+        <button className="btn-icon danger" onClick={() => onDelete(item.id)} title={t("common.delete")} style={{ width: "28px", height: "28px" }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
         </button>
       </div>
@@ -209,8 +214,8 @@ function ShoppingItemRow({ item, listId, onToggle, onDelete }: {
   );
 }
 
-function AddItemModal({ isOpen, onClose, listId, ingredients, onAdd }: {
-  isOpen: boolean; onClose: () => void; listId: number; ingredients: Ingredient[]; onAdd: () => void;
+function AddItemModal({ isOpen, onClose, listId, ingredients, onAdd, t }: {
+  isOpen: boolean; onClose: () => void; listId: number; ingredients: Ingredient[]; onAdd: () => void; t: T;
 }) {
   const [search, setSearch] = useState("");
   const [selectedIngredient, setSelectedIngredient] = useState<Ingredient | null>(null);
@@ -285,42 +290,42 @@ function AddItemModal({ isOpen, onClose, listId, ingredients, onAdd }: {
     <Modal
       open={isOpen}
       onClose={onClose}
-      title="Adicionar item"
+      title={t("shoppingList.addItemModalTitle")}
       wide={true}
       footer={
         <>
-          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t("common.cancel")}</button>
           <button
             className="btn btn-primary"
             onClick={handleSubmit}
             disabled={loading || (quickAddMode ? !quickAddName.trim() : !selectedIngredient)}
           >
-            {loading ? "A adicionar…" : "Adicionar à lista"}
+            {loading ? t("shoppingList.addingToList") : t("shoppingList.addToList")}
           </button>
         </>
       }
     >
       <div style={{ maxHeight: "70vh", overflow: "auto" }}>
         <div className="field">
-          <label className="field-label">Modo</label>
+          <label className="field-label">{t("shoppingList.modeLabel")}</label>
           <div style={{ display: "flex", gap: "var(--space-2)" }}>
-            <button className={`btn ${!quickAddMode ? "btn-primary" : "btn-secondary"}`} onClick={() => { setQuickAddMode(false); setSelectedIngredient(null); }} style={{ flex: 1 }}>Buscar ingrediente</button>
-            <button className={`btn ${quickAddMode ? "btn-primary" : "btn-secondary"}`} onClick={() => { setQuickAddMode(true); setSelectedIngredient(null); }} style={{ flex: 1 }}>Adição rápida</button>
+            <button className={`btn ${!quickAddMode ? "btn-primary" : "btn-secondary"}`} onClick={() => { setQuickAddMode(false); setSelectedIngredient(null); }} style={{ flex: 1 }}>{t("shoppingList.searchIngredientMode")}</button>
+            <button className={`btn ${quickAddMode ? "btn-primary" : "btn-secondary"}`} onClick={() => { setQuickAddMode(true); setSelectedIngredient(null); }} style={{ flex: 1 }}>{t("shoppingList.quickAddMode")}</button>
           </div>
         </div>
 
         {quickAddMode ? (
           <div className="field">
-            <label className="field-label" htmlFor="quick-add-name">Nome do item</label>
-            <input id="quick-add-name" className="input" autoFocus value={quickAddName} onChange={e => setQuickAddName(e.target.value)} placeholder="ex: Tomates cherry" onKeyDown={e => e.key === "Enter" && !e.shiftKey && handleSubmit()} />
+            <label className="field-label" htmlFor="quick-add-name">{t("shoppingList.itemNameLabel")}</label>
+            <input id="quick-add-name" className="input" autoFocus value={quickAddName} onChange={e => setQuickAddName(e.target.value)} placeholder={t("shoppingList.itemNamePlaceholder")} onKeyDown={e => e.key === "Enter" && !e.shiftKey && handleSubmit()} />
           </div>
         ) : (
           <>
-            <SearchBar value={search} onChange={setSearch} placeholder="Pesquisar ingredientes…" shortcut="" />
+            <SearchBar value={search} onChange={setSearch} placeholder={t("stock.searchPlaceholder")} shortcut="" />
             <div style={{ maxHeight: "300px", overflowY: "auto", marginTop: "var(--space-3)" }}>
               {filteredIngredients.length === 0 ? (
                 <p className="text-3" style={{ textAlign: "center", color: "var(--text-3)", padding: "var(--space-4)" }}>
-                  {search ? "Nenhum ingrediente encontrado" : "Comece a digitar para pesquisar"}
+                  {search ? t("shoppingList.noIngredientFound") : t("shoppingList.startTyping")}
                 </p>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
@@ -350,24 +355,24 @@ function AddItemModal({ isOpen, onClose, listId, ingredients, onAdd }: {
         {!quickAddMode && selectedIngredient && (
           <div style={{ marginTop: "var(--space-3)" }}>
             <div className="field">
-              <label className="field-label" htmlFor="qty">Quantidade</label>
+              <label className="field-label" htmlFor="qty">{t("shoppingList.quantityLabel")}</label>
               <input id="qty" type="number" className="input input-num" min="0" step="0.01" value={quantity} onChange={e => setQuantity(parseFloat(e.target.value) || 0)} />
             </div>
             <div className="field">
-              <label className="field-label" htmlFor="unit">Unidade</label>
+              <label className="field-label" htmlFor="unit">{t("shoppingList.unitLabel")}</label>
               <select id="unit" className="select" value={unit} onChange={e => setUnit(e.target.value)}>
                 {Object.entries(UNIT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
               </select>
             </div>
             <div className="field">
-              <label className="field-label" htmlFor="cat">Categoria</label>
+              <label className="field-label" htmlFor="cat">{t("shoppingList.categoryLabel")}</label>
               <select id="cat" className="select" value={category} onChange={e => setCategory(e.target.value)}>
                 {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div className="field">
-              <label className="field-label" htmlFor="notes">Notas</label>
-              <input id="notes" className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opcional: notas adicionais" />
+              <label className="field-label" htmlFor="notes">{t("shoppingList.notesLabel")}</label>
+              <input id="notes" className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder={t("shoppingList.notesOptionalPlaceholder")} />
             </div>
           </div>
         )}
@@ -376,8 +381,8 @@ function AddItemModal({ isOpen, onClose, listId, ingredients, onAdd }: {
   );
 }
 
-function RenameListModal({ isOpen, onClose, list, onRename }: {
-  isOpen: boolean; onClose: () => void; list: ShoppingList | null; onRename: (name: string) => void;
+function RenameListModal({ isOpen, onClose, list, onRename, t }: {
+  isOpen: boolean; onClose: () => void; list: ShoppingList | null; onRename: (name: string) => void; t: T;
 }) {
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
@@ -404,30 +409,31 @@ function RenameListModal({ isOpen, onClose, list, onRename }: {
     <Modal
       open={isOpen}
       onClose={onClose}
-      title="Renomear lista"
+      title={t("shoppingList.renameModalTitle")}
       footer={
         <>
-          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t("common.cancel")}</button>
           <button className="btn btn-primary" onClick={handleSubmit} disabled={loading || !name.trim()}>
-            {loading ? "A guardar…" : "Guardar"}
+            {loading ? t("stock.modal.saving") : t("common.save")}
           </button>
         </>
       }
     >
       <div className="field">
-        <label className="field-label" htmlFor="list-name">Nome da lista</label>
+        <label className="field-label" htmlFor="list-name">{t("shoppingList.listNameLabel")}</label>
         <input id="list-name" className="input" autoFocus value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && !e.shiftKey && handleSubmit()} />
       </div>
     </Modal>
   );
 }
 
-function ShoppingListsView({ lists, onSelectList, onCreateList, onRenameList, onDeleteList }: {
+function ShoppingListsView({ lists, onSelectList, onCreateList, onRenameList, onDeleteList, t }: {
   lists: ShoppingList[];
   onSelectList: (id: number) => void;
   onCreateList: (name: string) => Promise<void>;
   onRenameList: (id: number, name: string) => Promise<void>;
   onDeleteList: (id: number) => Promise<void>;
+  t: T;
 }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newListName, setNewListName] = useState("");
@@ -450,14 +456,14 @@ function ShoppingListsView({ lists, onSelectList, onCreateList, onRenameList, on
   return (
     <div className="content">
       <PageHeader
-        title="Listas de Compras"
-        subtitle={`${lists.length} lista${lists.length !== 1 ? "s" : ""}`}
+        title={t("shoppingList.title")}
+        subtitle={t(lists.length === 1 ? "shoppingList.subtitleSingular" : "shoppingList.subtitlePlural", { count: lists.length })}
         actions={
           <button className="btn btn-primary" onClick={() => setShowCreateModal(true)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
               <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
-            Nova lista
+            {t("shoppingList.newList")}
           </button>
         }
       />
@@ -470,11 +476,11 @@ function ShoppingListsView({ lists, onSelectList, onCreateList, onRenameList, on
               <path d="M2.05 2.05h2.5l2.5 11.5L8 21l8-1.5V5.5L4.55 3.5H3.55"/>
             </svg>
           }
-          title="Sem listas de compras"
-          body="Cria a tua primeira lista para começar a organizar as compras."
+          title={t("shoppingList.empty")}
+          body={t("shoppingList.emptyDesc")}
           action={
             <button className="btn btn-primary" onClick={() => setShowCreateModal(true)}>
-              Criar lista
+              {t("shoppingList.createList")}
             </button>
           }
         />
@@ -489,12 +495,12 @@ function ShoppingListsView({ lists, onSelectList, onCreateList, onRenameList, on
                 {list.name}
               </button>
               <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", color: "var(--text-3)" }}>
-                <span className="mono">{list.items.length} itens</span>
+                <span className="mono">{t("shoppingList.itemsCount", { count: list.items.length })}</span>
                 <span className="mono" style={{ color: "var(--brand)" }}>{list.total_estimated_cost.toFixed(2)} €</span>
-                <button className="btn-icon" onClick={() => setRenameList(list)} title="Renomear">
+                <button className="btn-icon" onClick={() => setRenameList(list)} title={t("shoppingList.rename")}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                 </button>
-                <button className="btn-icon danger" onClick={() => setDeleteConfirm({ id: list.id!, name: list.name })} title="Eliminar">
+                <button className="btn-icon danger" onClick={() => setDeleteConfirm({ id: list.id!, name: list.name })} title={t("common.delete")}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
                 </button>
               </div>
@@ -506,19 +512,19 @@ function ShoppingListsView({ lists, onSelectList, onCreateList, onRenameList, on
       <Modal
         open={showCreateModal}
         onClose={() => setShowCreateModal(false)}
-        title="Nova lista de compras"
+        title={t("shoppingList.newListModalTitle")}
         footer={
           <>
-            <button className="btn btn-secondary" onClick={() => setShowCreateModal(false)}>Cancelar</button>
+            <button className="btn btn-secondary" onClick={() => setShowCreateModal(false)}>{t("common.cancel")}</button>
             <button className="btn btn-primary" onClick={handleCreate} disabled={loading || !newListName.trim()}>
-              {loading ? "A criar…" : "Criar lista"}
+              {loading ? t("shoppingList.creating") : t("shoppingList.createList")}
             </button>
           </>
         }
       >
         <div className="field">
-          <label className="field-label" htmlFor="new-list-name">Nome da lista</label>
-          <input id="new-list-name" className="input" autoFocus value={newListName} onChange={e => setNewListName(e.target.value)} onKeyDown={e => e.key === "Enter" && !e.shiftKey && handleCreate()} placeholder="ex: Compras da semana" />
+          <label className="field-label" htmlFor="new-list-name">{t("shoppingList.listNameLabel")}</label>
+          <input id="new-list-name" className="input" autoFocus value={newListName} onChange={e => setNewListName(e.target.value)} onKeyDown={e => e.key === "Enter" && !e.shiftKey && handleCreate()} placeholder={t("shoppingList.listNamePlaceholder")} />
         </div>
       </Modal>
 
@@ -527,14 +533,15 @@ function ShoppingListsView({ lists, onSelectList, onCreateList, onRenameList, on
         onClose={() => setRenameList(null)}
         list={renameList}
         onRename={(name) => onRenameList(renameList!.id!, name)}
+        t={t}
       />
 
       <ConfirmDialog
         open={!!deleteConfirm}
         onCancel={() => setDeleteConfirm(null)}
         onConfirm={() => { onDeleteList(deleteConfirm!.id); setDeleteConfirm(null); }}
-        title="Confirmar"
-        body={deleteConfirm ? `Eliminar lista "${deleteConfirm.name}"?` : ""}
+        title={t("shoppingList.confirmTitle")}
+        body={deleteConfirm ? t("shoppingList.confirmDeleteListBody", { name: deleteConfirm.name }) : ""}
         danger
       />
     </div>
@@ -549,7 +556,8 @@ function ShoppingListDetailView({
   onRenameList,
   onToggleItem,
   onDeleteItem,
-  onClearPurchased
+  onClearPurchased,
+  t,
 }: {
   list: ShoppingList;
   ingredients: Ingredient[];
@@ -559,6 +567,7 @@ function ShoppingListDetailView({
   onToggleItem: (id: number, purchased: boolean) => Promise<void>;
   onDeleteItem: (id: number) => Promise<void>;
   onClearPurchased: () => Promise<void>;
+  t: T;
 }) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [showAddItemModal, setShowAddItemModal] = useState(false);
@@ -568,19 +577,21 @@ function ShoppingListDetailView({
   useEffect(() => {
     const cats = new Set<string>();
     for (const item of list.items) {
-      if (!item.purchased) cats.add(item.category || "Sem categoria");
+      if (!item.purchased) cats.add(item.category || t("shoppingList.noCategory"));
     }
     setExpandedCategories(cats);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list]);
 
   const itemsByCategory = useMemo(() => {
     const grouped: Record<string, ShoppingItem[]> = {};
     for (const item of list.items) {
-      const cat = item.category || "Sem categoria";
+      const cat = item.category || t("shoppingList.noCategory");
       if (!grouped[cat]) grouped[cat] = [];
       grouped[cat].push(item);
     }
     return grouped;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list]);
 
   const totalPurchased = list.items.filter(i => i.purchased).length;
@@ -595,22 +606,22 @@ function ShoppingListDetailView({
           </button>
           <div>
             <h1 className="content-title">{list.name}</h1>
-            <p className="content-sub mono">{list.items.length} itens • {totalPurchased} comprados • {list.total_estimated_cost.toFixed(2)} € estimado</p>
+            <p className="content-sub mono">{t("shoppingList.summary", { items: list.items.length, purchased: totalPurchased, total: list.total_estimated_cost.toFixed(2) })}</p>
           </div>
         </div>
         <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
           <button className="btn btn-secondary" onClick={() => setShowRenameModal(true)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-            Renomear
+            {t("shoppingList.rename")}
           </button>
           <button className="btn btn-primary" onClick={() => setShowAddItemModal(true)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Adicionar item
+            {t("shoppingList.addItem")}
           </button>
           {totalPurchased > 0 && (
             <button className="btn btn-danger" onClick={onClearPurchased}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-              Limpar comprados ({totalPurchased})
+              {t("shoppingList.clearPurchased", { count: totalPurchased })}
             </button>
           )}
         </div>
@@ -618,15 +629,15 @@ function ShoppingListDetailView({
 
       <div style={{ display: "flex", gap: "14px", marginBottom: "16px" }}>
         <div style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "13px", padding: "15px 18px" }}>
-          <div className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)" }}>Em falta</div>
+          <div className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)" }}>{t("shoppingList.missing")}</div>
           <div className="mono" style={{ fontSize: "26px", fontWeight: 600, color: "var(--ember)", marginTop: "6px" }}>{list.items.length - totalPurchased}</div>
         </div>
         <div style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "13px", padding: "15px 18px" }}>
-          <div className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)" }}>No carrinho</div>
+          <div className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)" }}>{t("shoppingList.inCart")}</div>
           <div className="mono" style={{ fontSize: "26px", fontWeight: 600, color: "var(--green)", marginTop: "6px" }}>{totalPurchased}</div>
         </div>
         <div style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "13px", padding: "15px 18px" }}>
-          <div className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)" }}>Progresso</div>
+          <div className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)" }}>{t("shoppingList.progress")}</div>
           <div className="mono" style={{ fontSize: "26px", fontWeight: 600, color: "var(--ink)", marginTop: "6px" }}>{totalPurchased}/{list.items.length}</div>
         </div>
       </div>
@@ -635,11 +646,11 @@ function ShoppingListDetailView({
         {sortedCategories.length === 0 ? (
           <EmptyState
             icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden="true" width="48" height="48"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2.5l2.5 11.5L8 21l8-1.5V5.5L4.55 3.5H3.55"/></svg>}
-            title="Lista vazia"
-            body="Adiciona itens para começar as tuas compras."
+            title={t("shoppingList.emptyListTitle")}
+            body={t("shoppingList.emptyListDesc")}
             action={
               <button className="btn btn-primary" onClick={() => setShowAddItemModal(true)}>
-                Adicionar primeiro item
+                {t("shoppingList.addFirstItem")}
               </button>
             }
           />
@@ -655,12 +666,13 @@ function ShoppingListDetailView({
                 if (next.has(cat)) next.delete(cat); else next.add(cat);
                 return next;
               })}
+              t={t}
             />
           ))
         )}
 
         <div style={{ padding: "var(--space-4)", background: "var(--elevated)", fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--border-subtle)" }}>
-          <span>Total estimado</span>
+          <span>{t("shoppingList.totalEstimated")}</span>
           <span className="mono" style={{ fontSize: "18px", color: "var(--brand)" }}>
             {list.total_estimated_cost.toFixed(2)} €
           </span>
@@ -669,20 +681,20 @@ function ShoppingListDetailView({
 
       <AddItemModal
         isOpen={showAddItemModal} onClose={() => setShowAddItemModal(false)}
-        listId={list.id!} ingredients={ingredients} onAdd={onReload}
+        listId={list.id!} ingredients={ingredients} onAdd={onReload} t={t}
       />
 
       <RenameListModal
         isOpen={showRenameModal} onClose={() => setShowRenameModal(false)}
-        list={list} onRename={onRenameList}
+        list={list} onRename={onRenameList} t={t}
       />
 
       <ConfirmDialog
         open={!!deleteConfirmItem}
         onCancel={() => setDeleteConfirmItem(null)}
         onConfirm={() => { onDeleteItem(deleteConfirmItem!); setDeleteConfirmItem(null); }}
-        title="Confirmar"
-        body={`Eliminar item "${list.items.find(i => i.id === deleteConfirmItem)?.ingredient_name || ''}"?`}
+        title={t("shoppingList.confirmTitle")}
+        body={t("shoppingList.confirmDeleteItemBody", { name: list.items.find(i => i.id === deleteConfirmItem)?.ingredient_name || '' })}
         danger
       />
     </div>
@@ -691,6 +703,7 @@ function ShoppingListDetailView({
 
 export default function ShoppingListPage() {
   const { showToast } = useToast();
+  const { t } = useI18n();
   const [lists, setLists] = useState<ShoppingList[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [selectedListId, setSelectedListId] = useState<number | null>(null);
@@ -702,9 +715,9 @@ export default function ShoppingListPage() {
       const data = await invoke<ShoppingList[]>("shopping_lists_list");
       setLists(data);
     } catch (e) {
-      showToast("Erro ao carregar listas", "err");
+      showToast(t("shoppingList.loadListsError"), "err");
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   const loadIngredients = useCallback(async () => {
     try {
@@ -725,9 +738,9 @@ export default function ShoppingListPage() {
       const list = await invoke<ShoppingList>("shopping_list_get", { id });
       setSelectedList(list);
     } catch (e) {
-      showToast("Erro ao carregar lista", "err");
+      showToast(t("shoppingList.loadListError"), "err");
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   const handleSelectList = (id: number) => {
     setSelectedListId(id);
@@ -742,9 +755,9 @@ export default function ShoppingListPage() {
       setSelectedListId(list.id!);
       setView("detail");
       loadListDetail(list.id!);
-      showToast("Lista criada", "ok");
+      showToast(t("shoppingList.listCreated"), "ok");
     } catch (e) {
-      showToast("Erro ao criar lista", "err");
+      showToast(t("shoppingList.listCreateError"), "err");
     }
   };
 
@@ -755,9 +768,9 @@ export default function ShoppingListPage() {
       if (selectedList && selectedList.id === id) {
         setSelectedList({ ...selectedList, name });
       }
-      showToast("Lista renomeada", "ok");
+      showToast(t("shoppingList.listRenamed"), "ok");
     } catch (e) {
-      showToast("Erro ao renomear", "err");
+      showToast(t("shoppingList.listRenameError"), "err");
     }
   };
 
@@ -770,9 +783,9 @@ export default function ShoppingListPage() {
         setSelectedList(null);
         setView("lists");
       }
-      showToast("Lista eliminada", "ok");
+      showToast(t("shoppingList.listDeleted"), "ok");
     } catch (e) {
-      showToast("Erro ao eliminar", "err");
+      showToast(t("shoppingList.listDeleteError"), "err");
     }
   };
 
@@ -788,7 +801,7 @@ export default function ShoppingListPage() {
         items: prev.items.map(i => i.id === itemId ? updatedItem : i)
       } : null);
     } catch (e) {
-      showToast("Erro ao actualizar", "err");
+      showToast(t("shoppingList.itemUpdateError"), "err");
     }
   };
 
@@ -799,9 +812,9 @@ export default function ShoppingListPage() {
         ...prev,
         items: prev.items.filter(i => i.id !== itemId)
       } : null);
-      showToast("Item removido", "ok");
+      showToast(t("shoppingList.itemRemoved"), "ok");
     } catch (e) {
-      showToast("Erro ao remover", "err");
+      showToast(t("shoppingList.itemRemoveError"), "err");
     }
   };
 
@@ -811,9 +824,9 @@ export default function ShoppingListPage() {
         listId: selectedListId!
       });
       setSelectedList(list);
-      showToast("Comprados removidos", "ok");
+      showToast(t("shoppingList.purchasedCleared"), "ok");
     } catch (e) {
-      showToast("Erro ao limpar", "err");
+      showToast(t("shoppingList.clearError"), "err");
     }
   };
 
@@ -825,6 +838,7 @@ export default function ShoppingListPage() {
         onCreateList={handleCreateList}
         onRenameList={handleRenameList}
         onDeleteList={handleDeleteList}
+        t={t}
       />
     );
   }
@@ -835,10 +849,10 @@ export default function ShoppingListPage() {
         <div className="content-header">
           <button className="btn btn-secondary" onClick={() => setView("lists")}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-            Voltar
+            {t("shoppingList.back")}
           </button>
         </div>
-        <EmptyState title="A carregar lista…" />
+        <EmptyState title={t("shoppingList.loadingList")} />
       </div>
     );
   }
@@ -853,6 +867,7 @@ export default function ShoppingListPage() {
       onToggleItem={handleToggleItem}
       onDeleteItem={handleDeleteItem}
       onClearPurchased={handleClearPurchased}
+      t={t}
     />
   );
 }

@@ -3,6 +3,9 @@ import { invoke } from "../lib/devInvoke";
 import { useToast } from "../components/ui/Toast";
 import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
+import { useI18n } from "../i18n";
+
+type T = (key: string, params?: Record<string, string | number>) => string;
 
 // ============================================================================
 // TYPES
@@ -107,9 +110,9 @@ interface BarListRow {
   color: string;
 }
 
-const BarList = ({ rows }: { rows: BarListRow[] }) =>
+const BarList = ({ rows, t }: { rows: BarListRow[]; t: T }) =>
   rows.length === 0 ? (
-    <div className="empty" style={{ padding: "24px 0", color: "var(--ink-3)" }}>Sem dados</div>
+    <div className="empty" style={{ padding: "24px 0", color: "var(--ink-3)" }}>{t("reports.noData")}</div>
   ) : (
     <div>
       {rows.map((row) => (
@@ -192,27 +195,27 @@ const KPICard = ({
 // MAIN REPORTS PAGE
 // ============================================================================
 
-const TABS = [
-  { id: "costs", label: "Custos", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> },
-  { id: "waste", label: "Desperdício", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polyline points="16 2 22 8 16 14"/><line x1="22" y1="8" x2="8" y2="8"/></svg> },
-  { id: "stock", label: "Stock Trends", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
-  { id: "meals", label: "Refeições", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
-  { id: "prices", label: "Preços", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="10" x2="8" y2="10"/><line x1="12" y1="10" x2="12" y2="10"/><line x1="16" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/></svg> },
+const getTabs = (t: T) => [
+  { id: "costs", label: t("reports.tabs.costs"), icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> },
+  { id: "waste", label: t("reports.tabs.waste"), icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polyline points="16 2 22 8 16 14"/><line x1="22" y1="8" x2="8" y2="8"/></svg> },
+  { id: "stock", label: t("reports.tabs.stock"), icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
+  { id: "meals", label: t("reports.tabs.meals"), icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
+  { id: "prices", label: t("reports.tabs.prices"), icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="10" x2="8" y2="10"/><line x1="12" y1="10" x2="12" y2="10"/><line x1="16" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/></svg> },
 ];
 
-const RANGE_OPTIONS = [
-  { value: 7, label: "7 dias" },
-  { value: 30, label: "30 dias" },
-  { value: 90, label: "90 dias" },
-  { value: 365, label: "1 ano" },
+const getRangeOptions = (t: T) => [
+  { value: 7, label: t("reports.range.d7") },
+  { value: 30, label: t("reports.range.d30") },
+  { value: 90, label: t("reports.range.d90") },
+  { value: 365, label: t("reports.range.d365") },
 ];
 
-const MEAL_TYPE_LABELS: Record<string, string> = {
-  breakfast: "Pequeno-almoço",
-  lunch: "Almoço",
-  dinner: "Jantar",
-  snack: "Lanche",
-};
+const getMealTypeLabels = (t: T): Record<string, string> => ({
+  breakfast: t("calendar.meals.breakfast"),
+  lunch: t("calendar.meals.lunch"),
+  dinner: t("calendar.meals.dinner"),
+  snack: t("calendar.meals.snack"),
+});
 
 const UNIT_LABELS: Record<string, string> = {
   gram: "g", kilogram: "kg", milligram: "mg",
@@ -226,8 +229,8 @@ const UNIT_LABELS: Record<string, string> = {
 
 
 
-function CostsTab({ costReport, days }: { costReport: CostReport | null; days: number }) {
-  if (!costReport || !costReport.total_spent) return <div className="empty" style={{ minHeight: 200 }}>Sem dados</div>;
+function CostsTab({ costReport, days, t }: { costReport: CostReport | null; days: number; t: T }) {
+  if (!costReport || !costReport.total_spent) return <div className="empty" style={{ minHeight: 200 }}>{t("reports.noData")}</div>;
 
   const byCategory = costReport.by_category ?? [];
   const byRecipe = costReport.by_recipe ?? [];
@@ -267,30 +270,30 @@ function CostsTab({ costReport, days }: { costReport: CostReport | null; days: n
       {/* KPI Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "var(--space-4)" }}>
         <KPICard
-          label="Total Gasto"
+          label={t("reports.costsTab.totalSpent")}
           value={`€${costReport.total_spent.toFixed(2)}`}
-          subLabel={`${days} dias`}
+          subLabel={t("reports.costsTab.days", { days })}
           icon={<span className="ms" style={{ fontSize: 22 }}>payments</span>}
           color="var(--ember)"
         />
         <KPICard
-          label="Média Diária"
+          label={t("reports.costsTab.dailyAvg")}
           value={`€${costReport.daily_avg.toFixed(2)}`}
-          subLabel="por dia"
+          subLabel={t("reports.costsTab.perDay")}
           icon={<span className="ms" style={{ fontSize: 22 }}>calendar_month</span>}
           color="var(--green)"
         />
         <KPICard
-          label="Categorias"
+          label={t("reports.costsTab.categories")}
           value={byCategory.length}
-          subLabel="com gastos"
+          subLabel={t("reports.costsTab.withSpending")}
           icon={<span className="ms" style={{ fontSize: 22 }}>category</span>}
           color="var(--amber)"
         />
         <KPICard
-          label="Fornecedores"
+          label={t("reports.costsTab.suppliers")}
           value={bySupplier.length}
-          subLabel="utilizados"
+          subLabel={t("reports.costsTab.used")}
           icon={<span className="ms" style={{ fontSize: 22 }}>local_shipping</span>}
           color="var(--approx)"
         />
@@ -300,18 +303,18 @@ function CostsTab({ costReport, days }: { costReport: CostReport | null; days: n
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-5)", alignItems: "start" }}>
         <div className="card" style={{ padding: 20 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-            <span style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>Gastos por categoria</span>
+            <span style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>{t("reports.costsTab.spendByCategory")}</span>
             <span className="mono" style={{ fontSize: 16, fontWeight: 600, color: "var(--ink)" }}>€{costReport.total_spent.toFixed(2)}</span>
           </div>
-          <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 16 }}>Total · últimos {days} dias</div>
-          <BarList rows={categoryRows} />
+          <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 16 }}>{t("reports.costsTab.totalLastDays", { days })}</div>
+          <BarList rows={categoryRows} t={t} />
         </div>
         <div className="card" style={{ padding: 20 }}>
-          <div style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", marginBottom: 4 }}>Gastos por receita</div>
+          <div style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", marginBottom: 4 }}>{t("reports.costsTab.spendByRecipe")}</div>
           <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 16 }}>
-            últimos {days} dias · top {Math.min(8, byRecipe.length)} receitas
+            {t("reports.costsTab.lastDaysTopRecipes", { days, count: Math.min(8, byRecipe.length) })}
           </div>
-          <BarList rows={recipeRows} />
+          <BarList rows={recipeRows} t={t} />
         </div>
       </div>
 
@@ -320,30 +323,30 @@ function CostsTab({ costReport, days }: { costReport: CostReport | null; days: n
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span className="ms" style={{ fontSize: 19, color: "var(--approx)" }}>local_shipping</span>
-            <span style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>Gastos por fornecedor</span>
+            <span style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>{t("reports.costsTab.spendBySupplier")}</span>
           </div>
           <span className="mono" style={{ fontSize: 16, fontWeight: 600, color: "var(--approx)" }}>€{supplierTotal.toFixed(2)}</span>
         </div>
         <div style={{ display: "flex", gap: 8, background: "var(--approx-soft)", borderRadius: 9, padding: "10px 12px", margin: "12px 0 16px" }}>
           <span className="ms" style={{ fontSize: 17, color: "var(--approx)", flexShrink: 0 }}>info</span>
           <span style={{ fontSize: "11.5px", color: "var(--ink-2)", lineHeight: 1.45 }}>
-            Fonte diferente: dados de faturas de fornecedores, não de consumo de receitas. Este total não reconcilia com os relatórios acima.
+            {t("reports.costsTab.differentSourceNote")}
           </span>
         </div>
-        <BarList rows={supplierRows} />
+        <BarList rows={supplierRows} t={t} />
       </div>
 
       {/* Top Recipes Table */}
       <div className="card" style={{ padding: "var(--space-4)" }}>
-        <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--ink)", fontWeight: 600 }}>Top Receitas por Custo</h3>
+        <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--ink)", fontWeight: 600 }}>{t("reports.costsTab.topRecipesTable")}</h3>
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
-                <th>Receita</th>
-                <th className="mono">Custo Total</th>
-                <th className="mono">Custo/Porção</th>
-                <th className="mono">Vezes</th>
+                <th>{t("reports.costsTab.colRecipe")}</th>
+                <th className="mono">{t("reports.costsTab.colTotalCost")}</th>
+                <th className="mono">{t("reports.costsTab.colCostPerPortion")}</th>
+                <th className="mono">{t("reports.costsTab.colTimes")}</th>
               </tr>
             </thead>
             <tbody>
@@ -363,8 +366,8 @@ function CostsTab({ costReport, days }: { costReport: CostReport | null; days: n
   );
 }
 
-function WasteTab({ wasteReport, days }: { wasteReport: WasteReport | null; days: number }) {
-  if (!wasteReport || !wasteReport.total_wasted_value) return <div className="empty" style={{ minHeight: 200 }}>Sem dados</div>;
+function WasteTab({ wasteReport, days, t }: { wasteReport: WasteReport | null; days: number; t: T }) {
+  if (!wasteReport || !wasteReport.total_wasted_value) return <div className="empty" style={{ minHeight: 200 }}>{t("reports.noData")}</div>;
 
   const byCategory = wasteReport.by_category ?? [];
   const byIngredient = wasteReport.by_ingredient ?? [];
@@ -380,26 +383,26 @@ function WasteTab({ wasteReport, days }: { wasteReport: WasteReport | null; days
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
       <KPICard
-        label="Valor Total Desperdiçado"
+        label={t("reports.wasteTab.totalWasted")}
         value={`€${wasteReport.total_wasted_value.toFixed(2)}`}
-        subLabel={`${days} dias`}
+        subLabel={t("reports.costsTab.days", { days })}
         icon={<span className="ms" style={{ fontSize: 22 }}>delete</span>}
         color="var(--red)"
       />
       <div className="card" style={{ padding: 20 }}>
-        <div style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", marginBottom: 4 }}>Desperdício por categoria</div>
-        <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 16 }}>últimos {days} dias</div>
-        <BarList rows={categoryRows} />
+        <div style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", marginBottom: 4 }}>{t("reports.wasteTab.wasteByCategory")}</div>
+        <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 16 }}>{t("reports.wasteTab.lastDays", { days })}</div>
+        <BarList rows={categoryRows} t={t} />
       </div>
       <div className="card" style={{ padding: "var(--space-4)" }}>
-        <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--ink)", fontWeight: 600 }}>Por Ingrediente</h3>
+        <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--ink)", fontWeight: 600 }}>{t("reports.wasteTab.byIngredient")}</h3>
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
-                <th>Ingrediente</th>
-                <th className="mono">Qtd. Desperdiçada</th>
-                <th className="mono">Valor</th>
+                <th>{t("reports.wasteTab.colIngredient")}</th>
+                <th className="mono">{t("reports.wasteTab.colWastedQty")}</th>
+                <th className="mono">{t("reports.wasteTab.colValue")}</th>
               </tr>
             </thead>
             <tbody>
@@ -418,8 +421,8 @@ function WasteTab({ wasteReport, days }: { wasteReport: WasteReport | null; days
   );
 }
 
-function StockTrendsTab({ stockTrends, loading }: { stockTrends: StockSnapshot[]; loading: boolean }) {
-  if (loading) return <div className="empty" style={{ minHeight: 200 }}>A carregar...</div>;
+function StockTrendsTab({ stockTrends, loading, t }: { stockTrends: StockSnapshot[]; loading: boolean; t: T }) {
+  if (loading) return <div className="empty" style={{ minHeight: 200 }}>{t("reports.loadingEllipsis")}</div>;
 
   // Group by ingredient for multi-line chart
   const ingredientMap = new Map<number, { name: string; data: StockSnapshot[] }>();
@@ -436,10 +439,10 @@ function StockTrendsTab({ stockTrends, loading }: { stockTrends: StockSnapshot[]
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
       <div className="card" style={{ padding: 20 }}>
-        <div style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", marginBottom: 4 }}>Evolução do valor do stock</div>
-        <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 16 }}>top 5 ingredientes por valor atual</div>
+        <div style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", marginBottom: 4 }}>{t("reports.stockTab.evolution")}</div>
+        <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 16 }}>{t("reports.stockTab.top5")}</div>
         {topIngredients.length === 0 ? (
-          <div className="empty" style={{ minHeight: 200 }}>Sem dados</div>
+          <div className="empty" style={{ minHeight: 200 }}>{t("reports.noData")}</div>
         ) : (
           <div style={{ height: 300, position: "relative" }}>
             <svg viewBox="0 0 100 300" preserveAspectRatio="none" style={{ width: "100%", height: "100%" }}>
@@ -484,15 +487,16 @@ function StockTrendsTab({ stockTrends, loading }: { stockTrends: StockSnapshot[]
   );
 }
 
-function MealsTab({ mealStats, days }: { mealStats: MealStats | null; days: number }) {
-  if (!mealStats || !mealStats.total_meals) return <div className="empty" style={{ minHeight: 200 }}>Sem dados</div>;
+function MealsTab({ mealStats, days, t }: { mealStats: MealStats | null; days: number; t: T }) {
+  if (!mealStats || !mealStats.total_meals) return <div className="empty" style={{ minHeight: 200 }}>{t("reports.noData")}</div>;
 
   const byMealType = mealStats.by_meal_type ?? [];
   const byRecipe = mealStats.by_recipe ?? [];
+  const mealTypeLabels = getMealTypeLabels(t);
 
   const mealTypeRows: BarListRow[] = byMealType.map((m, i) => ({
     key: m.meal_type,
-    name: MEAL_TYPE_LABELS[m.meal_type] ?? m.meal_type,
+    name: mealTypeLabels[m.meal_type] ?? m.meal_type,
     amount: `${m.count}x`,
     pct: m.percentage,
     color: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
@@ -514,30 +518,30 @@ function MealsTab({ mealStats, days }: { mealStats: MealStats | null; days: numb
       {/* KPI Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "var(--space-4)" }}>
         <KPICard
-          label="Total Refeições"
+          label={t("reports.mealsTab.totalMeals")}
           value={mealStats.total_meals}
-          subLabel={`${days} dias`}
+          subLabel={t("reports.costsTab.days", { days })}
           icon={<span className="ms" style={{ fontSize: 22 }}>restaurant</span>}
           color="var(--ember)"
         />
         <KPICard
-          label="Média Porções"
+          label={t("reports.mealsTab.avgPortions")}
           value={mealStats.avg_portions.toFixed(1)}
-          subLabel="por refeição"
+          subLabel={t("reports.mealsTab.perMeal")}
           icon={<span className="ms" style={{ fontSize: 22 }}>groups</span>}
           color="var(--green)"
         />
         <KPICard
-          label="Tipos de Refeição"
+          label={t("reports.mealsTab.mealTypes")}
           value={byMealType.length}
-          subLabel="utilizados"
+          subLabel={t("reports.mealsTab.used")}
           icon={<span className="ms" style={{ fontSize: 22 }}>schedule</span>}
           color="var(--amber)"
         />
         <KPICard
-          label="Receitas Únicas"
+          label={t("reports.mealsTab.uniqueRecipes")}
           value={byRecipe.length}
-          subLabel="preparadas"
+          subLabel={t("reports.mealsTab.prepared")}
           icon={<span className="ms" style={{ fontSize: 22 }}>menu_book</span>}
           color="var(--approx)"
         />
@@ -546,30 +550,30 @@ function MealsTab({ mealStats, days }: { mealStats: MealStats | null; days: numb
       {/* Bar lists */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-5)", alignItems: "start" }}>
         <div className="card" style={{ padding: 20 }}>
-          <div style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", marginBottom: 4 }}>Refeições por tipo</div>
-          <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 16 }}>últimos {days} dias</div>
-          <BarList rows={mealTypeRows} />
+          <div style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", marginBottom: 4 }}>{t("reports.mealsTab.mealsByType")}</div>
+          <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 16 }}>{t("reports.wasteTab.lastDays", { days })}</div>
+          <BarList rows={mealTypeRows} t={t} />
         </div>
         <div className="card" style={{ padding: 20 }}>
-          <div style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", marginBottom: 4 }}>Top receitas preparadas</div>
+          <div style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", marginBottom: 4 }}>{t("reports.mealsTab.topRecipesPrepared")}</div>
           <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 16 }}>
-            últimos {days} dias · top {Math.min(8, byRecipe.length)}
+            {t("reports.mealsTab.lastDaysTop", { days, count: Math.min(8, byRecipe.length) })}
           </div>
-          <BarList rows={recipeRows} />
+          <BarList rows={recipeRows} t={t} />
         </div>
       </div>
 
       {/* Detail Table */}
       <div className="card" style={{ padding: "var(--space-4)" }}>
-        <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--ink)", fontWeight: 600 }}>Detalhe por Receita</h3>
+        <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--ink)", fontWeight: 600 }}>{t("reports.mealsTab.detailByRecipe")}</h3>
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
-                <th>Receita</th>
-                <th className="mono">Vezes</th>
-                <th className="mono">Total Porções</th>
-                <th className="mono">Média Porções</th>
+                <th>{t("reports.costsTab.colRecipe")}</th>
+                <th className="mono">{t("reports.mealsTab.colTimes")}</th>
+                <th className="mono">{t("reports.mealsTab.colTotalPortions")}</th>
+                <th className="mono">{t("reports.mealsTab.colAvgPortions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -595,13 +599,16 @@ function PricesTab({
   setPriceTrendIngredientId,
   loading,
   priceTrends,
+  t,
 }: {
   ingredients: { id: number; name: string }[];
   priceTrendIngredientId: number | null;
   setPriceTrendIngredientId: (id: number | null) => void;
   loading: boolean;
   priceTrends: PricePoint[];
+  t: T;
 }) {
+  const locale = t("calendar.locale");
   const selectedName = ingredients.find((i) => i.id === priceTrendIngredientId)?.name;
 
   // Build up to 6 bars from the trend (chronological order, most recent last).
@@ -617,7 +624,7 @@ function PricesTab({
 
   const bars = sample.map((p, i) => ({
     key: p.date + i,
-    label: new Date(p.date).toLocaleDateString("pt-PT", { month: "short" }).replace(".", ""),
+    label: new Date(p.date).toLocaleDateString(locale, { month: "short" }).replace(".", ""),
     h: (p.price / maxPrice) * 100,
     color: i === sample.length - 1 ? "var(--red)" : "var(--ember)",
   }));
@@ -626,7 +633,7 @@ function PricesTab({
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
       {/* Ingredient Selector */}
       <div className="card" style={{ padding: "var(--space-4)" }}>
-        <label className="field-label">Ingrediente</label>
+        <label className="field-label">{t("reports.pricesTab.ingredientLabel")}</label>
         <select
           className="select"
           value={priceTrendIngredientId ?? ""}
@@ -641,9 +648,9 @@ function PricesTab({
 
       {/* Tendência de preços */}
       <div className="card" style={{ padding: 20, maxWidth: 420 }}>
-        <div style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>Tendência de preços</div>
+        <div style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>{t("reports.pricesTab.priceTrend")}</div>
         <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 6 }}>
-          {selectedName ?? "Ingrediente"} · últimos {sample.length} registos
+          {t("reports.pricesTab.lastRecords", { name: selectedName ?? t("reports.pricesTab.defaultIngredient"), count: sample.length })}
         </div>
         {priceTrends.length === 0 ? (
           <EmptyState
@@ -654,8 +661,8 @@ function PricesTab({
                 <line x1="16" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/>
               </svg>
             }
-            title="Sem dados"
-            body="Adicione cotações de preços para ver a evolução"
+            title={t("reports.pricesTab.noDataTitle")}
+            body={t("reports.pricesTab.noDataDesc")}
           />
         ) : (
           <>
@@ -678,20 +685,20 @@ function PricesTab({
       {/* Price Points Table */}
       {priceTrends.length > 0 && (
         <div className="card" style={{ padding: "var(--space-4)" }}>
-          <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Histórico de Cotações</h3>
+          <h3 style={{ marginBottom: "var(--space-3)", fontSize: "14px", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{t("reports.pricesTab.historyTitle")}</h3>
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Data</th>
-                  <th>Fornecedor</th>
-                  <th className="mono">Preço</th>
+                  <th>{t("reports.pricesTab.colDate")}</th>
+                  <th>{t("reports.pricesTab.colSupplier")}</th>
+                  <th className="mono">{t("reports.pricesTab.colPrice")}</th>
                 </tr>
               </thead>
               <tbody>
                 {priceTrends.slice().reverse().map((p, i) => (
                   <tr key={i}>
-                    <td>{new Date(p.date).toLocaleDateString("pt-PT")}</td>
+                    <td>{new Date(p.date).toLocaleDateString(locale)}</td>
                     <td>{p.supplier}</td>
                     <td className="mono">€{p.price.toFixed(4)}</td>
                   </tr>
@@ -712,6 +719,7 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(false);
 
   const { showToast } = useToast();
+  const { t } = useI18n();
 
   // Data states
   const [costReport, setCostReport] = useState<CostReport | null>({
@@ -789,11 +797,11 @@ export default function ReportsPage() {
         }
       }
     } catch (e) {
-      showToast("Erro ao carregar relatório", "err");
+      showToast(t("reports.loadError"), "err");
     } finally {
       setLoading(false);
     }
-  }, [activeTab, days, priceTrendIngredientId, showToast]);
+  }, [activeTab, days, priceTrendIngredientId, showToast, t]);
 
   useEffect(() => {
     loadData();
@@ -814,7 +822,7 @@ export default function ReportsPage() {
             <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
             <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
           </svg>
-          <p className="text-3">A carregar relatório...</p>
+          <p className="text-3">{t("reports.loading")}</p>
         </div>
       </div>
     );
@@ -823,8 +831,8 @@ export default function ReportsPage() {
   return (
     <div className="content">
       <PageHeader
-        title="Relatórios"
-        subtitle="Análise de custos, desperdício, stock, refeições e preços"
+        title={t("reports.title")}
+        subtitle={t("reports.subtitle")}
         actions={
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>
             <select
@@ -833,16 +841,16 @@ export default function ReportsPage() {
               onChange={(e) => setDays(Number(e.target.value))}
               style={{ minWidth: "140px" }}
             >
-              {RANGE_OPTIONS.map((opt) => (
+              {getRangeOptions(t).map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
           </div>
         }
       />
-      
+
       <div className="tab-list">
-        {TABS.map((tab) => (
+        {getTabs(t).map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
@@ -853,10 +861,10 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {activeTab === "costs" && <CostsTab costReport={costReport} days={days} />}
-      {activeTab === "waste" && <WasteTab wasteReport={wasteReport} days={days} />}
-      {activeTab === "stock" && <StockTrendsTab stockTrends={stockTrends} loading={loading} />}
-      {activeTab === "meals" && <MealsTab mealStats={mealStats} days={days} />}
+      {activeTab === "costs" && <CostsTab costReport={costReport} days={days} t={t} />}
+      {activeTab === "waste" && <WasteTab wasteReport={wasteReport} days={days} t={t} />}
+      {activeTab === "stock" && <StockTrendsTab stockTrends={stockTrends} loading={loading} t={t} />}
+      {activeTab === "meals" && <MealsTab mealStats={mealStats} days={days} t={t} />}
       {activeTab === "prices" && (
         <PricesTab
           ingredients={ingredients}
@@ -864,6 +872,7 @@ export default function ReportsPage() {
           setPriceTrendIngredientId={setPriceTrendIngredientId}
           loading={loading}
           priceTrends={priceTrends}
+          t={t}
         />
       )}
     </div>

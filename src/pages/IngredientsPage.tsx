@@ -4,6 +4,7 @@ import { useToast } from "../components/ui/Toast";
 import PageHeader from "../components/ui/PageHeader";
 import IngredientAvatar from "../components/IngredientAvatar";
 import ImageUpload from "../components/ImageUpload";
+import { useI18n } from "../i18n";
 
 interface Ingredient {
   id: number;
@@ -12,12 +13,14 @@ interface Ingredient {
   price_per_unit: number;
 }
 
-const UNIT_GROUPS = [
-  { label: "Peso", units: ["gram", "kilogram", "milligram", "ounce", "pound", "pinch", "bunch", "clove", "slice"] },
-  { label: "Volume", units: ["milliliter", "liter", "fluid_ounce", "cup", "pint", "quart", "gallon"] },
-  { label: "Culinário", units: ["teaspoon", "tablespoon"] },
-  { label: "Contagem", units: ["piece", "dozen"] },
-  { label: "Outros", units: ["centimeter", "celsius", "fahrenheit"] },
+type T = (key: string, params?: Record<string, string | number>) => string;
+
+const getUnitGroups = (t: T) => [
+  { label: t("ingredients.unitGroups.weight"), units: ["gram", "kilogram", "milligram", "ounce", "pound", "pinch", "bunch", "clove", "slice"] },
+  { label: t("ingredients.unitGroups.volume"), units: ["milliliter", "liter", "fluid_ounce", "cup", "pint", "quart", "gallon"] },
+  { label: t("ingredients.unitGroups.culinary"), units: ["teaspoon", "tablespoon"] },
+  { label: t("ingredients.unitGroups.count"), units: ["piece", "dozen"] },
+  { label: t("ingredients.unitGroups.other"), units: ["centimeter", "celsius", "fahrenheit"] },
 ];
 
 const UNIT_LABELS: Record<string, string> = {
@@ -48,15 +51,16 @@ export default function IngredientsPage() {
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const { showToast } = useToast();
+  const { t } = useI18n();
 
   const load = useCallback(async () => {
     try {
       const data = await invoke<Ingredient[]>("ingredients_list");
       setIngredients(data);
     } catch (e) {
-      showToast("Erro ao carregar ingredientes", "err");
+      showToast(t("ingredients.loadError"), "err");
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -86,7 +90,7 @@ export default function IngredientsPage() {
             price_per_unit: form.price_per_unit,
           },
         });
-        showToast("Ingrediente criado", "ok");
+        showToast(t("ingredients.created"), "ok");
       } else if (editing) {
         await invoke("ingredient_update", {
           id: editing.id,
@@ -96,12 +100,12 @@ export default function IngredientsPage() {
             price_per_unit: form.price_per_unit,
           },
         });
-        showToast("Ingrediente actualizado", "ok");
+        showToast(t("ingredients.updated"), "ok");
       }
       closeModal();
       await load();
     } catch (e) {
-      showToast("Erro ao guardar", "err");
+      showToast(t("ingredients.saveError"), "err");
     } finally {
       setLoading(false);
     }
@@ -111,57 +115,58 @@ export default function IngredientsPage() {
     try {
       await invoke("ingredient_delete", { id });
       setConfirmDelete(null);
-      showToast("Ingrediente eliminado", "ok");
+      showToast(t("ingredients.deleted"), "ok");
       await load();
     } catch (e) {
-      showToast("Erro ao eliminar", "err");
+      showToast(t("ingredients.deleteError"), "err");
     }
   }
 
   const filtered = ingredients.filter(i =>
     i.name.toLowerCase().includes(search.toLowerCase())
   );
+  const unitGroups = getUnitGroups(t);
 
   return (
     <div className="content">
       <PageHeader
-        title="Ingredientes"
-        subtitle={`Inventário · ${ingredients.length} ${ingredients.length === 1 ? "item" : "itens"}`}
+        title={t("ingredients.title")}
+        subtitle={t(ingredients.length === 1 ? "ingredients.subtitleSingular" : "ingredients.subtitlePlural", { count: ingredients.length })}
         actions={
           <button className="btn-primary" onClick={openCreate}>
             <span className="ms" style={{ fontSize: 18 }} aria-hidden="true">add</span>
-            Novo ingrediente
+            {t("ingredients.newIngredient")}
           </button>
         }
       />
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "var(--space-4)" }}>
-        <div className="search-bar" role="search" aria-label="Pesquisar ingredientes" style={{ maxWidth: 320 }}>
+        <div className="search-bar" role="search" aria-label={t("ingredients.searchPlaceholder")} style={{ maxWidth: 320 }}>
           <span className="ms" style={{ fontSize: 18, color: "var(--ink-3)" }} aria-hidden="true">search</span>
           <input
-            placeholder="Pesquisar ingredientes…"
+            placeholder={t("ingredients.searchPlaceholder")}
             value={search}
             onChange={e => setSearch(e.target.value)}
-            aria-label="Pesquisar"
+            aria-label={t("common.search")}
           />
         </div>
         <div style={{ flex: 1 }} />
         <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>
-          {filtered.length} {filtered.length === 1 ? "ingrediente" : "ingredientes"}
+          {t(filtered.length === 1 ? "ingredients.countSingular" : "ingredients.countPlural", { count: filtered.length })}
         </span>
       </div>
 
       {filtered.length === 0 && (
         <div className="empty" role="status">
           <span className="ms" style={{ fontSize: 44, color: "var(--ink-3)" }} aria-hidden="true">search_off</span>
-          <p className="empty-title">{search ? "Sem resultados" : "Sem ingredientes"}</p>
+          <p className="empty-title">{search ? t("ingredients.noResults") : t("ingredients.empty")}</p>
           <p style={{ fontSize: 13, color: "var(--ink-2)" }}>
-            {search ? "Tenta outra pesquisa." : "Adiciona o primeiro ingrediente para começar."}
+            {search ? t("ingredients.noResultsDesc") : t("ingredients.emptyDesc")}
           </p>
           {!search && (
             <button className="btn-primary" onClick={openCreate} style={{ marginTop: 8 }}>
               <span className="ms" style={{ fontSize: 18 }} aria-hidden="true">add</span>
-              Adicionar ingrediente
+              {t("ingredients.addIngredient")}
             </button>
           )}
         </div>
@@ -174,10 +179,10 @@ export default function IngredientsPage() {
               <thead>
                 <tr>
                   <th style={{ width: 40 }}></th>
-                  <th>Nome</th>
-                  <th>Unidade</th>
-                  <th style={{ textAlign: "right" }}>Preço</th>
-                  <th style={{ width: 100, textAlign: "right" }}>Ações</th>
+                  <th>{t("common.name")}</th>
+                  <th>{t("ingredients.colUnit")}</th>
+                  <th style={{ textAlign: "right" }}>{t("common.price")}</th>
+                  <th style={{ width: 100, textAlign: "right" }}>{t("common.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -193,35 +198,35 @@ export default function IngredientsPage() {
                           <button
                             className="btn-icon danger"
                             onClick={() => handleDelete(ing.id)}
-                            aria-label="Confirmar eliminação"
-                            title="Confirmar"
+                            aria-label={t("ingredients.confirmDeleteAria")}
+                            title={t("common.confirm")}
                           >
                             <span className="ms" style={{ fontSize: 16 }} aria-hidden="true">check</span>
                           </button>
                           <button
                             className="btn-icon"
                             onClick={() => setConfirmDelete(null)}
-                            aria-label="Cancelar"
-                            title="Cancelar"
+                            aria-label={t("common.cancel")}
+                            title={t("common.cancel")}
                           >
                             <span className="ms" style={{ fontSize: 16 }} aria-hidden="true">close</span>
                           </button>
                         </div>
                       ) : (
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }} role="group" aria-label="Ações do ingrediente">
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }} role="group" aria-label={t("ingredients.actionsAriaLabel")}>
                           <button
                             className="btn-icon"
                             onClick={() => openEdit(ing)}
-                            title="Editar"
-                            aria-label={`Editar ${ing.name}`}
+                            title={t("common.edit")}
+                            aria-label={t("ingredients.editAria", { name: ing.name })}
                           >
                             <span className="ms" style={{ fontSize: 16 }} aria-hidden="true">edit</span>
                           </button>
                           <button
                             className="btn-icon danger"
                             onClick={() => setConfirmDelete(ing.id)}
-                            title="Eliminar"
-                            aria-label={`Eliminar ${ing.name}`}
+                            title={t("common.delete")}
+                            aria-label={t("ingredients.deleteAria", { name: ing.name })}
                           >
                             <span className="ms" style={{ fontSize: 16 }} aria-hidden="true">delete</span>
                           </button>
@@ -241,33 +246,33 @@ export default function IngredientsPage() {
           <div className="modal" onClick={e => e.stopPropagation()}>
             <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
               <h2 id="modal-title" className="modal-title" style={{ margin: 0 }}>
-                {modal === "create" ? "Novo ingrediente" : "Editar ingrediente"}
+                {modal === "create" ? t("ingredients.modal.newTitle") : t("ingredients.modal.editTitle")}
               </h2>
-              <button className="btn-icon" onClick={closeModal} aria-label="Fechar">
+              <button className="btn-icon" onClick={closeModal} aria-label={t("common.close")}>
                 <span className="ms" style={{ fontSize: 18 }} aria-hidden="true">close</span>
               </button>
             </header>
             <div>
               <div className="field">
-                <label htmlFor="name">Nome</label>
+                <label htmlFor="name">{t("common.name")}</label>
                 <input
                   id="name"
                   autoFocus
                   value={form.name}
                   onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                   onKeyDown={e => e.key === "Enter" && !e.shiftKey && handleSave()}
-                  placeholder="ex: Arroz arbório"
+                  placeholder={t("ingredients.modal.namePlaceholder")}
                 />
               </div>
 
               <div className="field">
-                <label htmlFor="unit">Unidade</label>
+                <label htmlFor="unit">{t("ingredients.colUnit")}</label>
                 <select
                   id="unit"
                   value={form.unit}
                   onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}
                 >
-                  {UNIT_GROUPS.map(g => (
+                  {unitGroups.map(g => (
                     <optgroup key={g.label} label={g.label}>
                       {g.units.map(u => (
                         <option key={u} value={u}>{UNIT_LABELS[u]}</option>
@@ -278,7 +283,7 @@ export default function IngredientsPage() {
               </div>
 
               <div className="field">
-                <label htmlFor="price">Preço por unidade (€)</label>
+                <label htmlFor="price">{t("ingredients.modal.pricePerUnit")}</label>
                 <input
                   id="price"
                   type="number"
@@ -294,7 +299,7 @@ export default function IngredientsPage() {
               </div>
 
               <div className="field">
-                <label>Imagem do ingrediente</label>
+                <label>{t("ingredients.modal.image")}</label>
                 <ImageUpload
                   entityType="ingredient"
                   entityId={editing?.id ?? 0}
@@ -302,13 +307,13 @@ export default function IngredientsPage() {
               </div>
             </div>
             <footer className="modal-footer">
-              <button className="btn btn-secondary" onClick={closeModal}>Cancelar</button>
+              <button className="btn btn-secondary" onClick={closeModal}>{t("common.cancel")}</button>
               <button
                 className="btn-primary"
                 onClick={handleSave}
                 disabled={loading || !form.name.trim()}
               >
-                {loading ? "A guardar…" : "Guardar"}
+                {loading ? t("ingredients.modal.saving") : t("common.save")}
               </button>
             </footer>
           </div>

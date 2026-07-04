@@ -5,6 +5,9 @@ import Modal from "../components/ui/Modal";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
+import { useI18n } from "../i18n";
+
+type T = (key: string, params?: Record<string, string | number>) => string;
 
 // Types matching the backend
 interface Recipe {
@@ -85,19 +88,19 @@ type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 const DAYS: DayOfWeek[] = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const MEAL_TYPES: MealType[] = ["breakfast", "lunch", "dinner", "snack"];
 
-const DAY_LABELS: Record<DayOfWeek, string> = {
-  monday: "Segunda", tuesday: "Terça", wednesday: "Quarta",
-  thursday: "Quinta", friday: "Sexta", saturday: "Sábado", sunday: "Domingo"
-};
+const getDayLabels = (t: T): Record<DayOfWeek, string> => ({
+  monday: t("mealPlanner.daysFull.monday"), tuesday: t("mealPlanner.daysFull.tuesday"), wednesday: t("mealPlanner.daysFull.wednesday"),
+  thursday: t("mealPlanner.daysFull.thursday"), friday: t("mealPlanner.daysFull.friday"), saturday: t("mealPlanner.daysFull.saturday"), sunday: t("mealPlanner.daysFull.sunday"),
+});
 
-const MEAL_LABELS: Record<MealType, string> = {
-  breakfast: "Pequeno-almoço", lunch: "Almoço", dinner: "Jantar", snack: "Lanche"
-};
+const getMealLabels = (t: T): Record<MealType, string> => ({
+  breakfast: t("calendar.meals.breakfast"), lunch: t("calendar.meals.lunch"), dinner: t("calendar.meals.dinner"), snack: t("calendar.meals.snack"),
+});
 
-const DAY_LABELS_SHORT: Record<DayOfWeek, string> = {
-  monday: "Seg", tuesday: "Ter", wednesday: "Qua",
-  thursday: "Qui", friday: "Sex", saturday: "Sáb", sunday: "Dom"
-};
+const getDayLabelsShort = (t: T): Record<DayOfWeek, string> => ({
+  monday: t("calendar.days.mon"), tuesday: t("calendar.days.tue"), wednesday: t("calendar.days.wed"),
+  thursday: t("calendar.days.thu"), friday: t("calendar.days.fri"), saturday: t("calendar.days.sat"), sunday: t("calendar.days.sun"),
+});
 
 const MEAL_COLORS: Record<MealType, string> = {
   breakfast: "var(--amber)", lunch: "var(--green)", dinner: "var(--ember)", snack: "var(--approx)"
@@ -111,6 +114,7 @@ export default function MealPlannerPage() {
   const [editingEntry, setEditingEntry] = useState<MealPlanEntry | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const { showToast } = useToast();
+  const { t } = useI18n();
   const [loading, setLoading] = useState(false);
 
   // Form state
@@ -132,18 +136,18 @@ export default function MealPlannerPage() {
       const plans = await invoke<MealPlan[]>("meal_plans_list");
       setMealPlans(plans);
     } catch (e) {
-      showToast("Erro ao carregar planos", "err");
+      showToast(t("mealPlanner.loadPlansError"), "err");
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   const loadRecipes = useCallback(async () => {
     try {
       const recipesData = await invoke<Recipe[]>("recipes_list");
       setRecipes(recipesData);
     } catch (e) {
-      showToast("Erro ao carregar receitas", "err");
+      showToast(t("mealPlanner.loadRecipesError"), "err");
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   const loadPlan = useCallback(async (id: number) => {
     setLoading(true);
@@ -151,11 +155,11 @@ export default function MealPlannerPage() {
       const plan = await invoke<MealPlanWithEntries>("meal_plan_get", { id });
       setSelectedPlan(plan);
     } catch (e) {
-      showToast("Erro ao carregar plano", "err");
+      showToast(t("mealPlanner.loadPlanError"), "err");
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   useEffect(() => {
     loadMealPlans();
@@ -174,12 +178,12 @@ export default function MealPlannerPage() {
           end_date: planForm.end_date + "T00:00:00Z",
         },
       });
-      showToast("Plano criado", "ok");
+      showToast(t("mealPlanner.planCreated"), "ok");
       setModal(null);
       setPlanForm({ name: "", start_date: new Date().toISOString().split("T")[0], end_date: new Date(Date.now() + 6 * 86400000).toISOString().split("T")[0] });
       await loadMealPlans();
     } catch (e) {
-      showToast("Erro ao criar plano", "err");
+      showToast(t("mealPlanner.planCreateError"), "err");
     } finally {
       setLoading(false);
     }
@@ -197,12 +201,12 @@ export default function MealPlannerPage() {
           end_date: planForm.end_date + "T00:00:00Z",
         },
       });
-      showToast("Plano actualizado", "ok");
+      showToast(t("mealPlanner.planUpdated"), "ok");
       setModal(null);
       await loadPlan(selectedPlan.meal_plan.id);
       await loadMealPlans();
     } catch (e) {
-      showToast("Erro ao actualizar plano", "err");
+      showToast(t("mealPlanner.planUpdateError"), "err");
     } finally {
       setLoading(false);
     }
@@ -212,18 +216,18 @@ export default function MealPlannerPage() {
     try {
       await invoke("meal_plan_delete", { id });
       setConfirmDelete(null);
-      showToast("Plano eliminado", "ok");
+      showToast(t("mealPlanner.planDeleted"), "ok");
       if (selectedPlan?.meal_plan.id === id) setSelectedPlan(null);
       await loadMealPlans();
     } catch (e) {
-      showToast("Erro ao eliminar plano", "err");
+      showToast(t("mealPlanner.planDeleteError"), "err");
     }
   }
 
   // Entry CRUD
   async function handleEntryAdd() {
     if (!selectedPlan || entryForm.recipe_id === 0) {
-      showToast("Seleciona uma receita", "warn");
+      showToast(t("mealPlanner.selectRecipeWarn"), "warn");
       return;
     }
     setLoading(true);
@@ -237,12 +241,12 @@ export default function MealPlannerPage() {
           portions: entryForm.portions,
         },
       });
-      showToast("Entrada adicionada", "ok");
+      showToast(t("mealPlanner.entryAdded"), "ok");
       setEntryForm({ recipe_id: 0, day_of_week: "monday", meal_type: "lunch", portions: 1 });
       setModal(null);
       await loadPlan(selectedPlan.meal_plan.id);
     } catch (e) {
-      showToast("Erro ao adicionar entrada", "err");
+      showToast(t("mealPlanner.entryAddError"), "err");
     } finally {
       setLoading(false);
     }
@@ -261,13 +265,13 @@ export default function MealPlannerPage() {
           portions: entryForm.portions,
         },
       });
-      showToast("Entrada actualizada", "ok");
+      showToast(t("mealPlanner.entryUpdated"), "ok");
       setEntryForm({ recipe_id: 0, day_of_week: "monday", meal_type: "lunch", portions: 1 });
       setEditingEntry(null);
       setModal(null);
       if (selectedPlan) await loadPlan(selectedPlan.meal_plan.id);
     } catch (e) {
-      showToast("Erro ao actualizar entrada", "err");
+      showToast(t("mealPlanner.entryUpdateError"), "err");
     } finally {
       setLoading(false);
     }
@@ -276,10 +280,10 @@ export default function MealPlannerPage() {
   async function handleEntryDelete(id: number) {
     try {
       await invoke("meal_entry_delete", { id });
-      showToast("Entrada eliminada", "ok");
+      showToast(t("mealPlanner.entryDeleted"), "ok");
       if (selectedPlan) await loadPlan(selectedPlan.meal_plan.id);
     } catch (e) {
-      showToast("Erro ao eliminar entrada", "err");
+      showToast(t("mealPlanner.entryDeleteError"), "err");
     }
   }
 
@@ -292,9 +296,9 @@ export default function MealPlannerPage() {
         planId: selectedPlan.meal_plan.id,
         portionsMultiplier: 1,
       });
-      showToast(`Lista de compras gerada: ${result.shopping_list.name}`, "ok");
+      showToast(t("mealPlanner.shoppingListGenerated", { name: result.shopping_list.name }), "ok");
     } catch (e) {
-      showToast("Erro ao gerar lista de compras", "err");
+      showToast(t("mealPlanner.shoppingListError"), "err");
     } finally {
       setLoading(false);
     }
@@ -348,12 +352,12 @@ export default function MealPlannerPage() {
   return (
     <div className="content">
       <PageHeader
-        title="Planeamento Semanal"
-        subtitle="Organiza as tuas refeições da semana"
+        title={t("mealPlanner.title")}
+        subtitle={t("mealPlanner.subtitle")}
         actions={
           <button className="btn-primary" onClick={() => openPlanModal("create")}>
             <span className="ms" style={{ fontSize: 16 }}>add</span>
-            Novo Plano
+            {t("mealPlanner.newPlan")}
           </button>
         }
       />
@@ -364,6 +368,7 @@ export default function MealPlannerPage() {
           openPlanModal={openPlanModal}
           loadPlan={loadPlan}
           setConfirmDelete={setConfirmDelete}
+          t={t}
         />
       ) : (
         <WeeklyGrid
@@ -375,6 +380,7 @@ export default function MealPlannerPage() {
           getEntry={getEntry}
           openEntryModal={openEntryModal}
           handleEntryDelete={handleEntryDelete}
+          t={t}
         />
       )}
 
@@ -382,32 +388,32 @@ export default function MealPlannerPage() {
       <Modal
         open={modal === "create" || modal === "edit"}
         onClose={closeModal}
-        title={modal === "create" ? "Novo Plano" : "Editar Plano"}
+        title={modal === "create" ? t("mealPlanner.modal.newPlanTitle") : t("mealPlanner.modal.editPlanTitle")}
         footer={
           <>
-            <button className="btn btn-secondary" onClick={closeModal}>Cancelar</button>
+            <button className="btn btn-secondary" onClick={closeModal}>{t("common.cancel")}</button>
             <button className="btn btn-primary" onClick={modal === "create" ? handlePlanCreate : handlePlanUpdate} disabled={loading || !planForm.name.trim()}>
-              {loading ? "A guardar…" : modal === "create" ? "Criar" : "Guardar"}
+              {loading ? t("mealPlanner.modal.saving") : modal === "create" ? t("mealPlanner.modal.create") : t("common.save")}
             </button>
           </>
         }
       >
         <div className="modal-body">
           <div className="field">
-            <label className="field-label" htmlFor="plan-name">Nome do Plano</label>
+            <label className="field-label" htmlFor="plan-name">{t("mealPlanner.modal.planNameLabel")}</label>
             <input
               id="plan-name"
               type="text"
               className="input"
               value={planForm.name}
               onChange={e => setPlanForm(f => ({ ...f, name: e.target.value }))}
-              placeholder="Ex: Semana de 15 a 21 Janeiro"
+              placeholder={t("mealPlanner.modal.planNamePlaceholder")}
               autoFocus
             />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-3)" }}>
             <div className="field">
-              <label className="field-label" htmlFor="plan-start">Data Início</label>
+              <label className="field-label" htmlFor="plan-start">{t("mealPlanner.modal.startDate")}</label>
               <input
                 id="plan-start"
                 type="date"
@@ -417,7 +423,7 @@ export default function MealPlannerPage() {
               />
             </div>
             <div className="field">
-              <label className="field-label" htmlFor="plan-end">Data Fim</label>
+              <label className="field-label" htmlFor="plan-end">{t("mealPlanner.modal.endDate")}</label>
               <input
                 id="plan-end"
                 type="date"
@@ -434,36 +440,36 @@ export default function MealPlannerPage() {
       <Modal
         open={modal === "entry"}
         onClose={closeModal}
-        title={editingEntry ? "Editar Entrada" : "Adicionar Refeição"}
+        title={editingEntry ? t("mealPlanner.entryModal.editTitle") : t("mealPlanner.entryModal.addTitle")}
         footer={
           <>
-            <button className="btn btn-secondary" onClick={closeModal}>Cancelar</button>
+            <button className="btn btn-secondary" onClick={closeModal}>{t("common.cancel")}</button>
             <button className="btn btn-primary" onClick={editingEntry ? handleEntryUpdate : handleEntryAdd} disabled={loading || entryForm.recipe_id === 0}>
-              {loading ? "A guardar…" : editingEntry ? "Guardar" : "Adicionar"}
+              {loading ? t("mealPlanner.modal.saving") : editingEntry ? t("common.save") : t("mealPlanner.entryModal.add")}
             </button>
           </>
         }
       >
         <div className="modal-body">
           <div className="field">
-            <label className="field-label" htmlFor="entry-recipe">Receita</label>
+            <label className="field-label" htmlFor="entry-recipe">{t("mealPlanner.entryModal.recipeLabel")}</label>
             <select
               id="entry-recipe"
               className="select"
               value={entryForm.recipe_id}
               onChange={e => setEntryForm(f => ({ ...f, recipe_id: parseInt(e.target.value) || 0 }))}
             >
-              <option value="0">Seleciona uma receita…</option>
+              <option value="0">{t("mealPlanner.entryModal.selectRecipe")}</option>
               {recipes.map(r => (
                 <option key={r.id} value={r.id}>
-                  {r.name} ({r.portions} porções)
+                  {r.name} ({r.portions} {t("mealPlanner.entryModal.portionsSuffix")})
                 </option>
               ))}
             </select>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-3)" }}>
             <div className="field">
-              <label className="field-label" htmlFor="entry-day">Dia da Semana</label>
+              <label className="field-label" htmlFor="entry-day">{t("mealPlanner.entryModal.dayLabel")}</label>
               <select
                 id="entry-day"
                 className="select"
@@ -471,12 +477,12 @@ export default function MealPlannerPage() {
                 onChange={e => setEntryForm(f => ({ ...f, day_of_week: e.target.value as DayOfWeek }))}
               >
                 {DAYS.map(d => (
-                  <option key={d} value={d}>{DAY_LABELS[d]}</option>
+                  <option key={d} value={d}>{getDayLabels(t)[d]}</option>
                 ))}
               </select>
             </div>
             <div className="field">
-              <label className="field-label" htmlFor="entry-meal">Tipo de Refeição</label>
+              <label className="field-label" htmlFor="entry-meal">{t("mealPlanner.entryModal.mealLabel")}</label>
               <select
                 id="entry-meal"
                 className="select"
@@ -484,13 +490,13 @@ export default function MealPlannerPage() {
                 onChange={e => setEntryForm(f => ({ ...f, meal_type: e.target.value as MealType }))}
               >
                 {MEAL_TYPES.map(m => (
-                  <option key={m} value={m}>{MEAL_LABELS[m]}</option>
+                  <option key={m} value={m}>{getMealLabels(t)[m]}</option>
                 ))}
               </select>
             </div>
           </div>
           <div className="field">
-            <label className="field-label" htmlFor="entry-portions">Porções</label>
+            <label className="field-label" htmlFor="entry-portions">{t("mealPlanner.entryModal.portionsLabel")}</label>
             <input
               id="entry-portions"
               type="number"
@@ -506,8 +512,8 @@ export default function MealPlannerPage() {
 
       <ConfirmDialog
         open={confirmDelete !== null}
-        title="Eliminar plano?"
-        body="Esta acção não pode ser desfeita. As entradas associadas também serão eliminadas."
+        title={t("mealPlanner.confirmDeleteTitle")}
+        body={t("mealPlanner.confirmDeleteBody")}
         onConfirm={() => {
           if (confirmDelete !== null) handlePlanDelete(confirmDelete);
         }}
@@ -524,25 +530,28 @@ function PlanList({
   mealPlans,
   openPlanModal,
   loadPlan,
-  setConfirmDelete
+  setConfirmDelete,
+  t,
 }: {
   mealPlans: MealPlan[];
   openPlanModal: (type: "create" | "edit", plan?: any) => void;
   loadPlan: (id: number) => void;
   setConfirmDelete: (id: number) => void;
+  t: T;
 }) {
+  const locale = t("calendar.locale");
   return (
     <div className="card" style={{ padding: "28px", margin: "0 auto", maxWidth: "760px" }}>
-      <h2 className="section-title" style={{ marginBottom: "18px" }}>Os Teus Planos</h2>
+      <h2 className="section-title" style={{ marginBottom: "18px" }}>{t("mealPlanner.yourPlans")}</h2>
       {mealPlans.length === 0 ? (
         <EmptyState
           icon={<span className="ms" style={{ fontSize: 32 }}>calendar_month</span>}
-          title="Nenhum plano ainda"
-          body="Cria o teu primeiro plano de refeições semanal"
+          title={t("mealPlanner.noPlans")}
+          body={t("mealPlanner.noPlansDesc")}
           action={
             <button className="btn-primary" onClick={() => openPlanModal("create")}>
               <span className="ms" style={{ fontSize: 16 }}>add</span>
-              Criar Plano
+              {t("mealPlanner.createPlan")}
             </button>
           }
         />
@@ -553,17 +562,17 @@ function PlanList({
               <div>
                 <h3 className="item-name">{plan.name}</h3>
                 <p className="item-meta">
-                  {new Date(plan.start_date).toLocaleDateString("pt-PT")} – {new Date(plan.end_date).toLocaleDateString("pt-PT")}
+                  {new Date(plan.start_date).toLocaleDateString(locale)} – {new Date(plan.end_date).toLocaleDateString(locale)}
                 </p>
               </div>
               <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
                 <button className="btn-primary btn-sm" style={{ flex: 1 }} onClick={() => loadPlan(plan.id)}>
-                  Abrir
+                  {t("mealPlanner.open")}
                 </button>
                 <button className="btn btn-sm" onClick={() => openPlanModal("edit", { meal_plan: plan, entries: [] })}>
-                  Editar
+                  {t("common.edit")}
                 </button>
-                <button className="btn-icon danger" onClick={() => setConfirmDelete(plan.id)} aria-label="Eliminar plano">
+                <button className="btn-icon danger" onClick={() => setConfirmDelete(plan.id)} aria-label={t("mealPlanner.deletePlanAria")}>
                   <span className="ms" style={{ fontSize: 16 }}>delete</span>
                 </button>
               </div>
@@ -583,7 +592,8 @@ function WeeklyGrid({
   setSelectedPlan,
   getEntry,
   openEntryModal,
-  handleEntryDelete
+  handleEntryDelete,
+  t,
 }: {
   selectedPlan: MealPlanWithEntries;
   loading: boolean;
@@ -593,8 +603,12 @@ function WeeklyGrid({
   getEntry: (day: DayOfWeek, meal: MealType) => MealPlanEntry | undefined;
   openEntryModal: (day: DayOfWeek, meal: MealType, entry?: MealPlanEntry) => void;
   handleEntryDelete: (id: number) => void;
+  t: T;
 }) {
   const startTime = new Date(selectedPlan.meal_plan.start_date).getTime();
+  const locale = t("calendar.locale");
+  const dayLabelsShort = getDayLabelsShort(t);
+  const mealLabels = getMealLabels(t);
 
   return (
     <>
@@ -603,15 +617,15 @@ function WeeklyGrid({
           <div>
             <h2 className="content-title" style={{ fontSize: "20px" }}>{selectedPlan.meal_plan.name}</h2>
             <p className="content-sub mono">
-              {new Date(selectedPlan.meal_plan.start_date).toLocaleDateString("pt-PT", { day: "numeric", month: "long" })} – {new Date(selectedPlan.meal_plan.end_date).toLocaleDateString("pt-PT", { day: "numeric", month: "long" })}
+              {new Date(selectedPlan.meal_plan.start_date).toLocaleDateString(locale, { day: "numeric", month: "long" })} – {new Date(selectedPlan.meal_plan.end_date).toLocaleDateString(locale, { day: "numeric", month: "long" })}
             </p>
           </div>
           <div style={{ display: "flex", gap: "8px" }}>
-            <button className="btn-icon" onClick={() => setSelectedPlan(null)} aria-label="Voltar aos planos">
+            <button className="btn-icon" onClick={() => setSelectedPlan(null)} aria-label={t("mealPlanner.backToPlans")}>
               <span className="ms" style={{ fontSize: 18 }}>arrow_back</span>
             </button>
             <button className="btn" onClick={() => openPlanModal("edit", selectedPlan)}>
-              Editar Plano
+              {t("mealPlanner.editPlan")}
             </button>
           </div>
         </div>
@@ -623,10 +637,10 @@ function WeeklyGrid({
           {DAYS.map(day => (
             <div key={day} style={{ background: "var(--inset)", padding: "12px 8px", textAlign: "center" }}>
               <div className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>
-                {DAY_LABELS_SHORT[day]}
+                {dayLabelsShort[day]}
               </div>
               <div className="mono" style={{ fontSize: "16px", fontWeight: 600, color: "var(--ink)", marginTop: "2px" }}>
-                {new Date(startTime + DAYS.indexOf(day) * 86400000).toLocaleDateString("pt-PT", { day: "2-digit" })}
+                {new Date(startTime + DAYS.indexOf(day) * 86400000).toLocaleDateString(locale, { day: "2-digit" })}
               </div>
             </div>
           ))}
@@ -638,7 +652,7 @@ function WeeklyGrid({
           >
             <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0 10px" }}>
               <span style={{ width: 8, height: 8, borderRadius: "50%", background: MEAL_COLORS[meal], flexShrink: 0 }} />
-              <span style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--ink)" }}>{MEAL_LABELS[meal]}</span>
+              <span style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--ink)" }}>{mealLabels[meal]}</span>
             </div>
             {DAYS.map(day => {
               const entry = getEntry(day, meal);
@@ -664,14 +678,14 @@ function WeeklyGrid({
                       {entry.recipe_name}
                     </div>
                     <div className="mono" style={{ fontSize: "9.5px", color: "var(--ink-3)", marginTop: "3px" }}>
-                      {entry.portions} por.
+                      {entry.portions} {t("dashboard.week.portions")}
                     </div>
                   </div>
                   <button
                     className="btn-icon danger"
                     style={{ width: 20, height: 20, alignSelf: "flex-end" }}
                     onClick={e => { e.stopPropagation(); handleEntryDelete(entry.id); }}
-                    aria-label="Eliminar entrada"
+                    aria-label={t("mealPlanner.deleteEntryAria")}
                   >
                     <span className="ms" style={{ fontSize: 13 }}>delete</span>
                   </button>
@@ -702,16 +716,16 @@ function WeeklyGrid({
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "14px" }}>
         <button className="btn-primary" onClick={handleGenerateShoppingList} disabled={loading}>
           <span className="ms" style={{ fontSize: 18 }}>shopping_cart</span>
-          {loading ? "A gerar…" : "Gerar lista de compras"}
+          {loading ? t("mealPlanner.generating") : t("mealPlanner.generateShoppingList")}
         </button>
       </div>
 
       <div className="card" style={{ marginTop: "16px", padding: "16px" }}>
-        <h3 className="section-title">Resumo</h3>
+        <h3 className="section-title">{t("mealPlanner.summary")}</h3>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", fontSize: "13px" }}>
-          <span className="mono"><strong>{selectedPlan.entries.length}</strong> refeições planeadas</span>
-          <span className="mono"><strong>{[...new Set(selectedPlan.entries.map(e => e.recipe_id))].length}</strong> receitas diferentes</span>
-          <span className="mono"><strong>{selectedPlan.entries.reduce((sum, e) => sum + e.portions, 0)}</strong> porções no total</span>
+          <span className="mono"><strong>{selectedPlan.entries.length}</strong> {t("mealPlanner.mealsPlanned")}</span>
+          <span className="mono"><strong>{[...new Set(selectedPlan.entries.map(e => e.recipe_id))].length}</strong> {t("mealPlanner.differentRecipes")}</span>
+          <span className="mono"><strong>{selectedPlan.entries.reduce((sum, e) => sum + e.portions, 0)}</strong> {t("mealPlanner.totalPortions")}</span>
         </div>
       </div>
     </>

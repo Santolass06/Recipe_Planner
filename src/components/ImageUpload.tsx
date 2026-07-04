@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useI18n } from "../i18n";
 
 interface Image {
   id: number;
@@ -37,6 +38,7 @@ export default function ImageUpload({
   accept = "image/*",
   showPreview = true,
 }: ImageUploadProps) {
+  const { t } = useI18n();
   const [image, setImage] = useState<Image | null>(null);
   const [uploading, setUploading] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" | "warn" | "info" } | null>(null);
@@ -63,7 +65,7 @@ export default function ImageUpload({
       setImage(primary);
       onImageChange?.(primary);
     } catch (e) {
-      console.error("Erro ao carregar imagem:", e);
+      console.error("Error loading image:", e);
     }
   };
 
@@ -72,7 +74,7 @@ export default function ImageUpload({
     if (!file) return;
 
     if (file.size > maxSizeMB * 1024 * 1024) {
-      showToast(`Ficheiro muito grande (máx. ${maxSizeMB}MB)`, "warn");
+      showToast(t("imageUpload.fileTooLarge", { maxSize: maxSizeMB }), "warn");
       return;
     }
 
@@ -93,9 +95,9 @@ export default function ImageUpload({
         } as { input: ImageUploadInput });
         setImage(uploaded);
         onImageChange?.(uploaded);
-        showToast("Imagem carregada", "ok");
+        showToast(t("imageUpload.uploaded"), "ok");
       } catch (e) {
-        showToast("Erro ao carregar imagem", "err");
+        showToast(t("imageUpload.uploadError"), "err");
       } finally {
         setUploading(false);
       }
@@ -109,9 +111,9 @@ export default function ImageUpload({
       await invoke("image_delete", { id: image.id });
       setImage(null);
       onImageChange?.(null);
-      showToast("Imagem removida", "ok");
+      showToast(t("imageUpload.removed"), "ok");
     } catch (e) {
-      showToast("Erro ao remover imagem", "err");
+      showToast(t("imageUpload.removeError"), "err");
     }
   };
 
@@ -120,7 +122,7 @@ export default function ImageUpload({
   if (entityId === 0) {
     return (
       <div className="image-upload-placeholder" style={{ opacity: 0.5 }}>
-        <p className="text-3 text-muted">Guarda primeiro para adicionar imagem</p>
+        <p className="text-3 text-muted">{t("imageUpload.saveFirst")}</p>
       </div>
     );
   }
@@ -142,7 +144,7 @@ export default function ImageUpload({
         <div className="image-preview" style={{ position: "relative", display: "inline-block" }}>
           <img
             src={imageUrl}
-            alt="Pré-visualização"
+            alt={t("imageUpload.preview")}
             style={{
               maxWidth: "200px",
               maxHeight: "200px",
@@ -155,8 +157,8 @@ export default function ImageUpload({
             type="button"
             className="btn-icon danger"
             onClick={handleDelete}
-            title="Remover imagem"
-            aria-label="Remover imagem"
+            title={t("imageUpload.removeImage")}
+            aria-label={t("imageUpload.removeImage")}
             style={{
               position: "absolute",
               top: "-8px",
@@ -188,7 +190,7 @@ export default function ImageUpload({
                 <circle cx="12" cy="12" r="10" strokeOpacity="0.2"/>
                 <path d="M12 2a10 10 0 0 1 10 10" strokeOpacity="1"/>
               </svg>
-              A carregar…
+              {t("imageUpload.uploading")}
             </>
           ) : (
             <>
@@ -197,7 +199,7 @@ export default function ImageUpload({
                 <circle cx="8.5" cy="8.5" r="1.5"/>
                 <polyline points="21 15 16 10 5 21"/>
               </svg>
-              Adicionar imagem
+              {t("imageUpload.addImage")}
             </>
           )}
         </button>

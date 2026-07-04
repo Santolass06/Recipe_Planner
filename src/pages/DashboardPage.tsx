@@ -5,6 +5,9 @@ import { useToast } from "../components/ui/Toast";
 import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
 import StatusPill from "../components/ui/StatusPill";
+import { useI18n } from "../i18n";
+
+type T = (key: string, params?: Record<string, string | number>) => string;
 
 interface DashboardStats {
   low_stock_count: number;
@@ -47,7 +50,10 @@ interface StockItemWithIngredient {
   updated_at: string;
 }
 
-const DOW_SHORT = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+const getDowShort = (t: T) => [
+  t("dashboard.dow.sun"), t("dashboard.dow.mon"), t("dashboard.dow.tue"),
+  t("dashboard.dow.wed"), t("dashboard.dow.thu"), t("dashboard.dow.fri"), t("dashboard.dow.sat"),
+];
 
 const MEAL_COLOR: Record<string, string> = {
   breakfast: "var(--amber)", lunch: "var(--green)", dinner: "var(--ember)", snack: "var(--approx)"
@@ -66,7 +72,7 @@ const UNIT_LABELS: Record<string, string> = {
 const formatEur = (n: number) =>
   `€${n.toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const formatRelativeTime = (dateStr: string) => {
+const formatRelativeTime = (dateStr: string, t: T) => {
   const date = new Date(dateStr);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
@@ -74,10 +80,10 @@ const formatRelativeTime = (dateStr: string) => {
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);
 
-  if (diffMins < 1) return "Agora mesmo";
-  if (diffMins < 60) return `Há ${diffMins} min`;
-  if (diffHours < 24) return `Há ${diffHours}h`;
-  if (diffDays < 7) return `Há ${diffDays} dia${diffDays > 1 ? "s" : ""}`;
+  if (diffMins < 1) return t("dashboard.time.now");
+  if (diffMins < 60) return t("dashboard.time.minsAgo", { mins: diffMins });
+  if (diffHours < 24) return t("dashboard.time.hoursAgo", { hours: diffHours });
+  if (diffDays < 7) return t(diffDays > 1 ? "dashboard.time.daysAgo" : "dashboard.time.dayAgo", { days: diffDays });
   return date.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit" });
 };
 
@@ -117,53 +123,53 @@ function KpiCard({
   );
 }
 
-function KpiRow({ stats, navigateToStock, navigateToShopping }: {
-  stats: DashboardStats | null; navigateToStock: () => void; navigateToShopping: () => void;
+function KpiRow({ stats, navigateToStock, navigateToShopping, t }: {
+  stats: DashboardStats | null; navigateToStock: () => void; navigateToShopping: () => void; t: T;
 }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 16 }}>
       <KpiCard
-        icon="euro" color="var(--ember)" label="Valor em Stock"
+        icon="euro" color="var(--ember)" label={t("dashboard.kpi.stockValue")}
         value={formatEur(stats?.total_stock_value ?? 0)}
-        subIcon="inventory_2" sub={`${stats?.total_ingredients ?? 0} ingredientes`}
+        subIcon="inventory_2" sub={t("dashboard.kpi.stockValueSub", { count: stats?.total_ingredients ?? 0 })}
       />
       <KpiCard
-        icon="warning" color="var(--amber)" label="Stock Baixo"
+        icon="warning" color="var(--amber)" label={t("dashboard.kpi.lowStock")}
         value={stats?.low_stock_count ?? 0}
-        subIcon="shopping_cart" sub="itens abaixo do mínimo"
+        subIcon="shopping_cart" sub={t("dashboard.kpi.lowStockSub")}
         onClick={navigateToStock}
       />
       <KpiCard
-        icon="schedule" color="var(--red)" label="A Expirar (7d)"
+        icon="schedule" color="var(--red)" label={t("dashboard.kpi.expiring")}
         value={stats?.expiring_soon_count ?? 0}
-        subIcon="error" sub="itens a vencer em breve"
+        subIcon="error" sub={t("dashboard.kpi.expiringSub")}
         onClick={navigateToStock}
       />
       <KpiCard
-        icon="receipt_long" color="var(--green)" label="Compras Pendentes"
+        icon="receipt_long" color="var(--green)" label={t("dashboard.kpi.pendingPurchases")}
         value={stats?.pending_shopping_items ?? 0}
-        subIcon="shopping_cart" sub="itens em falta"
+        subIcon="shopping_cart" sub={t("dashboard.kpi.pendingPurchasesSub")}
         onClick={navigateToShopping}
       />
     </div>
   );
 }
 
-function AlertsPanel({ lowStock, navigateToShopping }: { lowStock: StockItemWithIngredient[]; navigateToShopping: () => void }) {
+function AlertsPanel({ lowStock, navigateToShopping, t }: { lowStock: StockItemWithIngredient[]; navigateToShopping: () => void; t: T }) {
   return (
     <div className="card" style={{ padding: 0, overflow: "hidden" }}>
       <div style={{ padding: "15px 19px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span className="ms" style={{ fontSize: 19, color: "var(--amber)" }}>warning</span>
-          <span style={{ fontWeight: 600, fontSize: 14 }}>Alertas</span>
+          <span style={{ fontWeight: 600, fontSize: 14 }}>{t("dashboard.alerts.title")}</span>
         </div>
         <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{lowStock.length}</span>
       </div>
       {lowStock.length === 0 ? (
         <EmptyState
           icon={<span className="ms" style={{ fontSize: 32, color: "var(--green)" }}>check_circle</span>}
-          title="Stock OK"
-          body="Todos os ingredientes estão acima do mínimo"
+          title={t("dashboard.alerts.stockOk")}
+          body={t("dashboard.alerts.stockOkDesc")}
         />
       ) : (
         <div>
@@ -176,15 +182,15 @@ function AlertsPanel({ lowStock, navigateToShopping }: { lowStock: StockItemWith
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>{item.ingredient_name}</div>
                   <div className="mono" style={{ fontSize: "10.5px", color: "var(--ink-3)", marginTop: 1 }}>
-                    {item.quantity} {unit} em stock · min {item.min_quantity} {unit}
+                    {item.quantity} {unit} {t("dashboard.alerts.inStock")} · {t("dashboard.alerts.min")} {item.min_quantity} {unit}
                   </div>
                 </div>
-                <StatusPill status={isOut ? "out" : "low"} label={isOut ? "Esgotado" : "Baixo"} />
+                <StatusPill status={isOut ? "out" : "low"} label={isOut ? t("dashboard.alerts.outOfStock") : t("dashboard.alerts.low")} />
                 <button
                   onClick={navigateToShopping}
                   style={{ border: "1px solid var(--line)", background: "var(--inset)", borderRadius: 7, height: 28, padding: "0 10px", fontSize: "11.5px", fontWeight: 600, color: "var(--ink-2)", cursor: "pointer", fontFamily: "var(--sans)" }}
                 >
-                  + Lista
+                  {t("dashboard.alerts.addToList")}
                 </button>
               </div>
             );
@@ -195,9 +201,10 @@ function AlertsPanel({ lowStock, navigateToShopping }: { lowStock: StockItemWith
   );
 }
 
-function WeekPanel({ upcomingMeals, mealsThisWeek, navigateToMealPlanner }: {
-  upcomingMeals: MealPlanEntryWithRecipe[]; mealsThisWeek: number; navigateToMealPlanner: () => void;
+function WeekPanel({ upcomingMeals, mealsThisWeek, navigateToMealPlanner, t }: {
+  upcomingMeals: MealPlanEntryWithRecipe[]; mealsThisWeek: number; navigateToMealPlanner: () => void; t: T;
 }) {
+  const dowShort = getDowShort(t);
   const localKey = (d: Date) =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   const today = new Date();
@@ -209,7 +216,7 @@ function WeekPanel({ upcomingMeals, mealsThisWeek, navigateToMealPlanner }: {
       const md = m.planned_date ? new Date(m.planned_date) : null;
       return md && !isNaN(md.getTime()) && localKey(md) === key;
     });
-    return { dow: DOW_SHORT[d.getDay()], dayNum: String(d.getDate()), isToday: i === 0, meals };
+    return { dow: dowShort[d.getDay()], dayNum: String(d.getDate()), isToday: i === 0, meals };
   });
 
   return (
@@ -217,12 +224,12 @@ function WeekPanel({ upcomingMeals, mealsThisWeek, navigateToMealPlanner }: {
       <div style={{ padding: "15px 19px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span className="ms" style={{ fontSize: 19, color: "var(--ember)" }}>calendar_view_week</span>
-          <span style={{ fontWeight: 600, fontSize: 14 }}>Próximos 7 dias</span>
+          <span style={{ fontWeight: 600, fontSize: 14 }}>{t("dashboard.week.title")}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{mealsThisWeek} planeadas</span>
+          <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{t("dashboard.week.planned", { count: mealsThisWeek })}</span>
           <button onClick={navigateToMealPlanner} className="mono" style={{ fontSize: 11, color: "var(--ember)", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
-            Plano →
+            {t("dashboard.week.plan")}
           </button>
         </div>
       </div>
@@ -236,7 +243,7 @@ function WeekPanel({ upcomingMeals, mealsThisWeek, navigateToMealPlanner }: {
             {d.meals.slice(0, 2).map(m => (
               <div key={m.id} style={{ background: "var(--inset)", borderLeft: `2px solid ${MEAL_COLOR[m.meal_type] ?? "var(--ink-3)"}`, borderRadius: 4, padding: "5px 6px", cursor: "pointer" }} onClick={navigateToMealPlanner}>
                 <div style={{ fontSize: "10.5px", fontWeight: 600, color: "var(--ink)", lineHeight: 1.15 }}>{m.recipe_name}</div>
-                <div className="mono" style={{ fontSize: "8.5px", color: "var(--ink-3)" }}>{m.portions} por.</div>
+                <div className="mono" style={{ fontSize: "8.5px", color: "var(--ink-3)" }}>{m.portions} {t("dashboard.week.portions")}</div>
               </div>
             ))}
           </div>
@@ -246,36 +253,36 @@ function WeekPanel({ upcomingMeals, mealsThisWeek, navigateToMealPlanner }: {
   );
 }
 
-function PendingShoppingPanel({ pendingCount, navigateToShopping }: { pendingCount: number; navigateToShopping: () => void }) {
+function PendingShoppingPanel({ pendingCount, navigateToShopping, t }: { pendingCount: number; navigateToShopping: () => void; t: T }) {
   return (
     <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <div style={{ padding: "15px 19px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 8 }}>
         <span className="ms" style={{ fontSize: 19, color: "var(--ember)" }}>shopping_cart</span>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>Compras Pendentes</span>
+        <span style={{ fontWeight: 600, fontSize: 14 }}>{t("dashboard.pendingShopping.title")}</span>
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: "24px 19px" }}>
         <div className="mono" style={{ fontSize: 34, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>{pendingCount}</div>
-        <div style={{ fontSize: "12.5px", color: "var(--ink-2)" }}>itens por comprar</div>
+        <div style={{ fontSize: "12.5px", color: "var(--ink-2)" }}>{t("dashboard.pendingShopping.itemsToBuy")}</div>
       </div>
       <div style={{ padding: "13px 19px", borderTop: "1px solid var(--line-2)" }}>
-        <button className="btn btn-ghost btn-sm" style={{ width: "100%" }} onClick={navigateToShopping}>Ver lista completa</button>
+        <button className="btn btn-ghost btn-sm" style={{ width: "100%" }} onClick={navigateToShopping}>{t("dashboard.pendingShopping.viewFullList")}</button>
       </div>
     </div>
   );
 }
 
-function RecentActivityPanel({ activity }: { activity: ActivityItem[] }) {
+function RecentActivityPanel({ activity, t }: { activity: ActivityItem[]; t: T }) {
   return (
     <div className="card" style={{ padding: 0, overflow: "hidden" }}>
       <div style={{ padding: "15px 19px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 8 }}>
         <span className="ms" style={{ fontSize: 19, color: "var(--ink-2)" }}>history</span>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>Atividade Recente</span>
+        <span style={{ fontWeight: 600, fontSize: 14 }}>{t("dashboard.recentActivity.title")}</span>
       </div>
       {activity.length === 0 ? (
         <EmptyState
           icon={<span className="ms" style={{ fontSize: 32, color: "var(--ink-3)" }}>history</span>}
-          title="Sem actividade recente"
-          body="As tuas ações aparecerão aqui"
+          title={t("dashboard.recentActivity.empty")}
+          body={t("dashboard.recentActivity.emptyDesc")}
         />
       ) : (
         <div style={{ padding: "6px 19px 14px", maxHeight: 300, overflowY: "auto" }}>
@@ -286,7 +293,7 @@ function RecentActivityPanel({ activity }: { activity: ActivityItem[] }) {
                 <span className="ms" style={{ fontSize: 17, color: meta.color, marginTop: 1 }}>{meta.icon}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: "12.5px", color: "var(--ink)", lineHeight: 1.3 }}>{item.description}</div>
-                  <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 1 }}>{formatRelativeTime(item.timestamp)}</div>
+                  <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 1 }}>{formatRelativeTime(item.timestamp, t)}</div>
                 </div>
               </div>
             );
@@ -297,20 +304,20 @@ function RecentActivityPanel({ activity }: { activity: ActivityItem[] }) {
   );
 }
 
-function QuickActionsPanel({ navigateToMealPlanner, navigateToShopping, navigateToStock, navigateToRecipes }: {
-  navigateToMealPlanner: () => void; navigateToShopping: () => void; navigateToStock: () => void; navigateToRecipes: () => void;
+function QuickActionsPanel({ navigateToMealPlanner, navigateToShopping, navigateToStock, navigateToRecipes, t }: {
+  navigateToMealPlanner: () => void; navigateToShopping: () => void; navigateToStock: () => void; navigateToRecipes: () => void; t: T;
 }) {
   const actions = [
-    { icon: "calendar_view_week", label: "Criar Planeamento Semanal", onClick: navigateToMealPlanner },
-    { icon: "shopping_cart", label: "Nova Lista de Compras", onClick: navigateToShopping },
-    { icon: "inventory_2", label: "Verificar Stock", onClick: navigateToStock },
-    { icon: "menu_book", label: "Nova Receita", onClick: navigateToRecipes },
+    { icon: "calendar_view_week", label: t("dashboard.quickActions.weeklyPlan"), onClick: navigateToMealPlanner },
+    { icon: "shopping_cart", label: t("dashboard.quickActions.newShoppingList"), onClick: navigateToShopping },
+    { icon: "inventory_2", label: t("dashboard.quickActions.checkStock"), onClick: navigateToStock },
+    { icon: "menu_book", label: t("dashboard.quickActions.newRecipe"), onClick: navigateToRecipes },
   ];
   return (
     <div className="card" style={{ padding: 0, overflow: "hidden" }}>
       <div style={{ padding: "15px 19px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 8 }}>
         <span className="ms" style={{ fontSize: 19, color: "var(--ember)" }}>bolt</span>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>Ações Rápidas</span>
+        <span style={{ fontWeight: 600, fontSize: 14 }}>{t("dashboard.quickActions.title")}</span>
       </div>
       <div>
         {actions.map((a, i) => (
@@ -335,6 +342,7 @@ function QuickActionsPanel({ navigateToMealPlanner, navigateToShopping, navigate
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const { t } = useI18n();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [upcomingMeals, setUpcomingMeals] = useState<MealPlanEntryWithRecipe[]>([]);
@@ -355,11 +363,11 @@ export default function DashboardPage() {
       setUpcomingMeals(mealsData);
       setLowStock(lowStockData);
     } catch (e) {
-      showToast("Erro ao carregar dashboard", "err");
+      showToast(t("dashboard.error"), "err");
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   useEffect(() => {
     loadDashboard();
@@ -378,7 +386,7 @@ export default function DashboardPage() {
             <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
             <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
           </svg>
-          <p className="text-3">A carregar dashboard...</p>
+          <p className="text-3">{t("dashboard.loading")}</p>
         </div>
       </div>
     );
@@ -387,31 +395,32 @@ export default function DashboardPage() {
   return (
     <div className="content">
       <PageHeader
-        title="Dashboard"
-        subtitle="Visão geral da tua cozinha"
+        title={t("dashboard.title")}
+        subtitle={t("dashboard.subtitle")}
         actions={
           <button className="btn btn-primary" onClick={navigateToRecipes}>
             <span className="ms" style={{ fontSize: 14 }}>add</span>
-            Nova Receita
+            {t("dashboard.newRecipe")}
           </button>
         }
       />
 
-      <KpiRow stats={stats} navigateToStock={navigateToStock} navigateToShopping={navigateToShopping} />
+      <KpiRow stats={stats} navigateToStock={navigateToStock} navigateToShopping={navigateToShopping} t={t} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1.05fr 1.35fr", gap: 16, marginBottom: 16 }}>
-        <AlertsPanel lowStock={lowStock} navigateToShopping={navigateToShopping} />
-        <WeekPanel upcomingMeals={upcomingMeals} mealsThisWeek={stats?.meals_this_week ?? 0} navigateToMealPlanner={navigateToMealPlanner} />
+        <AlertsPanel lowStock={lowStock} navigateToShopping={navigateToShopping} t={t} />
+        <WeekPanel upcomingMeals={upcomingMeals} mealsThisWeek={stats?.meals_this_week ?? 0} navigateToMealPlanner={navigateToMealPlanner} t={t} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
-        <PendingShoppingPanel pendingCount={stats?.pending_shopping_items ?? 0} navigateToShopping={navigateToShopping} />
-        <RecentActivityPanel activity={activity} />
+        <PendingShoppingPanel pendingCount={stats?.pending_shopping_items ?? 0} navigateToShopping={navigateToShopping} t={t} />
+        <RecentActivityPanel activity={activity} t={t} />
         <QuickActionsPanel
           navigateToMealPlanner={navigateToMealPlanner}
           navigateToShopping={navigateToShopping}
           navigateToStock={navigateToStock}
           navigateToRecipes={navigateToRecipes}
+          t={t}
         />
       </div>
     </div>
