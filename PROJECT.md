@@ -66,6 +66,27 @@ bloqueantes, antes de qualquer feature nova.
   Ainda não usado em `src/` (confirmado 2026-07).
 - [ ] Limpeza do `mise.db` órfão (ficheiro antigo num path diferente do
   atual).
+- [ ] **Bug: câmara não abre no Scanner de recibos** (sessão de 2026-07-05,
+  máquina de desenvolvimento Ubuntu + Nix misturados — mesma família de
+  problema que o fix de EGL/TLS acima). Sintoma: `getUserMedia` falha
+  sempre, WebKitGTK reporta no terminal `GStreamer element appsink not
+  found` e `Video capture was requested but no device was found amongst 0
+  devices`, apesar de `/dev/video0` existir e `gst-inspect-1.0` encontrar
+  `appsink`/`v4l2src` normalmente a partir do shell. Já testado sem
+  resolver: `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` (elimina o erro de
+  sandbox mas não este), instalar `libssl-dev` +
+  `libwebkit2gtk-4.1-dev`/`libgtk-3-dev` via apt (resolveu erros de
+  compilação `openssl-sys`/`glib-sys` em separado, não o da câmara), e
+  apontar `PKG_CONFIG_PATH` manualmente (o `pkg-config` ativo por omissão
+  nesta máquina é o do Nix, que não vê os `.pc` instalados pelo apt em
+  `/usr/lib/x86_64-linux-gnu/pkgconfig` — mistura Nix/apt torna o ambiente
+  de build inconsistente, à parte do bug da câmara em si). Hipótese por
+  confirmar: sandbox do WebKitGTK bloqueia o *device discovery* do
+  GStreamer mesmo com `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` (essa
+  flag pode não cobrir o processo GStreamer/pipewire), ou falta o portal
+  `xdg-desktop-portal` para concessão de câmara em apps sandboxed. Não
+  bloqueante para o resto da app — o resto do Scanner (upload manual de
+  imagem + OCR) não depende disto.
 
 ---
 
