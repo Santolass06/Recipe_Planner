@@ -191,6 +191,65 @@ Documentado aqui, **não implementado ainda**:
 
 ---
 
+## OCR — Digitalização de recibos
+
+Duas abordagens exploradas em branches separadas (sessão de 2026-07-05),
+ambas substituindo o `tesseract.js` + fallback mock anterior. Nenhuma
+integrada em `main` ainda — branches de exploração apagadas depois de
+documentado aqui; para retomar, reimplementar a partir desta descrição.
+
+- **Nativa (Rust, `ocrs` + `rten`)**: motor de OCR neural embutido no
+  binário, sem processo externo. Descarrega os modelos de deteção/
+  reconhecimento automaticamente para o diretório de dados da app no
+  primeiro uso, depois corre 100% offline. Usa `strsim` para fuzzy matching
+  na fase de parsing dos itens do recibo. Contra: `ocrs` só extrai texto
+  bruto — os campos estruturados (nome, quantidade, preço) continuam a
+  depender de heurísticas de parsing escritas à mão.
+- **Vision LLM local (Ollama + modelo `moondream`)**: arranca um daemon
+  Ollama em background automaticamente, garante o modelo descarregado, e
+  pede extração estruturada (JSON com nome/quantidade/unidade/preço/
+  desconto) diretamente ao modelo a partir da imagem do recibo. A favor:
+  mais robusto a variação de layout de recibo, não precisa de parsing
+  manual. Contra: depende de runtime externo (Ollama) instalado e a
+  correr, download de modelo maior, inferência mais lenta e mais pesada em
+  RAM que a opção nativa.
+
+**Decisão:** por fechar. Nenhuma das duas foi validada visualmente ainda.
+Critério sugerido para decidir: se a precisão de parsing da opção nativa
+for aceitável nos recibos reais de teste, preferir essa (sem dependência
+externa); caso contrário, avaliar o custo de exigir Ollama instalado.
+
+## Tradução de vocabulário (unidades, ingredientes, passos)
+
+Problema: dados semeados/inseridos ficam fixos na língua em que foram
+escritos independentemente do toggle PT/EN (ex.: `Unit::name_pt()` e os
+dicionários de unidade duplicados em `StockPage`/`IngredientsPage`/
+`RecipesPage`/`CostsPage` devolvem sempre PT; `suppliers.notes` é texto
+livre semeado em PT). Discussão de 2026-07-05 dividiu o problema em três
+níveis de dificuldade, cada um numa branch de exploração própria (mesmo
+padrão do OCR):
+
+- **Unidades** (`feature/i18n/units-dict`) — vocabulário fechado (~20
+  valores do enum `Unit`). Trivial: um único dicionário PT/EN
+  (`src/i18n/units.ts`) consumido via `useI18n()`, substituindo os 4
+  dicionários duplicados hardcoded.
+- **Ingredientes** (`feature/i18n/ingredients-dict`) — vocabulário
+  quase-fechado (algumas centenas de nomes comuns). Dicionário PT↔EN
+  curado para os casos comuns + fallback para o texto original quando o
+  ingrediente não está no dicionário (não forçar tradução de texto livre
+  do utilizador).
+- **Passos de receita** (`feature/i18n/steps-onnx-mt`) — texto livre em
+  frases completas, um dicionário palavra-a-palavra não produz gramática
+  correta. Rejeitado: tradução via LLM de chat (custo/latência por
+  chamada). Opção a explorar: modelo de tradução neural leve local via
+  ONNX (ex. família OPUS-MT/Helsinki-NLP, ~300MB), reaproveitando o
+  runtime ONNX já introduzido na exploração de OCR nativo. Alternativa:
+  motor de tradução por regras offline (Apertium, par PT↔EN). Não
+  decidido se vale a pena face ao esforço — avaliar depois das duas
+  branches anteriores fechadas.
+
+---
+
 ## Workflow
 
 A partir da sessão de i18n (2026-07-04): cada tarefa/feature nova segue este
