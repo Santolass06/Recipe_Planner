@@ -240,22 +240,39 @@ fornecedor).
   (evita falsos alertas), com possibilidade de ver o detalhe por
   marca/fornecedor.
 
-**Decisões a fechar antes de implementar:**
-1. Qual preço/lote usar ao calcular o custo de uma receita quando há várias
-   marcas em stock? Opções: média ponderada pela quantidade em stock, mais
-   barato primeiro, mais caro primeiro, ou tirar proporcionalmente de todos
-   os lotes (nota: esta última é também uma política de *consumo* de stock,
-   decrementa vários lotes ao mesmo tempo, ao contrário das outras três).
-2. Âmbito da escolha da estratégia — sugestão: global (Settings) como
-   default na primeira versão, com possível override por ingrediente
-   depois. Evitar seletor por-cálculo já na primeira versão.
-3. Onde vive a marca: confirmado — liga-se ao preço/compra
-   (`price_quote`/`purchase`), não é um campo simples no ingrediente, porque
-   precisa de suportar o cruzamento marca × fornecedor × preço × stock.
-   Ver [[Purchase sources architecture]] — hoje `shopping_list_items` e
-   `stock_purchases` não partilham `supplier_id`, o relatório `by_supplier`
-   usa só `stock_purchases` e não reconcilia com `total_spent`; este desenho
-   tem de resolver essa divergência, não empilhar-lhe em cima.
+**Decisões fechadas (2026-07-06):**
+1. **Política de custo:** média ponderada pela quantidade em stock. Reflete o
+   custo real do mix guardado; mais barato/mais caro primeiro distorcem o
+   custo real, e a política proporcional confunde cálculo de custo com
+   política de *consumo* de stock (decrementa vários lotes ao mesmo tempo).
+   → Comparação com dados reais das outras 3 políticas fica para
+   [[#Fase de Polishing]].
+2. **Âmbito:** global (Settings) como default, override por ingrediente
+   fica para depois. Sem seletor por-cálculo na v1.
+3. **Onde vive a marca e caminho único para o stock subir:** confirmado —
+   auditoria ao código (2026-07-06) mostrou que a divergência é maior do que
+   documentado antes: `price_quotes.supplier` é texto livre (sem FK),
+   `shopping_list_toggle_item` só liga uma flag (não cria stock_purchase,
+   não atualiza stock, não regista fornecedor), e o único INSERT em
+   `stock_purchases` vindo da confirmação de importação de recibo
+   (`db.rs:4383`) nem preenche `supplier_id` — fica sempre NULL. Só o
+   caminho manual (`stock_purchase_add`) faz tudo corretamente hoje.
+   **Decisão: convergir em `stock_purchases` como único evento que sobe
+   stock** — já tem a forma certa (ingrediente + quantidade + preço +
+   `supplier_id` + data = lote), evita empilhar uma terceira representação
+   sobre as duas já divergentes. `price_quotes.supplier` mantém-se texto
+   livre por agora (catálogo de referência solto, não um lote real) —
+   não é bloqueador do 3.1.
+   Ao implementar: corrigir o `supplier_id` NULL na importação de recibo;
+   ligar `shopping_list_toggle_item` a criar um lote real (deixa de ser só
+   flag, passa a pedir/confirmar marca+fornecedor+preço, pré-preenchido com
+   a estimativa); e definir convenção para evitar duplicar stock quando a
+   mesma compra é registada por dois caminhos (lista de compras vs. recibo
+   da mesma ida às compras) — por agora, convenção de utilização (usar um
+   ou outro por compra, não os dois), sem reconciliação automática.
+   → Comparar com dados reais as alternativas descartadas (manter dois
+   caminhos separados / reconciliação automática lista↔recibo) fica para
+   [[#Fase de Polishing]].
 
 **Impacto:** Ingredientes, Stock, Compras, Custos, Fornecedores, Relatórios.
 
@@ -369,6 +386,33 @@ padrão do OCR):
   motor de tradução por regras offline (Apertium, par PT↔EN). Não
   decidido se vale a pena face ao esforço — avaliar depois das duas
   branches anteriores fechadas.
+
+---
+
+## Fase de Polishing
+
+Depois da Fase 3 (features estruturantes) e com a app estável para a
+madrinha testar, esta fase serve para decidir com dados reais e casos de
+uso reais o que hoje ficou decidido "no papel" ou por heurística. Não é
+trabalho novo — é validar/comparar decisões já tomadas.
+
+- **Política de custo alternativa (3.1)** — 3.1 implementa média ponderada.
+  Implementar também mais barato primeiro, mais caro primeiro, e
+  proporcional, e comparar os 4 resultados com o stock e histórico de
+  compras reais da madrinha para confirmar se a média ponderada continua a
+  ser a melhor escolha ou se um caso de uso concreto pede outra.
+- **Caminho lista↔recibo alternativo (3.1)** — 3.1 converge tudo em
+  `stock_purchases` com convenção de "um caminho por compra" (sem
+  reconciliação automática). Testar com uso real se isto basta, ou se
+  aparecem casos de duplicação/perda de stock que justifiquem manter dois
+  caminhos separados com `supplier_id` próprio, ou implementar
+  reconciliação automática lista↔recibo.
+- **Tradução de vocabulário** (unidades, ingredientes, passos de receita) —
+  ver [[Tradução de vocabulário (unidades, ingredientes, passos)]]. Unidades
+  ainda aparecem em PT independentemente do toggle de língua.
+- **Escolha de motor de OCR** — ver [[OCR — Digitalização de recibos]].
+  Precisa de teste com recibos reais para decidir entre nativo (Rust) e
+  Vision LLM local.
 
 ---
 
