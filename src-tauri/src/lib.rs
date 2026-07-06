@@ -1,7 +1,4 @@
-use mise_core::*;
 use mise_tauri;
-use mise_tauri::AppDb;
-use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
