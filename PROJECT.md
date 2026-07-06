@@ -135,19 +135,19 @@ denso, amber `#f5a524`, tabular numbers) como base.
 
 Dos 5 itens, 3 fechados (warnings, CSP, dedup de unidades). Os 2 restantes
 foram deliberadamente adiados, não esquecidos — cada um depende de uma
-decisão do André, não é algo a decidir autonomamente:
+decisão de produto, não é algo a decidir autonomamente:
 
 - **Migração de OCR** — a escolha entre nativo (Rust `ocrs`/`rten`) e
   Vision LLM local está documentada como "por fechar" em
   [[OCR — Digitalização de recibos]], à espera de teste com recibos reais.
-  Implementar qualquer uma agora seria decidir por ele.
+  Implementar qualquer uma agora seria decidir prematuramente.
 - **Refactor dos god-components** — puramente estrutural, sem mudança de
   comportamento, em 4 componentes grandes sem testes de frontend; o maior
   risco é regressão silenciosa (stale closures, effects, handlers mal
   religados) que só um teste visual exaustivo apanharia. Prioridade
-  combinada: ter a app estável para a madrinha testar vem primeiro.
-  Retomar depois da Fase 3, ou antes se o feedback da madrinha apontar
-  para uma das páginas grandes especificamente.
+  combinada: ter a app estável para utilizadores finais testarem vem
+  primeiro. Retomar depois da Fase 3, ou antes se feedback de utilização
+  apontar para uma das páginas grandes especificamente.
 
 - [x] **Limpar os ~466 warnings do Rust.** 441 eram `missing_docs`
   (`#![warn(missing_docs)]` em `crates/core/src/lib.rs`) sobre campos
@@ -168,8 +168,8 @@ decisão do André, não é algo a decidir autonomamente:
   `cdn.jsdelivr.net` em `connect-src` é temporário — o `tesseract.js`
   descarrega dali o worker script e os dados de língua por omissão;
   remover quando a migração de OCR para crate Rust nativo (item abaixo)
-  acontecer. Durante a validação (`cargo tauri dev`, confirmação visual
-  do André) descoberto e corrigido um bug real, não relacionado com CSP
+  acontecer. Durante a validação (`cargo tauri dev`, confirmação visual)
+  descoberto e corrigido um bug real, não relacionado com CSP
   mas que a CSP obrigou a resolver para poder escrever `img-src`
   corretamente: `ImageUpload.tsx` construía a pré-visualização de imagem
   com `http://localhost:8080/${image.path}` — não existe (nem nunca
@@ -188,7 +188,7 @@ decisão do André, não é algo a decidir autonomamente:
   identicamente em `SettingsPage.tsx` e `HelpPage.tsx`. Movida para
   `src/lib/devInvoke.ts` (já é o módulo partilhado de `invoke`), ambas
   as páginas importam de lá agora.
-- [ ] **Adiado, decisão do André.** Migrar OCR de `tesseract.js` (client-side)
+- [ ] **Adiado, decisão de produto pendente.** Migrar OCR de `tesseract.js` (client-side)
   para crate Rust nativo. Não substituir por API externa sem decisão
   explícita (privacidade/local-first) — ver [[OCR — Digitalização de
   recibos]] para as duas abordagens já exploradas.
@@ -217,7 +217,7 @@ decisão do André, não é algo a decidir autonomamente:
      outras páginas mostravam `"pcs"` — inconsistência real entre
      páginas, escondida pela duplicação. Uniformizado para `"pcs"`.
   Validado com `npx tsc --noEmit`, `npm run build`, e confirmação
-  visual do André (Ingredientes/Receitas/Stock/Compras).
+  visual (Ingredientes/Receitas/Stock/Compras).
 
 ---
 
@@ -302,7 +302,7 @@ fornecedor).
 
 ### 3.3 — Stock isolado por evento (proposto, não decidido)
 
-Pedido do André após testar o 3.2: um evento poder ter também ingredientes
+Requisito levantado após teste do 3.2: um evento poder ter também ingredientes
 exclusivos e stock isolado do catálogo principal — e ao confirmar um recibo
 (scanner ou manual) poder escolher se a compra alimenta o stock normal ou o
 stock de um evento específico.
@@ -333,16 +333,16 @@ por evento implica escolher entre dois modelos com custos bem diferentes:
 3. Custo de receita (`calculate_cost`) de uma receita de evento: usa o
    weighted-average do stock do evento, do catálogo, ou combina os dois?
 
-**Estado:** só implementar quando o André decidir avançar — não começar sem
-essa conversa de design.
+**Estado:** só implementar após decisão explícita de avançar — não começar
+sem essa conversa de design.
 
 ---
 
 ### 3.4 — Importar receita por URL (proposto, a aprovar)
 
-**Pedido do André (2026-07-06):** uma app que a madrinha já usa permite colar
-o URL de uma receita (ex. NYT Cooking) e descarregá-la automaticamente para
-a app. Avaliado antes de planear: exequível.
+**Motivação (2026-07-06):** paridade com aplicações de referência do setor
+que permitem colar o URL de uma receita (ex. NYT Cooking) e importá-la
+diretamente, sem transcrição manual. Avaliado antes de planear: exequível.
 
 **Viabilidade confirmada (2026-07-06):** testado com uma página real da NYT
 Cooking (`cooking.nytimes.com/recipes/1020044-vegetable-paella-with-chorizo`).
@@ -388,14 +388,13 @@ dependência nova necessária.
 - Download automático da imagem para `image_base64` — fica só o URL de
   referência na primeira iteração.
 
-**Decisões a confirmar com o André antes de implementar:**
+**Decisões a confirmar antes de implementar:**
 1. Âmbito do MVP acima (parse read-only + pré-preencher formulário
    existente, sem gravação automática nem download de imagem) — aprovado?
 2. Fallback sem JSON-LD Recipe: aceitável mostrar erro e pedir preenchimento
    manual (sem 2ª estratégia de scraping)?
 
-**Estado:** a aguardar aprovação do André. Não implementar sem confirmação
-explícita.
+**Estado:** a aguardar aprovação. Não implementar sem confirmação explícita.
 
 ---
 
@@ -485,16 +484,16 @@ padrão do OCR):
 
 ## Fase de Polishing
 
-Depois da Fase 3 (features estruturantes) e com a app estável para a
-madrinha testar, esta fase serve para decidir com dados reais e casos de
-uso reais o que hoje ficou decidido "no papel" ou por heurística. Não é
-trabalho novo — é validar/comparar decisões já tomadas.
+Depois da Fase 3 (features estruturantes) e com a app estável para
+utilizadores finais testarem, esta fase serve para decidir com dados reais
+e casos de uso reais o que hoje ficou decidido "no papel" ou por
+heurística. Não é trabalho novo — é validar/comparar decisões já tomadas.
 
 - **Política de custo alternativa (3.1)** — 3.1 implementa média ponderada.
   Implementar também mais barato primeiro, mais caro primeiro, e
   proporcional, e comparar os 4 resultados com o stock e histórico de
-  compras reais da madrinha para confirmar se a média ponderada continua a
-  ser a melhor escolha ou se um caso de uso concreto pede outra.
+  compras reais para confirmar se a média ponderada continua a ser a
+  melhor escolha ou se um caso de uso concreto pede outra.
 - **Caminho lista↔recibo alternativo (3.1)** — 3.1 converge tudo em
   `stock_purchases` com convenção de "um caminho por compra" (sem
   reconciliação automática). Testar com uso real se isto basta, ou se
@@ -520,7 +519,7 @@ fluxo, sem exceções:
 3. Validar: `cargo check --workspace`, `cargo test --workspace` (quando
    aplicável), `npx tsc --noEmit`, `npm run build`, teste visual via
    `cargo tauri dev`.
-4. Confirmação visual do André.
+4. Confirmação visual da funcionalidade.
 5. `git merge --no-ff` para `main` → push.
 
 Nunca trabalhar diretamente em `main`.
