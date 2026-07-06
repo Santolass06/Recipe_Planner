@@ -178,8 +178,27 @@ denso, amber `#f5a524`, tabular numbers) como base.
   (~824 linhas), `MealPlannerPage` (~719 linhas), `ReportsPage` (~871 linhas).
 - [x] Página de Ajuda com conteúdo real — `HelpPage.tsx` já tem conteúdo
   próprio (secções por módulo + links úteis), não é placeholder.
-- [ ] Duplicação de `UNIT_LABELS`/`UNIT_SHORT` (mapas de unidade→abreviatura)
-  repetida em ~8 páginas — candidato a módulo partilhado.
+- [x] **Duplicação de `UNIT_LABELS`/`UNIT_SHORT`.** Consolidada em
+  `src/lib/units.ts` (`UNIT_LABELS_FULL` "símbolo — nome" para
+  dropdowns, `UNIT_LABELS_SHORT` derivado para células de tabela),
+  importado em `CostsPage`, `DashboardPage`, `IngredientsPage`,
+  `RecipesPage`, `ReportsPage`, `ShoppingListPage`, `StockPage`.
+  `ReceiptScannerPage` ficou de fora — usa um vocabulário diferente
+  (pack/bottle/box/can/jar/sachet) que não corresponde ao enum `Unit`
+  real do backend, é heurística de parsing de OCR, fora do âmbito desta
+  limpeza. Dois achados reais durante a consolidação:
+  1. `IngredientsPage.tsx` e `RecipesPage.tsx` tinham um grupo "Outro"
+     no seletor de unidade com `centimeter`/`celsius`/`fahrenheit` —
+     nenhum destes existe no enum `Unit` do backend (só 20 variantes,
+     de `Gram` a `Slice`); escolher qualquer um deles falharia ao
+     guardar (`serde` rejeita variante desconhecida). Grupo removido,
+     chave de tradução `ingredients.unitGroups.other` removida de
+     `en.ts`/`pt.ts`.
+  2. `RecipesPage.tsx` mostrava `piece` como `"un"` enquanto todas as
+     outras páginas mostravam `"pcs"` — inconsistência real entre
+     páginas, escondida pela duplicação. Uniformizado para `"pcs"`.
+  Validado com `npx tsc --noEmit`, `npm run build`, e confirmação
+  visual do André (Ingredientes/Receitas/Stock/Compras).
 
 ---
 

@@ -11,18 +11,9 @@ import { useI18n } from "../i18n";
 import type { ShoppingItem } from "../../crates/core/bindings/ShoppingItem";
 import type { ShoppingList } from "../../crates/core/bindings/ShoppingList";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
+import { UNIT_LABELS_SHORT as UNIT_LABELS } from "../lib/units";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
-
-const UNIT_LABELS: Record<string, string> = {
-  gram: "g", kilogram: "kg", milligram: "mg",
-  ounce: "oz", pound: "lb",
-  milliliter: "ml", liter: "l", fluid_ounce: "fl oz",
-  cup: "cup", pint: "pt", quart: "qt", gallon: "gal",
-  teaspoon: "tsp", tablespoon: "tbsp",
-  piece: "pcs", dozen: "dz",
-  pinch: "pitada", bunch: "molho", clove: "dente", slice: "fatia",
-};
 
 const CATEGORIES = [
   "Hortícolas", "Frutas", "Carnes e Peixes", "Lacticínios",

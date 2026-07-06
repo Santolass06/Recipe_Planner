@@ -7,6 +7,7 @@ import { useI18n } from "../i18n";
 import type { RecipeWithIngredients as Recipe } from "../../crates/core/bindings/RecipeWithIngredients";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import type { CostBreakdown } from "../../crates/core/bindings/CostBreakdown";
+import { UNIT_LABELS_SHORT } from "../lib/units";
 
 // Cálculo só no frontend (não há endpoint de análise de margem no backend) —
 // sem binding correspondente.
@@ -20,20 +21,7 @@ interface CostAnalysis {
   profit_total: number;
 }
 
-const UNIT_LABELS: Record<string, string> = {
-  gram: "g — Grama", kilogram: "kg — Quilograma", milligram: "mg — Miligrama",
-  ounce: "oz — Onça", pound: "lb — Libra", pinch: "pitada — Pitada",
-  bunch: "molho — Molho", clove: "dente — Dente", slice: "fatia — Fatia",
-  milliliter: "ml — Mililitro", liter: "l — Litro",
-  fluid_ounce: "fl oz — Fluid Ounce", cup: "cup — Chávena",
-  pint: "pt — Pint", quart: "qt — Quart", gallon: "gal — Galão",
-  teaspoon: "tsp — Colher de chá", tablespoon: "tbsp — Colher de sopa",
-  piece: "pcs — Peça", dozen: "dz — Dúzia",
-  centimeter: "cm — Centímetro", celsius: "°C — Celsius",
-  fahrenheit: "°F — Fahrenheit",
-};
-
-const shortUnit = (unit: string) => (UNIT_LABELS[unit] ?? unit).split(" — ")[0];
+const shortUnit = (unit: string) => UNIT_LABELS_SHORT[unit] ?? unit;
 
 const eur = (n: number) => `€${n.toFixed(2)}`;
 
