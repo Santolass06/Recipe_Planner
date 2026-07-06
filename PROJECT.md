@@ -131,7 +131,23 @@ denso, amber `#f5a524`, tabular numbers) como base.
 
 ---
 
-## Fase 2 — Higiene técnica
+## Fase 2 — Higiene técnica — encerrada com 2 itens adiados (2026-07-06)
+
+Dos 5 itens, 3 fechados (warnings, CSP, dedup de unidades). Os 2 restantes
+foram deliberadamente adiados, não esquecidos — cada um depende de uma
+decisão do André, não é algo a decidir autonomamente:
+
+- **Migração de OCR** — a escolha entre nativo (Rust `ocrs`/`rten`) e
+  Vision LLM local está documentada como "por fechar" em
+  [[OCR — Digitalização de recibos]], à espera de teste com recibos reais.
+  Implementar qualquer uma agora seria decidir por ele.
+- **Refactor dos god-components** — puramente estrutural, sem mudança de
+  comportamento, em 4 componentes grandes sem testes de frontend; o maior
+  risco é regressão silenciosa (stale closures, effects, handlers mal
+  religados) que só um teste visual exaustivo apanharia. Prioridade
+  combinada: ter a app estável para a madrinha testar vem primeiro.
+  Retomar depois da Fase 3, ou antes se o feedback da madrinha apontar
+  para uma das páginas grandes especificamente.
 
 - [x] **Limpar os ~466 warnings do Rust.** 441 eram `missing_docs`
   (`#![warn(missing_docs)]` em `crates/core/src/lib.rs`) sobre campos
@@ -172,10 +188,13 @@ denso, amber `#f5a524`, tabular numbers) como base.
   identicamente em `SettingsPage.tsx` e `HelpPage.tsx`. Movida para
   `src/lib/devInvoke.ts` (já é o módulo partilhado de `invoke`), ambas
   as páginas importam de lá agora.
-- [ ] Migrar OCR de `tesseract.js` (client-side) para crate Rust nativo. Não
-  substituir por API externa sem decisão explícita (privacidade/local-first).
-- [ ] Refatorar god-components: `ShoppingListPage` (~858 linhas), `RecipesPage`
-  (~824 linhas), `MealPlannerPage` (~719 linhas), `ReportsPage` (~871 linhas).
+- [ ] **Adiado, decisão do André.** Migrar OCR de `tesseract.js` (client-side)
+  para crate Rust nativo. Não substituir por API externa sem decisão
+  explícita (privacidade/local-first) — ver [[OCR — Digitalização de
+  recibos]] para as duas abordagens já exploradas.
+- [ ] **Adiado, depois da Fase 3.** Refatorar god-components:
+  `ShoppingListPage` (~835 linhas), `RecipesPage` (~794 linhas),
+  `MealPlannerPage` (~666 linhas), `ReportsPage` (~785 linhas).
 - [x] Página de Ajuda com conteúdo real — `HelpPage.tsx` já tem conteúdo
   próprio (secções por módulo + links úteis), não é placeholder.
 - [x] **Duplicação de `UNIT_LABELS`/`UNIT_SHORT`.** Consolidada em
