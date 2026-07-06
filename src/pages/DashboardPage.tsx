@@ -10,6 +10,7 @@ import type { DashboardStats } from "../../crates/core/bindings/DashboardStats";
 import type { ActivityItem } from "../../crates/core/bindings/ActivityItem";
 import type { MealPlanEntryWithRecipe } from "../../crates/core/bindings/MealPlanEntryWithRecipe";
 import type { StockItemWithIngredient } from "../../crates/core/bindings/StockItemWithIngredient";
+import { UNIT_LABELS_SHORT as UNIT_LABELS } from "../lib/units";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -20,16 +21,6 @@ const getDowShort = (t: T) => [
 
 const MEAL_COLOR: Record<string, string> = {
   breakfast: "var(--amber)", lunch: "var(--green)", dinner: "var(--ember)", snack: "var(--approx)"
-};
-
-const UNIT_LABELS: Record<string, string> = {
-  gram: "g", kilogram: "kg", milligram: "mg",
-  ounce: "oz", pound: "lb",
-  milliliter: "ml", liter: "l", fluid_ounce: "fl oz",
-  cup: "cup", pint: "pt", quart: "qt", gallon: "gal",
-  teaspoon: "tsp", tablespoon: "tbsp",
-  piece: "pcs", dozen: "dz",
-  pinch: "pitada", bunch: "molho", clove: "dente", slice: "fatia",
 };
 
 const formatEur = (n: number) =>

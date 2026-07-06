@@ -12,21 +12,9 @@ import type { StockItem } from "../../crates/core/bindings/StockItem";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import type { Supplier } from "../../crates/core/bindings/Supplier";
 import type { StockPurchase } from "../../crates/core/bindings/StockPurchase";
+import { UNIT_LABELS_FULL as UNIT_LABELS } from "../lib/units";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
-
-const UNIT_LABELS: Record<string, string> = {
-  gram: "g — Grama", kilogram: "kg — Quilograma", milligram: "mg — Miligrama",
-  ounce: "oz — Onça", pound: "lb — Libra", pinch: "pitada — Pitada",
-  bunch: "molho — Molho", clove: "dente — Dente", slice: "fatia — Fatia",
-  milliliter: "ml — Mililitro", liter: "l — Litro",
-  fluid_ounce: "fl oz — Fluid Ounce", cup: "cup — Chávena",
-  pint: "pt — Pint", quart: "qt — Quart", gallon: "gal — Galão",
-  teaspoon: "tsp — Colher de chá", tablespoon: "tbsp — Colher de sopa",
-  piece: "pcs — Peça", dozen: "dz — Dúzia",
-  centimeter: "cm — Centímetro", celsius: "°C — Celsius",
-  fahrenheit: "°F — Fahrenheit",
-};
 
 const getStatus = (quantity: number, min: number, t: T) => {
   if (quantity <= 0) return { label: t("stock.statusOut"), status: "out" as const };

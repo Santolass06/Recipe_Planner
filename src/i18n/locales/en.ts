@@ -310,7 +310,6 @@ export const en = {
       volume: "Volume",
       culinary: "Culinary",
       count: "Count",
-      other: "Other",
     },
     loadError: "Error loading ingredients",
     created: "Ingredient created",

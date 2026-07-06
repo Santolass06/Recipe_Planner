@@ -10,6 +10,7 @@ import SearchBar from "../components/ui/SearchBar";
 import { useI18n } from "../i18n";
 import type { RecipeWithIngredients as Recipe } from "../../crates/core/bindings/RecipeWithIngredients";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
+import { UNIT_LABELS_FULL as UNIT_LABELS, UNIT_LABELS_SHORT as UNIT_SHORT } from "../lib/units";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -18,29 +19,7 @@ const getUnitGroups = (t: T) => [
   { label: t("ingredients.unitGroups.volume"), units: ["milliliter", "liter", "fluid_ounce", "cup", "pint", "quart", "gallon"] },
   { label: t("ingredients.unitGroups.culinary"), units: ["teaspoon", "tablespoon"] },
   { label: t("ingredients.unitGroups.count"), units: ["piece", "dozen"] },
-  { label: t("ingredients.unitGroups.other"), units: ["centimeter", "celsius", "fahrenheit"] },
 ];
-
-const UNIT_LABELS: Record<string, string> = {
-  gram: "g — Grama", kilogram: "kg — Quilograma", milligram: "mg — Miligrama",
-  ounce: "oz — Onça", pound: "lb — Libra", pinch: "pitada — Pitada",
-  bunch: "molho — Molho", clove: "dente — Dente", slice: "fatia — Fatia",
-  milliliter: "ml — Mililitro", liter: "l — Litro",
-  fluid_ounce: "fl oz — Fluid Ounce", cup: "cup — Chávena",
-  pint: "pt — Pint", quart: "qt — Quart", gallon: "gal — Galão",
-  teaspoon: "tsp — Colher de chá", tablespoon: "tbsp — Colher de sopa",
-  piece: "pcs — Peça", dozen: "dz — Dúzia",
-  centimeter: "cm — Centímetro", celsius: "°C — Celsius",
-  fahrenheit: "°F — Fahrenheit",
-};
-
-const UNIT_SHORT: Record<string, string> = {
-  gram: "g", kilogram: "kg", milligram: "mg", ounce: "oz", pound: "lb",
-  pinch: "pitada", bunch: "molho", clove: "dente", slice: "fatia",
-  milliliter: "ml", liter: "l", fluid_ounce: "fl oz", cup: "cup",
-  pint: "pt", quart: "qt", gallon: "gal", teaspoon: "tsp", tablespoon: "tbsp",
-  piece: "un", dozen: "dz", centimeter: "cm", celsius: "°C", fahrenheit: "°F",
-};
 
 const CATEGORIES = [
   "Entrada", "Prato principal", "Sobremesa", "Acompanhamento",

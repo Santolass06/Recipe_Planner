@@ -310,7 +310,6 @@ export const pt = {
       volume: "Volume",
       culinary: "Culinário",
       count: "Contagem",
-      other: "Outros",
     },
     loadError: "Erro ao carregar ingredientes",
     created: "Ingrediente criado",

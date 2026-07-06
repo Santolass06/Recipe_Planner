@@ -9,6 +9,7 @@ import type { WasteReport } from "../../crates/core/bindings/WasteReport";
 import type { StockSnapshot } from "../../crates/core/bindings/StockSnapshot";
 import type { MealStats } from "../../crates/core/bindings/MealStats";
 import type { PricePoint } from "../../crates/core/bindings/PricePoint";
+import { UNIT_LABELS_SHORT as UNIT_LABELS } from "../lib/units";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -132,18 +133,6 @@ const getMealTypeLabels = (t: T): Record<string, string> => ({
   dinner: t("calendar.meals.dinner"),
   snack: t("calendar.meals.snack"),
 });
-
-const UNIT_LABELS: Record<string, string> = {
-  gram: "g", kilogram: "kg", milligram: "mg",
-  ounce: "oz", pound: "lb",
-  milliliter: "ml", liter: "l", fluid_ounce: "fl oz",
-  cup: "cup", pint: "pt", quart: "qt", gallon: "gal",
-  teaspoon: "tsp", tablespoon: "tbsp",
-  piece: "pcs", dozen: "dz",
-  pinch: "pitada", bunch: "molho", clove: "dente", slice: "fatia",
-};
-
-
 
 function CostsTab({ costReport, days, t }: { costReport: CostReport | null; days: number; t: T }) {
   if (!costReport || !costReport.total_spent) return <div className="empty" style={{ minHeight: 200 }}>{t("reports.noData")}</div>;
