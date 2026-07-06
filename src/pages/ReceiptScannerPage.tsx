@@ -3,6 +3,7 @@ import { invoke } from "../lib/devInvoke";
 import { useToast } from "../components/ui/Toast";
 import { createWorker } from "tesseract.js";
 import PageHeader from "../components/ui/PageHeader";
+import { useI18n } from "../i18n";
 
 interface Ingredient {
   id: number;
@@ -55,7 +56,8 @@ export default function ReceiptScannerPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [selectedSupplier, setSelectedSupplier] = useState<number | "">("");
   const [processing, setProcessing] = useState(false);
-  const [ocrProgress, setOcrProgress] = useState<string>("Aguardar imagem…");
+  const { t } = useI18n();
+  const [ocrProgress, setOcrProgress] = useState<string>(t("receiptScanner.ocr.waitingImage"));
   const { showToast } = useToast();
   const [showResults, setShowResults] = useState(false);
   const [importSummary, setImportSummary] = useState<{ count: number; total: number } | null>(null);
@@ -85,10 +87,10 @@ export default function ReceiptScannerPage() {
         },
       });
       workerRef.current = worker;
-      setOcrProgress("Modelo OCR pronto");
+      setOcrProgress(t("receiptScanner.ocr.modelReady"));
     } catch (e) {
-      setOcrProgress("Erro ao carregar OCR");
-      showToast("Falha ao inicializar Tesseract.js", "err");
+      setOcrProgress(t("receiptScanner.ocr.modelError"));
+      showToast(t("receiptScanner.ocr.initError"), "err");
     }
   };
 
@@ -96,14 +98,14 @@ export default function ReceiptScannerPage() {
     try {
       const data = await invoke<Ingredient[]>("ingredients_list");
       setIngredients(data);
-    } catch { showToast("Erro ao carregar ingredientes", "err"); }
+    } catch { showToast(t("receiptScanner.loadIngredientsError"), "err"); }
   };
 
   const loadSuppliers = async () => {
     try {
       const data = await invoke<Supplier[]>("suppliers_list");
       setSuppliers(data);
-    } catch { showToast("Erro ao carregar fornecedores", "err"); }
+    } catch { showToast(t("receiptScanner.loadSuppliersError"), "err"); }
   };
 
   const parseReceiptText = (text: string): ParsedLine[] => {
@@ -164,7 +166,7 @@ export default function ReceiptScannerPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      showToast("Seleciona um ficheiro de imagem", "warn");
+      showToast(t("receiptScanner.selectImageFile"), "warn");
       return;
     }
     setImageFile(file);
@@ -192,24 +194,24 @@ export default function ReceiptScannerPage() {
       setParsedLines([]);
       setShowResults(false);
     } catch (e) {
-      showToast("Erro ao aceder à câmara", "err");
+      showToast(t("receiptScanner.cameraError"), "err");
     }
   };
 
   const runOCR = async () => {
     if (!imageFile || !workerRef.current) return;
     setProcessing(true);
-    setOcrProgress("A processar…");
+    setOcrProgress(t("receiptScanner.ocr.processing"));
     try {
       const { data: { text } } = await workerRef.current.recognize(imageFile);
       const parsed = parseReceiptText(text);
       setParsedLines(parsed);
       setShowResults(true);
-      setOcrProgress(`${parsed.length} linhas detectadas`);
-      showToast(`${parsed.length} itens extraídos`, parsed.length > 0 ? "ok" : "warn");
+      setOcrProgress(t("receiptScanner.ocr.linesDetected", { count: parsed.length }));
+      showToast(t("receiptScanner.ocr.itemsExtracted", { count: parsed.length }), parsed.length > 0 ? "ok" : "warn");
     } catch (e) {
-      showToast("Erro no OCR", "err");
-      setOcrProgress("Erro no OCR");
+      showToast(t("receiptScanner.ocr.error"), "err");
+      setOcrProgress(t("receiptScanner.ocr.error"));
     } finally {
       setProcessing(false);
     }
@@ -234,11 +236,11 @@ export default function ReceiptScannerPage() {
       const newId = newIngredient.id;
       await loadIngredients();
       return newId;
-    } catch { throw new Error(`Falha ao criar ingrediente: ${line.name}`); }
+    } catch { throw new Error(t("receiptScanner.createIngredientError", { name: line.name })); }
   };
 
   const confirmImport = async () => {
-    if (parsedLines.length === 0) { showToast("Nada para importar", "warn"); return; }
+    if (parsedLines.length === 0) { showToast(t("receiptScanner.nothingToImport"), "warn"); return; }
     setProcessing(true);
     try {
       for (const line of parsedLines) {
@@ -255,11 +257,11 @@ export default function ReceiptScannerPage() {
             discount_percent: line.discount_percent,
             purchase_date: new Date().toISOString(),
             supplier_id: selectedSupplier ? selectedSupplier : null,
-            notes: "Importado via OCR de talão",
+            notes: t("receiptScanner.importedNote"),
           },
         });
       }
-      showToast(`${parsedLines.length} compras registadas e stock actualizado`, "ok");
+      showToast(t("receiptScanner.purchasesRegistered", { count: parsedLines.length }), "ok");
       setImportSummary({
         count: parsedLines.length,
         total: parsedLines.reduce((s, l) => s + l.quantity * l.price, 0),
@@ -269,7 +271,7 @@ export default function ReceiptScannerPage() {
       setImage(null);
       setImageFile(null);
     } catch (e) {
-      showToast("Erro ao importar", "err");
+      showToast(t("receiptScanner.importError"), "err");
     } finally {
       setProcessing(false);
     }
@@ -281,7 +283,7 @@ export default function ReceiptScannerPage() {
     setParsedLines([]);
     setShowResults(false);
     setSelectedSupplier("");
-    setOcrProgress("Aguardar imagem…");
+    setOcrProgress(t("receiptScanner.ocr.waitingImage"));
     setImportSummary(null);
   };
 
@@ -292,18 +294,18 @@ export default function ReceiptScannerPage() {
   // Step index for the indicator bar: 0 upload, 1 extract, 2 review, 3 confirm.
   const currentStep = importSummary ? 3 : showResults ? 2 : image ? 1 : 0;
   const STEP_META = [
-    { label: "Carregar", icon: "upload_file" },
-    { label: "Extração", icon: "document_scanner" },
-    { label: "Revisão", icon: "edit_note" },
-    { label: "Confirmar", icon: "task_alt" },
+    { label: t("receiptScanner.steps.upload"), icon: "upload_file" },
+    { label: t("receiptScanner.steps.extract"), icon: "document_scanner" },
+    { label: t("receiptScanner.steps.review"), icon: "edit_note" },
+    { label: t("receiptScanner.steps.confirm"), icon: "task_alt" },
   ];
 
   const matchMeta = (confidence: number): { color: string; icon: string; label: string } =>
     confidence > 0.7
-      ? { color: "var(--green)", icon: "check_circle", label: "Reconhecido" }
+      ? { color: "var(--green)", icon: "check_circle", label: t("receiptScanner.match.recognized") }
       : confidence > 0.4
-      ? { color: "var(--amber)", icon: "add_circle", label: "Novo item" }
-      : { color: "var(--red)", icon: "help", label: "Verificar" };
+      ? { color: "var(--amber)", icon: "add_circle", label: t("receiptScanner.match.newItem") }
+      : { color: "var(--red)", icon: "help", label: t("receiptScanner.match.verify") };
 
   const reviewTotal = parsedLines.reduce((s, l) => s + l.quantity * l.price, 0);
   const reviewNewCount = parsedLines.filter(l => l.confidence <= 0.7).length;
@@ -311,12 +313,12 @@ export default function ReceiptScannerPage() {
   return (
     <div className="content">
       <PageHeader
-        title="Scanner de Talões"
-        subtitle="OCR local via Tesseract.js"
+        title={t("receiptScanner.title")}
+        subtitle={t("receiptScanner.subtitle")}
         actions={
           <button className="btn" onClick={resetAll} disabled={!image && parsedLines.length === 0 && !importSummary}>
             <span className="ms" style={{ fontSize: 16 }} aria-hidden="true">refresh</span>
-            Novo scan
+            {t("receiptScanner.newScan")}
           </button>
         }
       />
@@ -349,23 +351,23 @@ export default function ReceiptScannerPage() {
           <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--green-soft)", display: "grid", placeItems: "center", margin: "0 auto" }}>
             <span className="ms" style={{ fontSize: 34, color: "var(--green)" }} aria-hidden="true">task_alt</span>
           </div>
-          <div style={{ fontFamily: "var(--serif)", fontSize: 24, color: "var(--ink)", marginTop: 16 }}>Compra importada</div>
-          <div style={{ fontSize: 13.5, color: "var(--ink-2)", marginTop: 6 }}>{importSummary.count} itens adicionados ao stock e histórico</div>
+          <div style={{ fontFamily: "var(--serif)", fontSize: 24, color: "var(--ink)", marginTop: 16 }}>{t("receiptScanner.confirmStep.title")}</div>
+          <div style={{ fontSize: 13.5, color: "var(--ink-2)", marginTop: 6 }}>{t("receiptScanner.confirmStep.subtitle", { count: importSummary.count })}</div>
           <div style={{ display: "flex", gap: 14, justifyContent: "center", marginTop: 26, flexWrap: "wrap" }}>
             <div style={{ background: "var(--inset)", borderRadius: 12, padding: "14px 22px" }}>
-              <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", color: "var(--ink-3)" }}>Importados</div>
+              <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", color: "var(--ink-3)" }}>{t("receiptScanner.confirmStep.imported")}</div>
               <div className="mono" style={{ fontSize: 22, fontWeight: 600, color: "var(--ink)", marginTop: 3 }}>{importSummary.count}</div>
             </div>
             <div style={{ background: "var(--inset)", borderRadius: 12, padding: "14px 22px" }}>
-              <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", color: "var(--ink-3)" }}>Gasto</div>
+              <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", color: "var(--ink-3)" }}>{t("receiptScanner.confirmStep.spent")}</div>
               <div className="mono" style={{ fontSize: 22, fontWeight: 600, color: "var(--ember)", marginTop: 3 }}>{importSummary.total.toFixed(2)} €</div>
             </div>
             <div style={{ background: "var(--inset)", borderRadius: 12, padding: "14px 22px" }}>
-              <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", color: "var(--ink-3)" }}>Stock</div>
+              <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", color: "var(--ink-3)" }}>{t("receiptScanner.confirmStep.stock")}</div>
               <div className="mono" style={{ fontSize: 22, fontWeight: 600, color: "var(--green)", marginTop: 3 }}>✓</div>
             </div>
           </div>
-          <button className="btn" onClick={resetAll} style={{ marginTop: 28 }}>Digitalizar outro</button>
+          <button className="btn" onClick={resetAll} style={{ marginTop: 28 }}>{t("receiptScanner.confirmStep.scanAnother")}</button>
         </div>
       ) : !image && !showResults ? (
         /* step 0: upload */
@@ -373,49 +375,49 @@ export default function ReceiptScannerPage() {
           <div style={{ width: 64, height: 64, borderRadius: 16, background: "var(--ember-soft)", display: "grid", placeItems: "center", margin: "0 auto" }}>
             <span className="ms" style={{ fontSize: 32, color: "var(--ember)" }} aria-hidden="true">photo_camera</span>
           </div>
-          <div style={{ fontFamily: "var(--serif)", fontSize: 22, color: "var(--ink)", marginTop: 18 }}>Fotografa ou carrega o talão</div>
+          <div style={{ fontFamily: "var(--serif)", fontSize: 22, color: "var(--ink)", marginTop: 18 }}>{t("receiptScanner.uploadStep.title")}</div>
           <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6, maxWidth: 380, marginLeft: "auto", marginRight: "auto", lineHeight: 1.5 }}>
-            Extraímos os itens automaticamente. Revê e corrige antes de importar para o stock. Suporta JPG, PNG, WebP — o OCR corre localmente no browser (português).
+            {t("receiptScanner.uploadStep.desc")}
           </div>
           <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 22 }}>
             <label className="btn-primary" style={{ cursor: "pointer" }}>
               <span className="ms" style={{ fontSize: 19 }} aria-hidden="true">upload</span>
-              Escolher ficheiro
+              {t("receiptScanner.uploadStep.chooseFile")}
               <input type="file" ref={fileInputRef} accept="image/*" onChange={handleFileSelect} style={{ display: "none" }} />
             </label>
             <button className="btn-secondary" style={{ height: 42, padding: "0 20px", borderRadius: 10, fontWeight: 600, fontSize: 13.5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7 }} onClick={handleCameraCapture}>
               <span className="ms" style={{ fontSize: 19 }} aria-hidden="true">photo_camera</span>
-              Usar câmara
+              {t("receiptScanner.uploadStep.useCamera")}
             </button>
           </div>
-          <p style={{ margin: "16px 0 0", fontSize: 11, color: "var(--ink-3)", lineHeight: 1.6 }}>Desktop: usa "Escolher ficheiro". Mobile: "Usar câmara" abre a câmara traseira.</p>
+          <p style={{ margin: "16px 0 0", fontSize: 11, color: "var(--ink-3)", lineHeight: 1.6 }}>{t("receiptScanner.uploadStep.hint")}</p>
         </div>
       ) : image && !showResults ? (
         /* step 1: extract */
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr", gap: 18 }}>
           <div style={{ border: "1px solid var(--line)", borderRadius: 14, minHeight: 320, display: "flex", alignItems: "center", justifyContent: "center", padding: 14, position: "relative", background: "var(--inset)", overflow: "hidden" }}>
             <span className="mono" style={{ position: "absolute", top: 14, left: 14, fontSize: 10, color: "var(--ink-3)", background: "var(--surface)", padding: "3px 8px", borderRadius: 6, zIndex: 1 }}>
-              TALÃO · {(imageFile?.name || "receipt.jpg").toUpperCase()}
+              {t("receiptScanner.extractStep.receiptLabel")} · {(imageFile?.name || "receipt.jpg").toUpperCase()}
             </span>
-            <img src={image!} alt="Talão carregado" style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 10, objectFit: "contain" }} />
+            <img src={image!} alt={t("receiptScanner.extractStep.altText")} style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 10, objectFit: "contain" }} />
           </div>
           <div className="card">
             <div style={{ display: "flex", alignItems: "center", gap: 8, color: processing ? "var(--ember)" : "var(--ink-2)" }}>
               <span className="ms" style={{ fontSize: 19 }} aria-hidden="true">{processing ? "hourglass_top" : "document_scanner"}</span>
-              <span style={{ fontWeight: 600, fontSize: 13.5 }}>{processing ? "A extrair texto…" : "Pronto para extrair texto"}</span>
+              <span style={{ fontWeight: 600, fontSize: 13.5 }}>{processing ? t("receiptScanner.extractStep.extracting") : t("receiptScanner.extractStep.readyToExtract")}</span>
             </div>
             <div className="mono" style={{ fontSize: 11.5, color: "var(--ink-2)", lineHeight: 1.9, marginTop: 14, background: "var(--inset)", borderRadius: 10, padding: 14 }}>
               {ocrProgress}
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
-              <button className="btn" onClick={resetAll}>Cancelar</button>
+              <button className="btn" onClick={resetAll}>{t("common.cancel")}</button>
               <button className="btn-primary" onClick={runOCR} disabled={processing} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 {processing ? (
                   <span className="ms animate-spin" style={{ fontSize: 18 }} aria-hidden="true">progress_activity</span>
                 ) : (
                   <span className="ms" style={{ fontSize: 18 }} aria-hidden="true">arrow_forward</span>
                 )}
-                {processing ? "A processar…" : "Extrair texto (OCR)"}
+                {processing ? t("receiptScanner.extractStep.processingBtn") : t("receiptScanner.extractStep.extractBtn")}
               </button>
             </div>
           </div>
@@ -425,17 +427,17 @@ export default function ReceiptScannerPage() {
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
           <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 10, background: "var(--amber-soft)" }}>
             <span className="ms" style={{ fontSize: 19, color: "var(--amber)" }} aria-hidden="true">edit_note</span>
-            <span style={{ fontSize: 13, color: "var(--ink)", fontWeight: 500, flex: 1 }}>Confirma os itens extraídos. Alguns precisam de atenção.</span>
-            <span className="mono" style={{ fontSize: 11, color: "var(--amber)", fontWeight: 600 }}>{reviewNewCount} a verificar</span>
+            <span style={{ fontSize: 13, color: "var(--ink)", fontWeight: 500, flex: 1 }}>{t("receiptScanner.reviewStep.confirmMsg")}</span>
+            <span className="mono" style={{ fontSize: 11, color: "var(--amber)", fontWeight: 600 }}>{t("receiptScanner.reviewStep.toVerify", { count: reviewNewCount })}</span>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1.7fr 90px 90px 100px 1fr 90px 36px", gap: 10, padding: "9px 18px", borderBottom: "1px solid var(--line)", background: "var(--inset)" }}>
-            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>Nome</span>
-            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>Qtd.</span>
-            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>Unidade</span>
-            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)", textAlign: "right" }}>Preço</span>
-            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>Correspondência</span>
-            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>Promoção</span>
+            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>{t("receiptScanner.reviewStep.colName")}</span>
+            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>{t("receiptScanner.reviewStep.colQty")}</span>
+            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>{t("receiptScanner.reviewStep.colUnit")}</span>
+            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)", textAlign: "right" }}>{t("receiptScanner.reviewStep.colPrice")}</span>
+            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>{t("receiptScanner.reviewStep.colMatch")}</span>
+            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>{t("receiptScanner.reviewStep.colPromo")}</span>
             <span></span>
           </div>
 
@@ -446,7 +448,7 @@ export default function ReceiptScannerPage() {
                 <input
                   value={line.name}
                   onChange={e => updateLine(idx, "name", e.target.value)}
-                  placeholder="Nome do ingrediente"
+                  placeholder={t("receiptScanner.reviewStep.namePlaceholder")}
                   style={{ border: "1px solid var(--line)", background: "var(--inset)", borderRadius: 7, height: 34, padding: "0 10px", fontFamily: "var(--sans)", fontSize: 13, color: "var(--ink)", width: "100%" }}
                 />
                 <input
@@ -489,7 +491,7 @@ export default function ReceiptScannerPage() {
                 </label>
                 <button
                   onClick={() => setParsedLines(l => l.filter((_, i) => i !== idx))}
-                  title="Remover" aria-label="Remover linha"
+                  title={t("receiptScanner.reviewStep.remove")} aria-label={t("receiptScanner.reviewStep.removeLine")}
                   style={{ width: 30, height: 30, border: "none", background: "transparent", borderRadius: 7, cursor: "pointer", color: "var(--ink-3)", display: "grid", placeItems: "center" }}
                 >
                   <span className="ms" style={{ fontSize: 18 }} aria-hidden="true">close</span>
@@ -499,18 +501,18 @@ export default function ReceiptScannerPage() {
           })}
 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", background: "var(--inset)", gap: 14, flexWrap: "wrap" }}>
-            <button className="btn" onClick={goBackToExtract}>← Voltar</button>
+            <button className="btn" onClick={goBackToExtract}>{t("receiptScanner.reviewStep.back")}</button>
             <div className="field" style={{ margin: 0, minWidth: 200 }}>
               <select value={selectedSupplier} onChange={e => setSelectedSupplier(e.target.value ? parseInt(e.target.value) : "")} style={{ height: 38 }}>
-                <option value="">Fornecedor — Nenhum —</option>
+                <option value="">{t("receiptScanner.reviewStep.noSupplier")}</option>
                 {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-              <span className="mono" style={{ fontSize: 12, color: "var(--ink-2)" }}>{parsedLines.length} ingredientes · {reviewTotal.toFixed(2)} €</span>
+              <span className="mono" style={{ fontSize: 12, color: "var(--ink-2)" }}>{t("receiptScanner.reviewStep.summary", { count: parsedLines.length, total: reviewTotal.toFixed(2) })}</span>
               <button className="btn-primary" onClick={confirmImport} disabled={processing} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <span className="ms" style={{ fontSize: 17 }} aria-hidden="true">check</span>
-                {processing ? "A importar…" : "Importar para stock"}
+                {processing ? t("receiptScanner.reviewStep.importing") : t("receiptScanner.reviewStep.importBtn")}
               </button>
             </div>
           </div>
@@ -519,9 +521,9 @@ export default function ReceiptScannerPage() {
         /* step 2 (empty result) */
         <div className="empty">
           <span className="ms" style={{ fontSize: 40, color: "var(--ink-3)" }} aria-hidden="true">search_off</span>
-          <h2 className="empty-title">Nenhum item detectado</h2>
-          <p style={{ color: "var(--ink-2)", fontSize: 13, maxWidth: 380 }}>O OCR não encontrou linhas com padrão preço/quantidade reconhecível. Tenta uma foto mais nítida ou edita manualmente.</p>
-          <button className="btn-primary" onClick={resetAll} style={{ marginTop: 8 }}>Tentar outra imagem</button>
+          <h2 className="empty-title">{t("receiptScanner.emptyStep.title")}</h2>
+          <p style={{ color: "var(--ink-2)", fontSize: 13, maxWidth: 380 }}>{t("receiptScanner.emptyStep.desc")}</p>
+          <button className="btn-primary" onClick={resetAll} style={{ marginTop: 8 }}>{t("receiptScanner.emptyStep.tryAnother")}</button>
         </div>
       )}
     </div>

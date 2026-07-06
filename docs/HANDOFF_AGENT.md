@@ -1,5 +1,8 @@
 # Handoff — Recipe Planner (Mise) · `project/remaster`
 
+> ⚠️ **DOCUMENTO DESATUALIZADO.** Escrito antes do merge de `project/remaster` para `main` (ver `cb0ec4a`). Para o estado atual do projeto, roadmap e workflow, consultar **`PROJECT.md`** na raiz do repo.
+> Mantido apenas como referência histórica — contém detalhe valioso sobre bugs Tauri v2/libSQL resolvidos nessa altura.
+
 > Documento de transferência de contexto para o próximo agente que continuar este projeto.
 > Autor: Cline (agente anterior). Última atualização: sessão de 2026-07-01.
 > Branch: `project/remaster` · Repo: `git@github.com:Santolass06/Recipe_Planner.git`

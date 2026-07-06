@@ -7,6 +7,9 @@ import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
 import StatusPill from "../components/ui/StatusPill";
 import SearchBar from "../components/ui/SearchBar";
+import { useI18n } from "../i18n";
+
+type T = (key: string, params?: Record<string, string | number>) => string;
 
 interface StockItem {
   id: number;
@@ -61,10 +64,10 @@ const UNIT_LABELS: Record<string, string> = {
   fahrenheit: "°F — Fahrenheit",
 };
 
-const getStatus = (quantity: number, min: number) => {
-  if (quantity <= 0) return { label: "Esgotado", status: "out" as const };
-  if (quantity <= min) return { label: "Baixo", status: "low" as const };
-  return { label: "OK", status: "ok" as const };
+const getStatus = (quantity: number, min: number, t: T) => {
+  if (quantity <= 0) return { label: t("stock.statusOut"), status: "out" as const };
+  if (quantity <= min) return { label: t("stock.statusLow"), status: "low" as const };
+  return { label: t("stock.statusOk"), status: "ok" as const };
 };
 
 // --- Subcomponents ---
@@ -83,7 +86,7 @@ function levelPct(quantity: number, min: number) {
   return quantity > 0 ? 100 : 0;
 }
 
-function StockTable({ items, ingredients, onEdit, onDelete, onPurchase }: any) {
+function StockTable({ items, ingredients, onEdit, onDelete, onPurchase, t }: any) {
   const getIngredientName = (id: number) => ingredients.find((i: any) => i.id === id)?.name ?? "—";
   const getIngredientUnit = (id: number) => ingredients.find((i: any) => i.id === id)?.unit ?? "";
 
@@ -93,17 +96,17 @@ function StockTable({ items, ingredients, onEdit, onDelete, onPurchase }: any) {
         <table className="table">
           <thead>
             <tr>
-              <th>Nome</th>
-              <th style={{ width: 160 }}>Nível</th>
-              <th style={{ textAlign: "right" }}>Stock</th>
-              <th style={{ textAlign: "right" }}>Mínimo</th>
-              <th style={{ textAlign: "right" }}>Estado</th>
-              <th style={{ textAlign: "right" }}>Ação</th>
+              <th>{t("common.name")}</th>
+              <th style={{ width: 160 }}>{t("stock.colLevel")}</th>
+              <th style={{ textAlign: "right" }}>{t("stock.colStock")}</th>
+              <th style={{ textAlign: "right" }}>{t("stock.colMin")}</th>
+              <th style={{ textAlign: "right" }}>{t("stock.colStatus")}</th>
+              <th style={{ textAlign: "right" }}>{t("stock.colAction")}</th>
             </tr>
           </thead>
           <tbody>
             {items.map((item: any) => {
-              const s = getStatus(item.quantity, item.min_quantity);
+              const s = getStatus(item.quantity, item.min_quantity, t);
               const pct = levelPct(item.quantity, item.min_quantity);
               const unit = UNIT_LABELS[getIngredientUnit(item.ingredient_id)] ?? getIngredientUnit(item.ingredient_id);
               return (
@@ -121,13 +124,13 @@ function StockTable({ items, ingredients, onEdit, onDelete, onPurchase }: any) {
                   </td>
                   <td style={{ textAlign: "right" }}>
                     <div className="ingredient-actions" role="group" style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
-                      <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); onEdit(item); }} title="Ajustar">
-                        Ajustar
+                      <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); onEdit(item); }} title={t("stock.adjust")}>
+                        {t("stock.adjust")}
                       </button>
-                      <button className="btn-icon" onClick={(e) => { e.stopPropagation(); onPurchase(item); }} title="Registar compra">
+                      <button className="btn-icon" onClick={(e) => { e.stopPropagation(); onPurchase(item); }} title={t("stock.registerPurchase")}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12V7H5V7M16 7V4M8 7V4M3 18H21M7 18V12M17 18V12M7 12H17"/></svg>
                       </button>
-                      <button className="btn-icon danger" onClick={(e) => { e.stopPropagation(); onDelete(item); }} title="Eliminar">
+                      <button className="btn-icon danger" onClick={(e) => { e.stopPropagation(); onDelete(item); }} title={t("common.delete")}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
                       </button>
                     </div>
@@ -143,7 +146,7 @@ function StockTable({ items, ingredients, onEdit, onDelete, onPurchase }: any) {
 }
 
 function StockModal({
-  open, onClose, editing, form, setForm, loading, handleSave, ingredients
+  open, onClose, editing, form, setForm, loading, handleSave, ingredients, t
 }: {
   open: boolean;
   onClose: () => void;
@@ -153,25 +156,26 @@ function StockModal({
   loading: boolean;
   handleSave: () => void;
   ingredients: Ingredient[];
+  t: T;
 }) {
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={editing ? "Editar stock" : "Novo stock"}
+      title={editing ? t("stock.modal.editTitle") : t("stock.modal.newTitle")}
       footer={
         <>
-          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t("common.cancel")}</button>
           <button className="btn btn-primary" onClick={handleSave} disabled={loading || form.ingredient_id === 0 || form.quantity < 0}>
-            {loading ? "A guardar…" : "Guardar"}
+            {loading ? t("stock.modal.saving") : t("common.save")}
           </button>
         </>
       }
     >
       <div className="field">
-        <label className="field-label" htmlFor="stock-ingredient">Ingrediente</label>
+        <label className="field-label" htmlFor="stock-ingredient">{t("stock.modal.ingredientLabel")}</label>
         <select id="stock-ingredient" className="select" value={form.ingredient_id} onChange={e => setForm((f: any) => ({ ...f, ingredient_id: parseInt(e.target.value) }))} disabled={editing}>
-          <option value={0}>Seleciona ingrediente</option>
+          <option value={0}>{t("stock.modal.selectIngredient")}</option>
           {ingredients.map((i: any) => (
             <option key={i.id} value={i.id}>{i.name} ({UNIT_LABELS[i.unit] ?? i.unit})</option>
           ))}
@@ -179,11 +183,11 @@ function StockModal({
       </div>
       <div className="field-row" style={{ display: "flex", gap: "var(--space-3)" }}>
         <div className="field" style={{ flex: 1 }}>
-          <label className="field-label" htmlFor="stock-quantity">Quantidade actual</label>
+          <label className="field-label" htmlFor="stock-quantity">{t("stock.modal.currentQty")}</label>
           <input id="stock-quantity" type="number" className="input input-num" min="0" step="0.01" value={form.quantity} onChange={e => setForm((f: any) => ({ ...f, quantity: parseFloat(e.target.value) || 0 }))} />
         </div>
         <div className="field" style={{ flex: 1 }}>
-          <label className="field-label" htmlFor="stock-min">Quantidade mínima</label>
+          <label className="field-label" htmlFor="stock-min">{t("stock.modal.minQty")}</label>
           <input id="stock-min" type="number" className="input input-num" min="0" step="0.01" value={form.min_quantity} onChange={e => setForm((f: any) => ({ ...f, min_quantity: parseFloat(e.target.value) || 0 }))} />
         </div>
       </div>
@@ -192,97 +196,97 @@ function StockModal({
 }
 
 function PurchaseModal({
-  open, onClose, form, setForm, loading, handleSave, ingredientName, suppliers, purchases, loadingPurchases
+  open, onClose, form, setForm, loading, handleSave, ingredientName, suppliers, purchases, loadingPurchases, t
 }: any) {
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={`Registar compra — ${ingredientName}`}
+      title={t("stock.purchaseModal.title", { name: ingredientName })}
       wide
       footer={
         <>
-          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t("common.cancel")}</button>
           <button className="btn btn-primary" onClick={handleSave} disabled={loading || form.ingredient_id === 0 || form.quantity <= 0 || form.price_per_unit <= 0}>
-            {loading ? "A registar…" : "Registar compra"}
+            {loading ? t("stock.purchaseModal.registering") : t("stock.purchaseModal.registerBtn")}
           </button>
         </>
       }
     >
       <div style={{ maxHeight: "65vh", overflowY: "auto", paddingRight: "var(--space-2)" }}>
         <div className="field">
-          <label className="field-label" htmlFor="purchase-qty">Quantidade</label>
+          <label className="field-label" htmlFor="purchase-qty">{t("stock.purchaseModal.quantity")}</label>
           <input id="purchase-qty" type="number" className="input input-num" min="0.01" step="0.01" value={form.quantity} onChange={e => setForm((f: any) => ({ ...f, quantity: parseFloat(e.target.value) || 0 }))} />
         </div>
         <div className="field-row" style={{ display: "flex", gap: "var(--space-3)" }}>
           <div className="field" style={{ flex: 1 }}>
-            <label className="field-label" htmlFor="purchase-unit">Unidade</label>
+            <label className="field-label" htmlFor="purchase-unit">{t("stock.purchaseModal.unit")}</label>
             <select id="purchase-unit" className="select" value={form.unit} onChange={e => setForm((f: any) => ({ ...f, unit: e.target.value }))}>
-              {Object.entries(UNIT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+              {Object.entries(UNIT_LABELS).map(([key, label]) => <option key={key} value={key}>{label as string}</option>)}
             </select>
           </div>
           <div className="field" style={{ flex: 1 }}>
-            <label className="field-label" htmlFor="purchase-price">Preço por unidade (€)</label>
+            <label className="field-label" htmlFor="purchase-price">{t("stock.purchaseModal.pricePerUnit")}</label>
             <input id="purchase-price" type="number" className="input input-num" min="0" step="0.01" value={form.price_per_unit} onChange={e => setForm((f: any) => ({ ...f, price_per_unit: parseFloat(e.target.value) || 0 }))} />
           </div>
         </div>
         <div className="field-row" style={{ display: "flex", gap: "var(--space-3)" }}>
           <div className="field" style={{ flex: 1 }}>
-            <label className="field-label" htmlFor="purchase-date">Data da compra</label>
+            <label className="field-label" htmlFor="purchase-date">{t("stock.purchaseModal.purchaseDate")}</label>
             <input id="purchase-date" type="date" className="input" value={form.purchase_date} onChange={e => setForm((f: any) => ({ ...f, purchase_date: e.target.value }))} />
           </div>
           <div className="field" style={{ flex: 1 }}>
-            <label className="field-label" htmlFor="purchase-supplier">Fornecedor</label>
+            <label className="field-label" htmlFor="purchase-supplier">{t("stock.purchaseModal.supplier")}</label>
             <select id="purchase-supplier" className="select" value={form.supplier_id ?? ""} onChange={e => {
               const val = e.target.value;
               setForm((f: any) => ({ ...f, supplier_id: val ? parseInt(val) : "" }));
             }}>
-              <option value="">— Nenhum —</option>
+              <option value="">{t("stock.purchaseModal.noneSupplier")}</option>
               {suppliers.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
         </div>
         <div className="field-row" style={{ display: "flex", gap: "var(--space-3)" }}>
           <div className="field" style={{ flex: 1 }}>
-            <label className="field-label" htmlFor="purchase-discount">Desconto (%)</label>
+            <label className="field-label" htmlFor="purchase-discount">{t("stock.purchaseModal.discount")}</label>
             <input id="purchase-discount" type="number" className="input input-num" min="0" max="100" step="1" value={form.discount_percent} onChange={e => setForm((f: any) => ({ ...f, discount_percent: parseInt(e.target.value) || 0 }))} />
           </div>
           <div className="field" style={{ flex: 1 }}>
             <label className="field-label" style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
               <input type="checkbox" checked={form.is_discount} onChange={e => setForm((f: any) => ({ ...f, is_discount: e.target.checked }))} />
-              <span>Era promoção?</span>
+              <span>{t("stock.purchaseModal.wasPromo")}</span>
             </label>
           </div>
         </div>
         <div className="field">
-          <label className="field-label" htmlFor="purchase-notes">Notas</label>
-          <textarea id="purchase-notes" className="textarea" rows={3} value={form.notes} onChange={e => setForm((f: any) => ({ ...f, notes: e.target.value }))} placeholder="Observações opcionais…" />
+          <label className="field-label" htmlFor="purchase-notes">{t("stock.purchaseModal.notes")}</label>
+          <textarea id="purchase-notes" className="textarea" rows={3} value={form.notes} onChange={e => setForm((f: any) => ({ ...f, notes: e.target.value }))} placeholder={t("stock.purchaseModal.notesPlaceholder")} />
         </div>
         <div style={{ marginTop: "var(--space-4)", padding: "var(--space-3)", background: "var(--inset)", borderRadius: "var(--radius-md)", border: "1px solid var(--line)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span className="text-2">Total: <strong className="mono">{(form.quantity * form.price_per_unit).toFixed(2)} €</strong></span>
-            <span className="text-4 mono">Subtotal: {(form.quantity * form.price_per_unit).toFixed(2)} €</span>
+            <span className="text-2">{t("stock.purchaseModal.total")} <strong className="mono">{(form.quantity * form.price_per_unit).toFixed(2)} €</strong></span>
+            <span className="text-4 mono">{t("stock.purchaseModal.subtotal")} {(form.quantity * form.price_per_unit).toFixed(2)} €</span>
           </div>
           {form.is_discount && form.discount_percent > 0 && (
             <div className="text-4" style={{ marginTop: "var(--space-2)" }}>
-              Com desconto de {form.discount_percent}%: {(form.quantity * form.price_per_unit * (1 - form.discount_percent / 100)).toFixed(2)} €
+              {t("stock.purchaseModal.withDiscount", { pct: form.discount_percent, amount: (form.quantity * form.price_per_unit * (1 - form.discount_percent / 100)).toFixed(2) })}
             </div>
           )}
         </div>
         {purchases.length > 0 && (
           <div style={{ marginTop: "var(--space-6)" }}>
-            <h3 className="title-4" style={{ marginBottom: "var(--space-3)" }}>Histórico de compras</h3>
+            <h3 className="title-4" style={{ marginBottom: "var(--space-3)" }}>{t("stock.purchaseModal.historyTitle")}</h3>
             <div className="card" style={{ overflow: "hidden", padding: 0 }}>
               <div className="table-wrap">
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Data</th>
-                      <th>Qtd</th>
-                      <th style={{ textAlign: "right" }}>Preço/unid</th>
-                      <th style={{ textAlign: "right" }}>Total</th>
-                      <th style={{ textAlign: "right" }}>Promoção</th>
-                      <th>Fornecedor</th>
+                      <th>{t("stock.purchaseModal.colDate")}</th>
+                      <th>{t("stock.purchaseModal.colQty")}</th>
+                      <th style={{ textAlign: "right" }}>{t("stock.purchaseModal.colPricePerUnit")}</th>
+                      <th style={{ textAlign: "right" }}>{t("stock.purchaseModal.colTotal")}</th>
+                      <th style={{ textAlign: "right" }}>{t("stock.purchaseModal.colPromo")}</th>
+                      <th>{t("stock.purchaseModal.colSupplier")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -354,7 +358,8 @@ export default function StockPage() {
   const [loading, setLoading] = useState(false);
   
   const { showToast } = useToast();
-  
+  const { t } = useI18n();
+
   const [confirmDelete, setConfirmDelete] = useState<StockItem | null>(null);
 
   const load = useCallback(async () => {
@@ -366,9 +371,9 @@ export default function StockPage() {
       setStock(stockData);
       setIngredients(ingredientsData);
     } catch (e) {
-      showToast("Erro ao carregar dados", "err");
+      showToast(t("stock.loadError"), "err");
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -377,9 +382,9 @@ export default function StockPage() {
       const data = await invoke<Supplier[]>("suppliers_list");
       setSuppliers(data);
     } catch (e) {
-      showToast("Erro ao carregar fornecedores", "err");
+      showToast(t("stock.suppliersLoadError"), "err");
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   useEffect(() => { loadSuppliers(); }, [loadSuppliers]);
 
@@ -389,11 +394,11 @@ export default function StockPage() {
       const data = await invoke<StockPurchase[]>("stock_purchases_list", { ingredientId });
       setPurchases(data);
     } catch (e) {
-      showToast("Erro ao carregar compras", "err");
+      showToast(t("stock.purchasesLoadError"), "err");
     } finally {
       setLoadingPurchases(false);
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   const openCreate = () => {
     setForm({ ingredient_id: 0, quantity: 0, min_quantity: 0 });
@@ -434,7 +439,7 @@ export default function StockPage() {
 
   async function handleSave() {
     if (form.ingredient_id === 0 || form.quantity < 0) {
-      showToast("Seleciona ingrediente e quantidade válida", "warn");
+      showToast(t("stock.selectValid"), "warn");
       return;
     }
     setLoading(true);
@@ -446,11 +451,11 @@ export default function StockPage() {
           min_quantity: form.min_quantity,
         },
       });
-      showToast(modal === "create" ? "Stock criado" : "Stock actualizado", "ok");
+      showToast(modal === "create" ? t("stock.created") : t("stock.updated"), "ok");
       closeModal();
       await load();
     } catch (e) {
-      showToast("Erro ao guardar", "err");
+      showToast(t("stock.saveError"), "err");
     } finally {
       setLoading(false);
     }
@@ -460,10 +465,10 @@ export default function StockPage() {
     if (!confirmDelete) return;
     try {
       await invoke("stock_delete", { ingredientId: confirmDelete.ingredient_id });
-      showToast("Stock eliminado", "ok");
+      showToast(t("stock.deleted"), "ok");
       await load();
     } catch (e) {
-      showToast("Erro ao eliminar", "err");
+      showToast(t("stock.deleteError"), "err");
     } finally {
       setConfirmDelete(null);
     }
@@ -471,11 +476,11 @@ export default function StockPage() {
 
   async function handlePurchaseSave() {
     if (purchaseForm.ingredient_id === 0 || purchaseForm.quantity <= 0 || purchaseForm.price_per_unit <= 0) {
-      showToast("Preenche ingrediente, quantidade e preço", "warn");
+      showToast(t("stock.fillFields"), "warn");
       return;
     }
     if (purchaseForm.discount_percent < 0 || purchaseForm.discount_percent > 100) {
-      showToast("Desconto entre 0 e 100%", "warn");
+      showToast(t("stock.discountRange"), "warn");
       return;
     }
     setLoading(true);
@@ -497,14 +502,14 @@ export default function StockPage() {
           notes: purchaseForm.notes || null,
         },
       });
-      showToast("Compra registada e stock actualizado", "ok");
+      showToast(t("stock.purchaseRegistered"), "ok");
       closePurchaseModal();
       await load();
       if (selectedIngredientForPurchases) {
         await loadPurchases(selectedIngredientForPurchases.ingredient_id);
       }
     } catch (e) {
-      showToast("Erro ao registar compra", "err");
+      showToast(t("stock.purchaseError"), "err");
     } finally {
       setLoading(false);
     }
@@ -519,15 +524,15 @@ export default function StockPage() {
   return (
     <div className="content">
       <PageHeader
-        title="Armazém"
-        subtitle={`${stock.length} ingredientes em stock`}
-        search={<SearchBar value={search} onChange={setSearch} placeholder="Pesquisar ingredientes…" />}
+        title={t("stock.title")}
+        subtitle={t("stock.subtitle", { count: stock.length })}
+        search={<SearchBar value={search} onChange={setSearch} placeholder={t("stock.searchPlaceholder")} />}
         actions={
           <button className="btn btn-primary" onClick={openCreate}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
               <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
-            Adicionar stock
+            {t("stock.addStock")}
           </button>
         }
       />
@@ -539,26 +544,27 @@ export default function StockPage() {
               <polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>
             </svg>
           }
-          title={search ? "Sem resultados" : "Sem stock registado"}
-          body={search ? "Tenta outra pesquisa." : "Adiciona o primeiro item de stock para começar."}
+          title={search ? t("stock.noResults") : t("stock.empty")}
+          body={search ? t("stock.noResultsDesc") : t("stock.emptyDesc")}
           action={
             !search && (
               <button className="btn btn-primary" onClick={openCreate}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
                   <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
                 </svg>
-                Adicionar stock
+                {t("stock.addStock")}
               </button>
             )
           }
         />
       ) : (
-        <StockTable 
-          items={filtered} 
-          ingredients={ingredients} 
-          onEdit={openEdit} 
-          onDelete={setConfirmDelete} 
-          onPurchase={openPurchaseModal} 
+        <StockTable
+          items={filtered}
+          ingredients={ingredients}
+          onEdit={openEdit}
+          onDelete={setConfirmDelete}
+          onPurchase={openPurchaseModal}
+          t={t}
         />
       )}
 
@@ -572,6 +578,7 @@ export default function StockPage() {
           loading={loading}
           handleSave={handleSave}
           ingredients={ingredients}
+          t={t}
         />
       )}
 
@@ -587,13 +594,14 @@ export default function StockPage() {
           suppliers={suppliers}
           purchases={purchases}
           loadingPurchases={loadingPurchases}
+          t={t}
         />
       )}
 
       <ConfirmDialog
         open={!!confirmDelete}
-        title="Eliminar stock"
-        body={confirmDelete ? `Tem a certeza que deseja eliminar o stock de "${getIngredientName(confirmDelete.ingredient_id)}"?` : ""}
+        title={t("stock.confirmDeleteTitle")}
+        body={confirmDelete ? t("stock.confirmDeleteBody", { name: getIngredientName(confirmDelete.ingredient_id) }) : ""}
         onConfirm={performDelete}
         onCancel={() => setConfirmDelete(null)}
         danger

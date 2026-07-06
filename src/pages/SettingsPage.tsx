@@ -18,43 +18,43 @@ type SettingsMap = Record<string, string>;
 
 interface SettingsCategory {
   key: string;
-  label: string;
+  labelKey: string;
   icon: React.ReactNode;
 }
 
 const CATEGORIES: SettingsCategory[] = [
-  { key: "general", label: "Geral", icon: (
+  { key: "general", labelKey: "settings.general", icon: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
     </svg>
   )},
-  { key: "units", label: "Unidades", icon: (
+  { key: "units", labelKey: "settings.units", icon: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 3h18"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M3 21h18"/>
       <path d="M6 3v18"/><path d="M12 3v18"/><path d="M18 3v18"/>
     </svg>
   )},
-  { key: "currency", label: "Moeda", icon: (
+  { key: "currency", labelKey: "settings.currency", icon: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
     </svg>
   )},
-  { key: "data", label: "Dados", icon: (
+  { key: "data", labelKey: "settings.data", icon: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 21v-6a2 2 0 0 0-2-2H9a2 2 0 0 0-2 2v6"/><path d="M3 17V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10"/><path d="M3 3h18"/><path d="M9 21v-4"/>
     </svg>
   )},
-  { key: "sync", label: "Sincronização", icon: (
+  { key: "sync", labelKey: "settings.sync", icon: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
     </svg>
   )},
-  { key: "about", label: "Sobre", icon: (
+  { key: "about", labelKey: "settings.about", icon: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
     </svg>
   )},
-  { key: "developer", label: "Desenvolvedor", icon: (
+  { key: "developer", labelKey: "settings.developer", icon: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M16 18l6-6-6-6"/><path d="M8 6l-6 6 6 6"/>
     </svg>
@@ -88,16 +88,18 @@ const LANGUAGES = [
   { value: "en", label: "English" },
 ];
 
-const THEMES = [
-  { value: "light", label: "Claro" },
-  { value: "dark", label: "Escuro" },
-  { value: "system", label: "Sistema" },
+type T = (key: string, params?: Record<string, string | number>) => string;
+
+const getThemes = (t: T) => [
+  { value: "light", label: t("theme_light") },
+  { value: "dark", label: t("theme_dark") },
+  { value: "system", label: t("theme_system") },
 ];
 
-const DENSITIES = [
-  { value: "compact", label: "Compacta" },
-  { value: "cozy", label: "Equilibrada" },
-  { value: "comfy", label: "Confortável" },
+const getDensities = (t: T) => [
+  { value: "compact", label: t("settings.densityCompact") },
+  { value: "cozy", label: t("settings.densityCozy") },
+  { value: "comfy", label: t("settings.densityComfy") },
 ];
 
 const DENSITY_ATTR_KEY = "mise-density";
@@ -134,35 +136,35 @@ const DATE_FORMATS = [
   { value: "YYYY-MM-DD", label: "YYYY-MM-DD" },
 ];
 
-const WEIGHT_UNITS = [
-  { value: "g", label: "Grama (g)" },
-  { value: "kg", label: "Quilograma (kg)" },
-  { value: "lb", label: "Libra (lb)" },
-  { value: "oz", label: "Onça (oz)" },
+const getWeightUnits = (t: T) => [
+  { value: "g", label: t("settings.weightG") },
+  { value: "kg", label: t("settings.weightKg") },
+  { value: "lb", label: t("settings.weightLb") },
+  { value: "oz", label: t("settings.weightOz") },
 ];
 
-const VOLUME_UNITS = [
-  { value: "ml", label: "Mililitro (ml)" },
-  { value: "l", label: "Litro (l)" },
-  { value: "fl_oz", label: "Fluid Ounce (fl oz)" },
-  { value: "cup", label: "Chávena (cup)" },
+const getVolumeUnits = (t: T) => [
+  { value: "ml", label: t("settings.volumeMl") },
+  { value: "l", label: t("settings.volumeL") },
+  { value: "fl_oz", label: t("settings.volumeFlOz") },
+  { value: "cup", label: t("settings.volumeCup") },
 ];
 
-const TEMPERATURE_UNITS = [
-  { value: "c", label: "Celsius (°C)" },
-  { value: "f", label: "Fahrenheit (°F)" },
+const getTemperatureUnits = (t: T) => [
+  { value: "c", label: t("settings.temperatureC") },
+  { value: "f", label: t("settings.temperatureF") },
 ];
 
-const CURRENCIES = [
-  { value: "EUR", label: "Euro (€)" },
-  { value: "USD", label: "Dólar ($)" },
-  { value: "GBP", label: "Libra (£)" },
-  { value: "BRL", label: "Real (R$)" },
+const getCurrencies = (t: T) => [
+  { value: "EUR", label: t("settings.currencyEur") },
+  { value: "USD", label: t("settings.currencyUsd") },
+  { value: "GBP", label: t("settings.currencyGbp") },
+  { value: "BRL", label: t("settings.currencyBrl") },
 ];
 
-const SYMBOL_POSITIONS = [
-  { value: "before", label: "Antes (€100)" },
-  { value: "after", label: "Depois (100€)" },
+const getSymbolPositions = (t: T) => [
+  { value: "before", label: t("settings.symbolBefore") },
+  { value: "after", label: t("settings.symbolAfter") },
 ];
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
@@ -173,7 +175,7 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
 };
 
 export default function SettingsPage() {
-  const { setLanguage } = useI18n();
+  const { t, setLanguage } = useI18n();
   const visibleCategories = CATEGORIES.filter(c => c.key !== "developer" || import.meta.env.DEV);
   const [activeCategory, setActiveCategory] = useState("general");
   const [settings, setSettings] = useState<SettingsMap>({});
@@ -190,11 +192,11 @@ export default function SettingsPage() {
       const data = await invoke<SettingsMap>("settings_get_all");
       setSettings(data);
     } catch (e) {
-      showToast("Erro ao carregar definições", "err");
+      showToast(t("settings.loadError"), "err");
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   useEffect(() => {
     loadSettings();
@@ -248,9 +250,9 @@ export default function SettingsPage() {
         applyDensity(values.density);
       }
 
-      showToast("Definições guardadas", "ok");
+      showToast(t("settings.saved"), "ok");
     } catch (e) {
-      showToast("Erro ao guardar definições", "err");
+      showToast(t("settings.saveError"), "err");
     } finally {
       setSaving(false);
     }
@@ -266,9 +268,9 @@ export default function SettingsPage() {
       a.download = `mise-backup-${new Date().toISOString().split("T")[0]}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      showToast("Dados exportados com sucesso", "ok");
+      showToast(t("settings.exportSuccess"), "ok");
     } catch (e) {
-      showToast("Erro ao exportar dados", "err");
+      showToast(t("settings.exportError"), "err");
     }
   };
 
@@ -278,17 +280,17 @@ export default function SettingsPage() {
       const text = await importFile.text();
       const data = JSON.parse(text);
       if (!data.version || !data.ingredients || !data.recipes) {
-        showToast("Ficheiro inválido: estrutura incorreta", "err");
+        showToast(t("settings.invalidFile"), "err");
         return;
       }
       const result = await invoke<any>("import_data", { data });
-      showToast(`Importados: ${result.ingredients_created} ingredientes, ${result.recipes_created} receitas`, "ok");
+      showToast(t("settings.importSuccess", { ingredients: result.ingredients_created, recipes: result.recipes_created }), "ok");
       if (result.errors.length > 0) {
-        showToast(`Avisos: ${result.errors.join("; ")}`, "warn");
+        showToast(t("settings.importWarnings", { errors: result.errors.join("; ") }), "warn");
       }
       setImportFile(null);
     } catch (e) {
-      showToast("Erro ao importar dados", "err");
+      showToast(t("settings.importError"), "err");
     }
   };
 
@@ -296,10 +298,10 @@ export default function SettingsPage() {
     try {
       await invoke("settings_reset");
       setSettings({});
-      showToast("Definições repostas para padrão", "ok");
+      showToast(t("settings.resetSuccess"), "ok");
       setShowResetConfirm(false);
     } catch (e) {
-      showToast("Erro ao repor definições", "err");
+      showToast(t("settings.resetError"), "err");
     }
   };
 
@@ -308,10 +310,10 @@ export default function SettingsPage() {
     try {
       await invoke("delete_all_data");
       setSettings({});
-      showToast("Todos os dados foram apagados", "ok");
+      showToast(t("settings.deleteAllDataSuccess"), "ok");
       setShowDeleteDataConfirm(false);
     } catch (e) {
-      showToast("Erro ao apagar dados", "err");
+      showToast(t("settings.deleteAllDataError"), "err");
     } finally {
       setSaving(false);
     }
@@ -321,9 +323,9 @@ export default function SettingsPage() {
     setSaving(true);
     try {
       await invoke("seed_demo_data");
-      showToast("Dados de demonstração gerados", "ok");
+      showToast(t("settings.demoDataSuccess"), "ok");
     } catch (e) {
-      showToast("Erro ao gerar dados", "err");
+      showToast(t("settings.demoDataError"), "err");
     } finally {
       setSaving(false);
     }
@@ -337,7 +339,7 @@ export default function SettingsPage() {
             <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
             <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
           </svg>
-          <p className="text-3">A carregar definições...</p>
+          <p className="text-3">{t("settings.loadingSettings")}</p>
         </div>
       </div>
     );
@@ -347,8 +349,8 @@ export default function SettingsPage() {
     <div className="content">
       <div className="content-header">
         <div>
-          <h1 className="content-title">Definições</h1>
-          <p className="content-sub mono">Personaliza a aplicação ao teu gosto</p>
+          <h1 className="content-title">{t("settings.pageTitle")}</h1>
+          <p className="content-sub mono">{t("settings.pageSub")}</p>
         </div>
       </div>
 
@@ -364,7 +366,7 @@ export default function SettingsPage() {
               <span style={{ width: 14, height: 14, display: "flex" }}>
                 {cat.icon}
               </span>
-              {cat.label}
+              {t(cat.labelKey)}
             </button>
           ))}
         </nav>
@@ -372,9 +374,9 @@ export default function SettingsPage() {
         {/* Settings Content */}
         <div className="settings-content">
           {activeCategory === "general" && (
-            <SettingsSection title="Geral" description="Idioma, tema, densidade e formato de data">
+            <SettingsSection title={t("settings.general")} description={t("settings.generalDesc")}>
               <div className="settings-group">
-                <label>Idioma</label>
+                <label>{t("settings.language")}</label>
                 <Seg
                   options={LANGUAGES}
                   value={getSetting("language", "general")}
@@ -383,25 +385,25 @@ export default function SettingsPage() {
               </div>
 
               <div className="settings-group">
-                <label>Tema</label>
+                <label>{t("settings.theme")}</label>
                 <Seg
-                  options={THEMES}
+                  options={getThemes(t)}
                   value={getSetting("theme", "general")}
                   onChange={v => saveCategorySettings("general", { theme: v })}
                 />
               </div>
 
               <div className="settings-group">
-                <label>Densidade</label>
+                <label>{t("settings.density")}</label>
                 <Seg
-                  options={DENSITIES}
+                  options={getDensities(t)}
                   value={getSetting("density", "general")}
                   onChange={v => saveCategorySettings("general", { density: v })}
                 />
               </div>
 
               <div className="settings-group">
-                <label>Formato de data</label>
+                <label>{t("settings.dateFormat")}</label>
                 <select
                   className="select"
                   value={getSetting("date_format", "general")}
@@ -414,68 +416,68 @@ export default function SettingsPage() {
           )}
 
           {activeCategory === "units" && (
-            <SettingsSection title="Unidades" description="Unidades padrão para peso, volume e temperatura">
+            <SettingsSection title={t("settings.units")} description={t("settings.unitsDesc")}>
               <div className="settings-group">
-                <label >Peso padrão</label>
+                <label >{t("settings.weightUnit")}</label>
                 <select
                   className="select"
                   value={getSetting("weight", "units")}
                   onChange={e => saveCategorySettings("units", { weight: e.target.value })}
                 >
-                  {WEIGHT_UNITS.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
+                  {getWeightUnits(t).map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
                 </select>
               </div>
 
               <div className="settings-group">
-                <label >Volume padrão</label>
+                <label >{t("settings.volumeUnit")}</label>
                 <select
                   className="select"
                   value={getSetting("volume", "units")}
                   onChange={e => saveCategorySettings("units", { volume: e.target.value })}
                 >
-                  {VOLUME_UNITS.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
+                  {getVolumeUnits(t).map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
                 </select>
               </div>
 
               <div className="settings-group">
-                <label >Temperatura</label>
+                <label >{t("settings.temperatureUnit")}</label>
                 <select
                   className="select"
                   value={getSetting("temperature", "units")}
                   onChange={e => saveCategorySettings("units", { temperature: e.target.value })}
                 >
-                  {TEMPERATURE_UNITS.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
+                  {getTemperatureUnits(t).map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
                 </select>
               </div>
             </SettingsSection>
           )}
 
           {activeCategory === "currency" && (
-            <SettingsSection title="Moeda" description="Moeda padrão e posição do símbolo">
+            <SettingsSection title={t("settings.currency")} description={t("settings.currencyDesc")}>
               <div className="settings-group">
-                <label >Moeda</label>
+                <label >{t("settings.currencyLabel")}</label>
                 <select
                   className="select"
                   value={getSetting("currency", "currency")}
                   onChange={e => saveCategorySettings("currency", { currency: e.target.value })}
                 >
-                  {CURRENCIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  {getCurrencies(t).map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </select>
               </div>
 
               <div className="settings-group">
-                <label >Posição do símbolo</label>
+                <label >{t("settings.symbolPosition")}</label>
                 <select
                   className="select"
                   value={getSetting("symbol_position", "currency")}
                   onChange={e => saveCategorySettings("currency", { symbol_position: e.target.value })}
                 >
-                  {SYMBOL_POSITIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  {getSymbolPositions(t).map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
               </div>
 
               <div style={{ marginTop: "20px", padding: "16px", background: "var(--bg-elevated)", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
-                <p className="text-3" style={{ marginBottom: "0" }}>Pré-visualização:</p>
+                <p className="text-3" style={{ marginBottom: "0" }}>{t("settings.pricePreview")}</p>
                 <p style={{ fontFamily: "var(--mono)", fontSize: "24px", fontWeight: 600, color: "var(--accent)", marginTop: "8px", marginBottom: "0" }}>
                   {getSetting("symbol_position", "currency") === "before"
                     ? `${CURRENCY_SYMBOLS[getSetting("currency", "currency")]}1.234,56`
@@ -486,26 +488,26 @@ export default function SettingsPage() {
           )}
 
           {activeCategory === "data" && (
-            <SettingsSection title="Dados" description="Exportar, importar e repor dados da aplicação">
+            <SettingsSection title={t("settings.data")} description={t("settings.dataDesc")}>
               <div style={{ display: "flex", flexDirection: "column" }}>
                 <div className="settings-section-sep">
-                  <h3 style={{ fontSize: "14px", fontWeight: 500, margin: "0 0 4px" }}>Exportar dados</h3>
+                  <h3 style={{ fontSize: "14px", fontWeight: 500, margin: "0 0 4px" }}>{t("settings.exportData")}</h3>
                   <p style={{ fontSize: "12px", color: "var(--text-3)", margin: "0 0 12px" }}>
-                    Baixa um ficheiro JSON com todos os teus ingredientes, receitas e definições.
+                    {t("settings.exportDesc")}
                   </p>
                   <button className="btn" onClick={handleExport} disabled={saving}>
                     <span className="ms" style={{ fontSize: 18 }} aria-hidden="true">download</span>
-                    Exportar JSON
+                    {t("settings.exportJsonBtn")}
                   </button>
                 </div>
 
                 <div className="settings-section-sep">
-                  <h3 style={{ fontSize: "14px", fontWeight: 500, margin: "0 0 4px" }}>Importar dados</h3>
+                  <h3 style={{ fontSize: "14px", fontWeight: 500, margin: "0 0 4px" }}>{t("settings.importData")}</h3>
                   <p style={{ fontSize: "12px", color: "var(--text-3)", margin: "0 0 12px" }}>
-                    Carrega um ficheiro JSON exportado anteriormente. Os dados existentes não serão apagados.
+                    {t("settings.importDesc")}
                   </p>
                   <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "var(--space-3)" }}>
-                    <label htmlFor="import-file" className="btn">Escolher ficheiro</label>
+                    <label htmlFor="import-file" className="btn">{t("settings.chooseFile")}</label>
                     <input
                       type="file"
                       id="import-file"
@@ -514,7 +516,7 @@ export default function SettingsPage() {
                       onChange={e => setImportFile(e.target.files?.[0] ?? null)}
                     />
                     <span style={{ color: "var(--text-3)", fontSize: "13px", flex: 1 }}>
-                      {importFile ? importFile.name : "Nenhum ficheiro selecionado."}
+                      {importFile ? importFile.name : t("settings.noFileSelected")}
                     </span>
                     <button
                       className="btn"
@@ -522,15 +524,15 @@ export default function SettingsPage() {
                       disabled={saving || !importFile}
                     >
                       <span className="ms" style={{ fontSize: 18 }} aria-hidden="true">upload</span>
-                      Importar JSON
+                      {t("settings.importJsonBtn")}
                     </button>
                   </div>
                 </div>
 
                 <div>
-                  <h3 style={{ fontSize: "14px", fontWeight: 500, margin: "0 0 4px", color: "var(--danger)" }}>Repor para padrão</h3>
+                  <h3 style={{ fontSize: "14px", fontWeight: 500, margin: "0 0 4px", color: "var(--danger)" }}>{t("settings.resetToDefault")}</h3>
                   <p style={{ fontSize: "12px", color: "var(--text-3)", margin: "0 0 12px" }}>
-                    Apaga todas as definições personalizadas e restaura os valores de fábrica. Esta ação não afecta ingredientes, receitas ou stock.
+                    {t("settings.resetDesc")}
                   </p>
                   <button
                     className="btn btn-danger"
@@ -540,7 +542,7 @@ export default function SettingsPage() {
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                     </svg>
-                    Repor definições
+                    {t("settings.resetSettings")}
                   </button>
                 </div>
               </div>
@@ -548,9 +550,9 @@ export default function SettingsPage() {
           )}
 
           {activeCategory === "sync" && (
-            <SettingsSection title="Sincronização" description="Configuração de sincronização na nuvem (Turso/libSQL)">
+            <SettingsSection title={t("settings.sync")} description={t("settings.syncDesc")}>
               <div className="field">
-                <label>Turso Database URL</label>
+                <label>{t("settings.tursoUrl")}</label>
                 <input
                   type="text"
                   className="input"
@@ -561,7 +563,7 @@ export default function SettingsPage() {
               </div>
 
               <div className="field">
-                <label>Auth Token</label>
+                <label>{t("settings.authToken")}</label>
                 <input
                   type="password"
                   className="input"
@@ -572,14 +574,13 @@ export default function SettingsPage() {
               </div>
 
               <div className="info-box">
-                <strong style={{ fontWeight: 500 }}>Em desenvolvimento:</strong> A sincronização automática ainda não está implementada.
-                As credenciais serão guardadas localmente para uso futuro.
+                <strong style={{ fontWeight: 500 }}>{t("settings.syncInDevelopment")}</strong> {t("settings.syncPlaceholder")}
               </div>
             </SettingsSection>
           )}
 
           {activeCategory === "about" && (
-            <SettingsSection title="Sobre" description="Informações da aplicação e links úteis">
+            <SettingsSection title={t("settings.about")} description={t("settings.aboutDesc")}>
               <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
                 <div style={{ textAlign: "center", padding: "var(--space-6) 0" }}>
                   <div className="settings-about-logo">
@@ -587,30 +588,28 @@ export default function SettingsPage() {
                   </div>
                   <h2 style={{ fontSize: "20px", fontWeight: 600, marginBottom: "var(--space-1)" }}>mise</h2>
                   <p style={{ color: "var(--text-3)", fontSize: "13px", marginBottom: "var(--space-2)" }} className="mono">pro-kitchen</p>
-                  <p style={{ color: "var(--text-2)", fontSize: "13px", marginBottom: "24px" }}>Versão 1.0.0 (build 2026.06)</p>
+                  <p style={{ color: "var(--text-2)", fontSize: "13px", marginBottom: "24px" }}>{t("settings.aboutVersion")}</p>
                 </div>
 
                 <div style={{ borderTop: "1px solid var(--border)", paddingTop: "var(--space-6)" }}>
-                  <h3 className="text-2" style={{ marginBottom: "var(--space-4)" }}>Links úteis</h3>
+                  <h3 className="text-2" style={{ marginBottom: "var(--space-4)" }}>{t("settings.usefulLinks")}</h3>
                   <div className="settings-links">
                     <a href="https://github.com/Santolass06/Recipe_Planner" target="_blank" rel="noopener noreferrer" onClick={(e) => { e.preventDefault(); openExternal("https://github.com/Santolass06/Recipe_Planner"); }}>
-                      Repositório no GitHub
+                      {t("settings.githubRepo")}
                     </a>
                     <a href="https://tauri.app" target="_blank" rel="noopener noreferrer" onClick={(e) => { e.preventDefault(); openExternal("https://tauri.app"); }}>
-                      Documentação Tauri
+                      {t("settings.tauriDocs")}
                     </a>
                     <a href="https://react.dev" target="_blank" rel="noopener noreferrer" onClick={(e) => { e.preventDefault(); openExternal("https://react.dev"); }}>
-                      Documentação React
+                      {t("settings.reactDocs")}
                     </a>
                   </div>
                 </div>
 
                 <div style={{ borderTop: "1px solid var(--border)", paddingTop: "var(--space-6)" }}>
-                  <h3 className="text-2" style={{ marginBottom: "var(--space-4)" }}>Licenças</h3>
+                  <h3 className="text-2" style={{ marginBottom: "var(--space-4)" }}>{t("settings.licenses")}</h3>
                   <p style={{ color: "var(--text-3)", fontSize: "12px", lineHeight: 1.6 }}>
-                    Esta aplicação é construída com tecnologias de código aberto:
-                    Tauri, React, Rust, libSQL, e muitas outras bibliotecas incríveis.
-                    Consulte o ficheiro LICENSE no repositório para detalhes.
+                    {t("settings.licensesDesc")}
                   </p>
                 </div>
               </div>
@@ -618,45 +617,44 @@ export default function SettingsPage() {
           )}
 
           {activeCategory === "developer" && import.meta.env.DEV && (
-            <SettingsSection title="Desenvolvedor" description="Ferramentas e opções avançadas">
+            <SettingsSection title={t("settings.developer")} description={t("settings.developerDesc")}>
               <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
                 <div>
-                  <h3 className="text-2" style={{ marginBottom: "var(--space-3)" }}>Informação da aplicação</h3>
+                  <h3 className="text-2" style={{ marginBottom: "var(--space-3)" }}>{t("settings.appInfoTitle")}</h3>
                   <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", padding: "var(--space-2) 0", borderBottom: "1px solid var(--border)" }}>
-                      <span className="text-3">Versão</span>
+                      <span className="text-3">{t("settings.versionLabel")}</span>
                       <span className="mono">1.0.0 (build 2026.07)</span>
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", padding: "var(--space-2) 0", borderBottom: "1px solid var(--border)" }}>
-                      <span className="text-3">Tecnologia</span>
+                      <span className="text-3">{t("settings.technologyLabel")}</span>
                       <span className="mono">Tauri 2 · React 19 · Rust · libSQL</span>
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", padding: "var(--space-2) 0" }}>
-                      <span className="text-3">Base de dados</span>
+                      <span className="text-3">{t("settings.databaseLabel")}</span>
                       <span className="mono">libSQL (SQLite) · WAL</span>
                     </div>
                   </div>
                 </div>
 
                 <div style={{ borderTop: "1px solid var(--border)", paddingTop: "var(--space-6)" }}>
-                  <h3 className="text-2" style={{ marginBottom: "var(--space-3)" }}>Dados de demonstração</h3>
+                  <h3 className="text-2" style={{ marginBottom: "var(--space-3)" }}>{t("settings.demoDataTitle")}</h3>
                   <p className="text-3" style={{ marginBottom: "var(--space-4)", lineHeight: 1.6 }}>
-                    Preenche a base de dados com ingredientes, receitas, stock e cotações de demonstração para testes.
+                    {t("settings.demoDataDesc")}
                   </p>
                   <button className="btn btn-primary" onClick={handleSeedDemoData} disabled={saving}>
-                    Gerar dados de demonstração
+                    {t("settings.generateDemoDataBtn")}
                   </button>
                 </div>
 
                 <div style={{ borderTop: "1px solid var(--border)", paddingTop: "var(--space-6)" }}>
-                  <h3 className="text-2" style={{ marginBottom: "var(--space-3)", color: "var(--danger)" }}>Zona de perigo</h3>
+                  <h3 className="text-2" style={{ marginBottom: "var(--space-3)", color: "var(--danger)" }}>{t("settings.dangerZoneTitle")}</h3>
                   <p className="text-3" style={{ marginBottom: "var(--space-4)", lineHeight: 1.6 }}>
-                    Apaga permanentemente todos os ingredientes, receitas, stock, listas de compras,
-                    planeamento, fornecedores e definições. Esta acção não pode ser desfeita.
+                    {t("settings.dangerZoneDesc")}
                   </p>
                   <button className="btn btn-danger" onClick={() => setShowDeleteDataConfirm(true)}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "var(--space-2)" }}><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-                    Apagar todos os dados
+                    {t("settings.deleteAllDataMenuBtn")}
                   </button>
                 </div>
               </div>
@@ -670,21 +668,20 @@ export default function SettingsPage() {
         <div className="modal-backdrop" onClick={() => setShowResetConfirm(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 className="modal-title">Confirmar reposição</h2>
-              <button className="modal-close" onClick={() => setShowResetConfirm(false)} aria-label="Fechar">
+              <h2 className="modal-title">{t("settings.confirmReset")}</h2>
+              <button className="modal-close" onClick={() => setShowResetConfirm(false)} aria-label={t("common.close")}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
             </div>
             <div className="modal-body">
               <p style={{ color: "var(--text-2)", lineHeight: 1.6 }}>
-                Tem a certeza que quer repor todas as definições para os valores padrão?
-                Esta ação não pode ser desfeita, mas não afecta os teus ingredientes, receitas ou stock.
+                {t("settings.confirmResetDesc")}
               </p>
             </div>
             <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setShowResetConfirm(false)}>Cancelar</button>
+              <button className="btn btn-secondary" onClick={() => setShowResetConfirm(false)}>{t("common.cancel")}</button>
               <button className="btn btn-danger" onClick={handleReset} disabled={saving}>
-                Repor tudo
+                {t("settings.confirmResetBtn")}
               </button>
             </div>
           </div>
@@ -696,22 +693,20 @@ export default function SettingsPage() {
         <div className="modal-backdrop" onClick={() => setShowDeleteDataConfirm(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 className="modal-title">Apagar todos os dados</h2>
-              <button className="modal-close" onClick={() => setShowDeleteDataConfirm(false)} aria-label="Fechar">
+              <h2 className="modal-title">{t("settings.deleteAllDataTitle")}</h2>
+              <button className="modal-close" onClick={() => setShowDeleteDataConfirm(false)} aria-label={t("common.close")}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
             </div>
             <div className="modal-body">
               <p style={{ color: "var(--text-2)", lineHeight: 1.6 }}>
-                Tem a certeza que quer apagar TODOS os dados? Todos os ingredientes, receitas, stock,
-                listas de compras, planeamento, fornecedores e definições serão permanentemente eliminados.
-                Esta acção NÃO pode ser desfeita.
+                {t("settings.deleteAllDataDesc")}
               </p>
             </div>
             <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setShowDeleteDataConfirm(false)}>Cancelar</button>
+              <button className="btn btn-secondary" onClick={() => setShowDeleteDataConfirm(false)}>{t("common.cancel")}</button>
               <button className="btn btn-danger" onClick={handleDeleteAllData} disabled={saving}>
-                Apagar tudo
+                {t("settings.deleteAllDataBtn")}
               </button>
             </div>
           </div>

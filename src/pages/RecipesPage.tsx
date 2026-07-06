@@ -7,6 +7,9 @@ import { useToast } from "../components/ui/Toast";
 import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
 import SearchBar from "../components/ui/SearchBar";
+import { useI18n } from "../i18n";
+
+type T = (key: string, params?: Record<string, string | number>) => string;
 
 interface RecipeIngredient {
   ingredient_id: number;
@@ -32,12 +35,12 @@ interface Ingredient {
   price_per_unit: number;
 }
 
-const UNIT_GROUPS = [
-  { label: "Peso", units: ["gram", "kilogram", "milligram", "ounce", "pound", "pinch", "bunch", "clove", "slice"] },
-  { label: "Volume", units: ["milliliter", "liter", "fluid_ounce", "cup", "pint", "quart", "gallon"] },
-  { label: "Culinário", units: ["teaspoon", "tablespoon"] },
-  { label: "Contagem", units: ["piece", "dozen"] },
-  { label: "Outros", units: ["centimeter", "celsius", "fahrenheit"] },
+const getUnitGroups = (t: T) => [
+  { label: t("ingredients.unitGroups.weight"), units: ["gram", "kilogram", "milligram", "ounce", "pound", "pinch", "bunch", "clove", "slice"] },
+  { label: t("ingredients.unitGroups.volume"), units: ["milliliter", "liter", "fluid_ounce", "cup", "pint", "quart", "gallon"] },
+  { label: t("ingredients.unitGroups.culinary"), units: ["teaspoon", "tablespoon"] },
+  { label: t("ingredients.unitGroups.count"), units: ["piece", "dozen"] },
+  { label: t("ingredients.unitGroups.other"), units: ["centimeter", "celsius", "fahrenheit"] },
 ];
 
 const UNIT_LABELS: Record<string, string> = {
@@ -98,7 +101,7 @@ interface CostLine {
   title?: string;
 }
 
-function computeCostLines(recipe: Recipe, servings: number, ingredients: Ingredient[]): CostLine[] {
+function computeCostLines(recipe: Recipe, servings: number, ingredients: Ingredient[], t: T): CostLine[] {
   const factor = servings / (recipe.portions || 1);
   return (recipe.ingredients ?? []).map(ing => {
     const stock = ingredients.find(i => i.id === ing.ingredient_id);
@@ -107,9 +110,9 @@ function computeCostLines(recipe: Recipe, servings: number, ingredients: Ingredi
     const cost = price * scaledQty;
     const approx = !stock || stock.unit !== ing.unit;
     const title = !stock
-      ? "Ingrediente não encontrado no inventário — custo indisponível"
+      ? t("recipes.ingredientNotFound")
       : stock.unit !== ing.unit
-        ? `Preço registado em ${UNIT_SHORT[stock.unit] ?? stock.unit}; conversão para ${UNIT_SHORT[ing.unit] ?? ing.unit} é aproximada`
+        ? t("recipes.priceConversionNote", { stockUnit: UNIT_SHORT[stock.unit] ?? stock.unit, ingUnit: UNIT_SHORT[ing.unit] ?? ing.unit })
         : undefined;
     return {
       name: stock?.name ?? ing.ingredient_name ?? "—",
@@ -133,6 +136,7 @@ function RecipeListCard({
   onSelect,
   onEdit,
   onDelete,
+  t,
 }: {
   recipe: Recipe;
   active: boolean;
@@ -142,6 +146,7 @@ function RecipeListCard({
   onSelect: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  t: T;
 }) {
   return (
     <div
@@ -174,13 +179,13 @@ function RecipeListCard({
           {recipe.name}
         </div>
         <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 2 }}>
-          {recipe.category} · {recipe.portions} porç.
+          {recipe.category} · {recipe.portions} {t("recipes.perPortionAbbrev")}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
           <span className="mono" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}>{eur(costPerPortion)}</span>
-          <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-3)" }}>/porç.</span>
+          <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-3)" }}>/{t("recipes.perPortionAbbrev")}</span>
           {hasApprox && (
-            <span className="mono" style={{ fontSize: 11, color: "var(--approx)", borderBottom: "1px dotted var(--approx)" }} title="Inclui custos aproximados">≈</span>
+            <span className="mono" style={{ fontSize: 11, color: "var(--approx)", borderBottom: "1px dotted var(--approx)" }} title={t("recipes.approxCostTitle")}>≈</span>
           )}
         </div>
       </div>
@@ -188,8 +193,8 @@ function RecipeListCard({
         <button
           className="btn-icon"
           onClick={e => { e.stopPropagation(); onEdit(); }}
-          title="Editar"
-          aria-label={`Editar ${recipe.name}`}
+          title={t("common.edit")}
+          aria-label={t("ingredients.editAria", { name: recipe.name })}
           type="button"
         >
           <span className="ms" style={{ fontSize: 14 }}>edit</span>
@@ -197,8 +202,8 @@ function RecipeListCard({
         <button
           className="btn-icon danger"
           onClick={e => { e.stopPropagation(); onDelete(); }}
-          title="Eliminar"
-          aria-label={`Eliminar ${recipe.name}`}
+          title={t("common.delete")}
+          aria-label={t("ingredients.deleteAria", { name: recipe.name })}
           type="button"
         >
           <span className="ms" style={{ fontSize: 14 }}>delete</span>
@@ -208,22 +213,22 @@ function RecipeListCard({
   );
 }
 
-function ServingsStepper({ value, min, max, onChange }: { value: number; min: number; max: number; onChange: (v: number) => void }) {
+function ServingsStepper({ value, min, max, onChange, t }: { value: number; min: number; max: number; onChange: (v: number) => void; t: T }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 2, background: "var(--inset)", border: "1px solid var(--line)", borderRadius: 9, padding: 3 }}>
       <button
         type="button"
         onClick={() => onChange(Math.max(min, value - 1))}
         disabled={value <= min}
-        aria-label="Diminuir porções"
+        aria-label={t("recipes.decreasePortions")}
         style={{ width: 26, height: 26, border: "none", background: "var(--surface)", borderRadius: 6, cursor: "pointer", color: "var(--ink)", fontSize: 16, display: "grid", placeItems: "center", opacity: value <= min ? 0.4 : 1 }}
       >−</button>
-      <span className="mono" style={{ minWidth: 58, textAlign: "center", fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}>{value} porç.</span>
+      <span className="mono" style={{ minWidth: 58, textAlign: "center", fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}>{value} {t("recipes.perPortionAbbrev")}</span>
       <button
         type="button"
         onClick={() => onChange(Math.min(max, value + 1))}
         disabled={value >= max}
-        aria-label="Aumentar porções"
+        aria-label={t("recipes.increasePortions")}
         style={{ width: 26, height: 26, border: "none", background: "var(--surface)", borderRadius: 6, cursor: "pointer", color: "var(--ink)", fontSize: 16, display: "grid", placeItems: "center", opacity: value >= max ? 0.4 : 1 }}
       >+</button>
     </div>
@@ -237,6 +242,7 @@ function RecipeDetail({
   ingredients,
   onEdit,
   onDelete,
+  t,
 }: {
   recipe: Recipe;
   servings: number;
@@ -244,8 +250,9 @@ function RecipeDetail({
   ingredients: Ingredient[];
   onEdit: () => void;
   onDelete: () => void;
+  t: T;
 }) {
-  const costLines = useMemo(() => computeCostLines(recipe, servings, ingredients), [recipe, servings, ingredients]);
+  const costLines = useMemo(() => computeCostLines(recipe, servings, ingredients, t), [recipe, servings, ingredients, t]);
   const total = costLines.reduce((s, l) => s + l.cost, 0);
   const perPortion = total / (servings || 1);
   const steps = (recipe.instructions ?? "").split(/\n+/).map(s => s.trim()).filter(Boolean);
@@ -263,7 +270,7 @@ function RecipeDetail({
       >
         {!recipe.image_path && (
           <span className="mono" style={{ position: "absolute", top: 14, left: 16, fontSize: 10, color: "var(--ink-3)", background: "var(--surface)", padding: "3px 8px", borderRadius: 6 }}>
-            FOTO DO PRATO
+            {t("recipes.dishPhoto")}
           </span>
         )}
       </div>
@@ -278,16 +285,16 @@ function RecipeDetail({
               {recipe.category}
             </span>
             <span className="mono" style={{ fontSize: 11, color: "var(--ink-2)", background: "var(--inset)", padding: "3px 9px", borderRadius: 7 }}>
-              {(recipe.ingredients ?? []).length} ingredientes
+              {t("recipes.ingredientsCount", { count: (recipe.ingredients ?? []).length })}
             </span>
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn btn-secondary" onClick={onEdit} type="button">
-            <span className="ms" style={{ fontSize: 15 }}>edit</span> Editar
+            <span className="ms" style={{ fontSize: 15 }}>edit</span> {t("common.edit")}
           </button>
           <button className="btn btn-secondary" onClick={onDelete} type="button" style={{ color: "var(--red)" }}>
-            <span className="ms" style={{ fontSize: 15 }}>delete</span> Eliminar
+            <span className="ms" style={{ fontSize: 15 }}>delete</span> {t("common.delete")}
           </button>
         </div>
       </div>
@@ -296,21 +303,21 @@ function RecipeDetail({
         <div style={{ flex: "1 1 140px", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 11, padding: "13px 15px", display: "flex", alignItems: "center", gap: 10 }}>
           <span className="ms" style={{ fontSize: 20, color: "var(--ink-3)" }}>timer</span>
           <div>
-            <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>Preparação</div>
+            <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>{t("recipes.prepTime")}</div>
             <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>—</div>
           </div>
         </div>
         <div style={{ flex: "1 1 140px", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 11, padding: "13px 15px", display: "flex", alignItems: "center", gap: 10 }}>
           <span className="ms" style={{ fontSize: 20, color: "var(--ink-3)" }}>skillet</span>
           <div>
-            <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>Cozedura</div>
+            <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>{t("recipes.cookTime")}</div>
             <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>—</div>
           </div>
         </div>
         <div style={{ flex: "1 1 140px", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 11, padding: "13px 15px", display: "flex", alignItems: "center", gap: 10 }}>
           <span className="ms" style={{ fontSize: 20, color: "var(--ink-3)" }}>euro</span>
           <div>
-            <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>Por porção</div>
+            <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>{t("recipes.perPortion")}</div>
             <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: "var(--ember)" }}>{eur(perPortion)}</div>
           </div>
         </div>
@@ -319,12 +326,12 @@ function RecipeDetail({
       <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 22, marginTop: 24 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <span style={{ fontFamily: "var(--serif)", fontSize: 18, fontWeight: 600, color: "var(--ink)" }}>Ingredientes</span>
-            <ServingsStepper value={servings} min={1} max={999} onChange={setServings} />
+            <span style={{ fontFamily: "var(--serif)", fontSize: 18, fontWeight: 600, color: "var(--ink)" }}>{t("recipes.ingredientsSection")}</span>
+            <ServingsStepper value={servings} min={1} max={999} onChange={setServings} t={t} />
           </div>
           <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden" }}>
             {costLines.length === 0 && (
-              <div style={{ padding: "16px", fontSize: 13, color: "var(--ink-3)" }}>Sem ingredientes.</div>
+              <div style={{ padding: "16px", fontSize: 13, color: "var(--ink-3)" }}>{t("recipes.noIngredients")}</div>
             )}
             {costLines.map((l, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 15px", borderBottom: i < costLines.length - 1 ? "1px solid var(--line-2)" : "none" }}>
@@ -347,14 +354,14 @@ function RecipeDetail({
           </div>
         </div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontFamily: "var(--serif)", fontSize: 18, fontWeight: 600, color: "var(--ink)", marginBottom: 12 }}>Preparação</div>
-          {steps.length === 0 && <p className="text-3">Sem instruções.</p>}
-          {steps.map((t, i) => (
+          <div style={{ fontFamily: "var(--serif)", fontSize: 18, fontWeight: 600, color: "var(--ink)", marginBottom: 12 }}>{t("recipes.preparationSection")}</div>
+          {steps.length === 0 && <p className="text-3">{t("recipes.noInstructions")}</p>}
+          {steps.map((step, i) => (
             <div key={i} style={{ display: "flex", gap: 12, marginBottom: 14 }}>
               <span className="mono" style={{ width: 24, height: 24, flexShrink: 0, borderRadius: "50%", background: "var(--inset)", color: "var(--ember)", fontSize: 12, fontWeight: 600, display: "grid", placeItems: "center" }}>
                 {i + 1}
               </span>
-              <span style={{ fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.5, paddingTop: 2 }}>{t}</span>
+              <span style={{ fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.5, paddingTop: 2 }}>{step}</span>
             </div>
           ))}
         </div>
@@ -363,7 +370,8 @@ function RecipeDetail({
   );
 }
 
-function RecipeFormContent({ form, setForm, ingredients, isView, handleSave, editingId }: any) {
+function RecipeFormContent({ form, setForm, ingredients, isView, handleSave, editingId, t }: any) {
+  const unitGroups = getUnitGroups(t);
   function addIngredientRow() {
     setForm((f: any) => ({ ...f, ingredients: [...f.ingredients, { ingredient_id: 0, quantity: 0, unit: "gram" }] }));
   }
@@ -382,7 +390,7 @@ function RecipeFormContent({ form, setForm, ingredients, isView, handleSave, edi
   return (
     <>
       <div className="field">
-        <label className="field-label" htmlFor="recipe-name">Nome</label>
+        <label className="field-label" htmlFor="recipe-name">{t("common.name")}</label>
         <input
           id="recipe-name"
           className="input"
@@ -390,13 +398,13 @@ function RecipeFormContent({ form, setForm, ingredients, isView, handleSave, edi
           value={form.name}
           onChange={e => setForm((f: any) => ({ ...f, name: e.target.value }))}
           onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) handleSave(); }}
-          placeholder="ex: Arroz de marisco"
+          placeholder={t("recipes.form.namePlaceholder")}
           disabled={isView}
         />
       </div>
 
       <div className="field">
-        <label className="field-label" htmlFor="recipe-category">Categoria</label>
+        <label className="field-label" htmlFor="recipe-category">{t("recipes.form.category")}</label>
         <select
           id="recipe-category"
           className="select"
@@ -409,7 +417,7 @@ function RecipeFormContent({ form, setForm, ingredients, isView, handleSave, edi
       </div>
 
       <div className="field">
-        <label className="field-label">Imagem da receita</label>
+        <label className="field-label">{t("recipes.form.image")}</label>
         <ImageUpload
           entityType="recipe"
           entityId={editingId ?? 0}
@@ -419,7 +427,7 @@ function RecipeFormContent({ form, setForm, ingredients, isView, handleSave, edi
 
       <div className="field-row">
         <div className="field" style={{ flex: 1 }}>
-          <label className="field-label" htmlFor="recipe-portions">Porções</label>
+          <label className="field-label" htmlFor="recipe-portions">{t("recipes.form.portions")}</label>
           <input
             id="recipe-portions"
             type="number"
@@ -434,13 +442,13 @@ function RecipeFormContent({ form, setForm, ingredients, isView, handleSave, edi
       </div>
 
       <div className="field">
-        <label className="field-label" htmlFor="recipe-instructions">Instruções</label>
+        <label className="field-label" htmlFor="recipe-instructions">{t("recipes.form.instructions")}</label>
         <textarea
           id="recipe-instructions"
           className="textarea"
           value={form.instructions}
           onChange={e => setForm((f: any) => ({ ...f, instructions: e.target.value }))}
-          placeholder="Descreve os passos da receita..."
+          placeholder={t("recipes.form.instructionsPlaceholder")}
           rows={4}
           disabled={isView}
         />
@@ -448,24 +456,24 @@ function RecipeFormContent({ form, setForm, ingredients, isView, handleSave, edi
 
       <div className="field">
         <div className="field-row">
-          <label className="field-label">Ingredientes</label>
+          <label className="field-label">{t("recipes.form.ingredientsLabel")}</label>
           {!isView && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={addIngredientRow}>
               <span className="ms" style={{ fontSize: 14 }}>add</span>
-              Adicionar
+              {t("recipes.form.addIngredient")}
             </button>
           )}
         </div>
         {form.ingredients.length === 0 && (
-          <p className="text-4 mono" style={{ marginTop: "var(--space-2)" }}>Nenhum ingrediente adicionado</p>
+          <p className="text-4 mono" style={{ marginTop: "var(--space-2)" }}>{t("recipes.form.noIngredientsAdded")}</p>
         )}
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
-                <th style={{ width: "40%" }}>Ingrediente</th>
-                <th style={{ width: "20%" }}>Quantidade</th>
-                <th style={{ width: "25%" }}>Unidade</th>
+                <th style={{ width: "40%" }}>{t("recipes.form.colIngredient")}</th>
+                <th style={{ width: "20%" }}>{t("recipes.form.colQuantity")}</th>
+                <th style={{ width: "25%" }}>{t("recipes.form.colUnit")}</th>
                 <th style={{ width: "15%" }}></th>
               </tr>
             </thead>
@@ -479,7 +487,7 @@ function RecipeFormContent({ form, setForm, ingredients, isView, handleSave, edi
                       onChange={e => updateIngredientRow(idx, "ingredient_id", parseInt(e.target.value))}
                       disabled={isView}
                     >
-                      <option value={0}>Seleciona ingrediente</option>
+                      <option value={0}>{t("recipes.form.selectIngredient")}</option>
                       {ingredients.map((i: any) => (
                         <option key={i.id} value={i.id}>{i.name} ({UNIT_LABELS[i.unit] ?? i.unit})</option>
                       ))}
@@ -503,7 +511,7 @@ function RecipeFormContent({ form, setForm, ingredients, isView, handleSave, edi
                       onChange={e => updateIngredientRow(idx, "unit", e.target.value)}
                       disabled={isView}
                     >
-                      {UNIT_GROUPS.map(g => (
+                      {unitGroups.map(g => (
                         <optgroup key={g.label} label={g.label}>
                           {g.units.map(u => (
                             <option key={u} value={u}>{UNIT_LABELS[u]}</option>
@@ -517,7 +525,7 @@ function RecipeFormContent({ form, setForm, ingredients, isView, handleSave, edi
                       <button
                         className="btn-icon danger"
                         onClick={() => removeIngredientRow(idx)}
-                        aria-label="Remover ingrediente"
+                        aria-label={t("recipes.form.removeIngredient")}
                         type="button"
                       >
                         <span className="ms" style={{ fontSize: 14 }}>close</span>
@@ -543,28 +551,29 @@ function RecipeModal({
   loading,
   ingredients,
   editing,
+  t,
 }: any) {
   if (!modal) return null;
 
   const isView = false;
-  const title = modal === "create" ? "Nova receita" : "Editar receita";
+  const title = modal === "create" ? t("recipes.modal.newTitle") : t("recipes.modal.editTitle");
 
   const footer = (
     <>
-      <button className="btn btn-secondary" onClick={closeModal}>Cancelar</button>
+      <button className="btn btn-secondary" onClick={closeModal}>{t("common.cancel")}</button>
       <button
         className="btn btn-primary"
         onClick={handleSave}
         disabled={loading || !form.name.trim()}
       >
-        {loading ? "A guardar…" : "Guardar"}
+        {loading ? t("recipes.modal.saving") : t("common.save")}
       </button>
     </>
   );
 
   return (
     <Modal open={!!modal} onClose={closeModal} title={title} footer={footer} wide>
-      <RecipeFormContent form={form} setForm={setForm} ingredients={ingredients} isView={isView} handleSave={handleSave} editingId={editing?.id} />
+      <RecipeFormContent form={form} setForm={setForm} ingredients={ingredients} isView={isView} handleSave={handleSave} editingId={editing?.id} t={t} />
     </Modal>
   );
 }
@@ -584,6 +593,7 @@ export default function RecipesPage() {
   const [servings, setServings] = useState(4);
 
   const { showToast } = useToast();
+  const { t } = useI18n();
 
   const load = useCallback(async () => {
     try {
@@ -594,9 +604,9 @@ export default function RecipesPage() {
       setRecipes(recipesData);
       setIngredients(ingredientsData);
     } catch (e) {
-      showToast("Erro ao carregar dados", "err");
+      showToast(t("recipes.loadError"), "err");
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -650,7 +660,7 @@ export default function RecipesPage() {
   async function handleSave() {
     if (!form.name.trim()) return;
     if (form.ingredients.some(ing => ing.ingredient_id === 0 || ing.quantity <= 0)) {
-      showToast("Preenche todos os ingredientes com quantidades válidas", "warn");
+      showToast(t("recipes.fillIngredientsWarn"), "warn");
       return;
     }
     setLoading(true);
@@ -675,7 +685,7 @@ export default function RecipesPage() {
             image_base64: null,
           },
         });
-        showToast("Receita criada", "ok");
+        showToast(t("recipes.created"), "ok");
       } else if (editing) {
         await invoke("recipe_update", {
           id: editing.id,
@@ -696,12 +706,12 @@ export default function RecipesPage() {
             image_base64: null,
           },
         });
-        showToast("Receita actualizada", "ok");
+        showToast(t("recipes.updated"), "ok");
       }
       closeModal();
       await load();
     } catch (e) {
-      showToast("Erro ao guardar", "err");
+      showToast(t("recipes.saveError"), "err");
     } finally {
       setLoading(false);
     }
@@ -712,22 +722,22 @@ export default function RecipesPage() {
       await invoke("recipe_delete", { id });
       setConfirmDelete(null);
       if (selectedId === id) setSelectedId(null);
-      showToast("Receita eliminada", "ok");
+      showToast(t("recipes.deleted"), "ok");
       await load();
     } catch (e) {
-      showToast("Erro ao eliminar", "err");
+      showToast(t("recipes.deleteError"), "err");
     }
   }
 
   return (
     <div className="content" style={{ padding: 0, height: "100%", maxWidth: "none" }}>
       <PageHeader
-        title="Receitas"
-        subtitle={`${recipes.length} receitas`}
+        title={t("recipes.title")}
+        subtitle={t("recipes.subtitle", { count: recipes.length })}
         actions={
           <button className="btn btn-primary" onClick={openCreate}>
             <span className="ms" style={{ fontSize: 16 }}>add</span>
-            Nova receita
+            {t("recipes.newRecipe")}
           </button>
         }
       />
@@ -736,12 +746,12 @@ export default function RecipesPage() {
         <div style={{ padding: "26px 30px 60px" }}>
           <EmptyState
             icon={<span className="ms" style={{ fontSize: 40 }}>restaurant</span>}
-            title="Sem receitas"
-            body="Adiciona a primeira receita para começar."
+            title={t("recipes.empty")}
+            body={t("recipes.emptyDesc")}
             action={
               <button className="btn btn-primary" onClick={openCreate}>
                 <span className="ms" style={{ fontSize: 16 }}>add</span>
-                Adicionar receita
+                {t("recipes.addRecipe")}
               </button>
             }
           />
@@ -754,16 +764,16 @@ export default function RecipesPage() {
               display: "flex", flexDirection: "column", gap: 9, background: "var(--surface)",
             }}
             role="list"
-            aria-label="Lista de receitas"
+            aria-label={t("recipes.listAriaLabel")}
           >
             <div style={{ marginBottom: 4 }}>
-              <SearchBar value={search} onChange={setSearch} placeholder="Pesquisar receitas…" />
+              <SearchBar value={search} onChange={setSearch} placeholder={t("recipes.searchPlaceholder")} />
             </div>
             {filtered.length === 0 && (
-              <p className="text-3" style={{ padding: "12px 4px" }}>Sem resultados para esta pesquisa.</p>
+              <p className="text-3" style={{ padding: "12px 4px" }}>{t("recipes.noSearchResults")}</p>
             )}
             {filtered.map((recipe, i) => {
-              const costLines = computeCostLines(recipe, recipe.portions, ingredients);
+              const costLines = computeCostLines(recipe, recipe.portions, ingredients, t);
               const total = costLines.reduce((s, l) => s + l.cost, 0);
               const perPortion = total / (recipe.portions || 1);
               const hasApprox = costLines.some(l => l.approx);
@@ -778,6 +788,7 @@ export default function RecipesPage() {
                   onSelect={() => selectRecipe(recipe)}
                   onEdit={() => openEdit(recipe)}
                   onDelete={() => setConfirmDelete(recipe.id)}
+                  t={t}
                 />
               );
             })}
@@ -792,9 +803,10 @@ export default function RecipesPage() {
                 ingredients={ingredients}
                 onEdit={() => openEdit(selected)}
                 onDelete={() => setConfirmDelete(selected.id)}
+                t={t}
               />
             ) : (
-              <EmptyState title="Seleciona uma receita" body="Escolhe uma receita na lista à esquerda para ver os detalhes." />
+              <EmptyState title={t("recipes.selectRecipe")} body={t("recipes.selectRecipeDesc")} />
             )}
           </div>
         </div>
@@ -809,12 +821,13 @@ export default function RecipesPage() {
         loading={loading}
         ingredients={ingredients}
         editing={editing}
+        t={t}
       />
 
       <ConfirmDialog
         open={confirmDelete !== null}
-        title="Eliminar Receita"
-        body={`Tens a certeza que queres eliminar a receita "${recipes.find(r => r.id === confirmDelete)?.name}"?`}
+        title={t("recipes.confirmDeleteTitle")}
+        body={t("recipes.confirmDeleteBody", { name: recipes.find(r => r.id === confirmDelete)?.name ?? "" })}
         onConfirm={() => { if (confirmDelete !== null) handleDelete(confirmDelete); }}
         onCancel={() => setConfirmDelete(null)}
         danger

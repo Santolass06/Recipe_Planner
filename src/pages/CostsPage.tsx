@@ -3,6 +3,7 @@ import { invoke } from "../lib/devInvoke";
 import { useToast } from "../components/ui/Toast";
 import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
+import { useI18n } from "../i18n";
 
 interface RecipeIngredient {
   ingredient_id: number;
@@ -81,6 +82,7 @@ export default function CostsPage() {
   const [analysis, setAnalysis] = useState<CostAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
   const { showToast } = useToast();
+  const { t } = useI18n();
 
   const load = useCallback(async () => {
     try {
@@ -94,9 +96,9 @@ export default function CostsPage() {
         setSelectedRecipeId(recipesData[0].id);
       }
     } catch (e) {
-      showToast("Erro ao carregar dados", "err");
+      showToast(t("costs.loadError"), "err");
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -131,12 +133,12 @@ export default function CostsPage() {
         profit_total,
       });
     } catch (e) {
-      showToast("Erro ao calcular custos", "err");
+      showToast(t("costs.calcError"), "err");
       setAnalysis(null);
     } finally {
       setLoading(false);
     }
-  }, [selectedRecipeId, recipes, margin, portions, showToast]);
+  }, [selectedRecipeId, recipes, margin, portions, showToast, t]);
 
   useEffect(() => { calculate(); }, [calculate]);
 
@@ -151,7 +153,7 @@ export default function CostsPage() {
   if (!selectedRecipeId || !analysis) {
     return (
       <div className="content">
-        <PageHeader title="Análise de Custos" subtitle="Seleciona uma receita para analisar" />
+        <PageHeader title={t("costs.title")} subtitle={t("costs.selectPrompt")} />
         {recipes.length > 0 && (
           <div style={{ display: "flex", gap: "7px", flexWrap: "wrap", marginBottom: "18px" }}>
             {recipes.map(r => (
@@ -169,8 +171,8 @@ export default function CostsPage() {
           icon={
             <span className="ms" style={{ fontSize: 40, color: "var(--ink-3)" }}>calculate</span>
           }
-          title="Nenhuma análise disponível"
-          body="Cria uma receita na página de Receitas e seleciona-a aqui."
+          title={t("costs.noAnalysis")}
+          body={t("costs.noAnalysisDesc")}
         />
       </div>
     );
@@ -190,8 +192,8 @@ export default function CostsPage() {
   return (
     <div className="content">
       <PageHeader
-        title="Análise de Custos"
-        subtitle={`${selectedRecipe.name} • ${selectedRecipe.portions} doses base`}
+        title={t("costs.title")}
+        subtitle={t("costs.subtitle", { name: selectedRecipe.name, portions: selectedRecipe.portions })}
       />
 
       {/* Recipe switcher chips */}
@@ -216,13 +218,13 @@ export default function CostsPage() {
                 {selectedRecipe.name}
               </div>
               <div className="mono" style={{ fontSize: "10.5px", color: "var(--ink-3)", marginTop: "3px" }}>
-                Discriminado para {portions} porções {loading && "· a calcular…"}
+                {t("costs.breakdownFor", { portions })} {loading && t("costs.calculating")}
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "2px", background: "var(--inset)", border: "1px solid var(--line)", borderRadius: "9px", padding: "3px", flexShrink: 0 }}>
               <button
                 onClick={decPortions}
-                aria-label="Diminuir porções"
+                aria-label={t("costs.decreasePortions")}
                 style={{ width: 26, height: 26, border: "none", background: "var(--surface)", borderRadius: 6, cursor: "pointer", color: "var(--ink)", fontSize: 16 }}
               >
                 −
@@ -232,7 +234,7 @@ export default function CostsPage() {
               </span>
               <button
                 onClick={incPortions}
-                aria-label="Aumentar porções"
+                aria-label={t("costs.increasePortions")}
                 style={{ width: 26, height: 26, border: "none", background: "var(--surface)", borderRadius: 6, cursor: "pointer", color: "var(--ink)", fontSize: 16 }}
               >
                 +
@@ -241,14 +243,14 @@ export default function CostsPage() {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1.7fr 1fr 90px", gap: "10px", padding: "9px 20px", borderBottom: "1px solid var(--line)", background: "var(--inset)" }}>
-            <span className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)" }}>Ingrediente</span>
-            <span className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)", textAlign: "right" }}>Qtd.</span>
-            <span className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)", textAlign: "right" }}>Custo</span>
+            <span className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)" }}>{t("costs.colIngredient")}</span>
+            <span className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)", textAlign: "right" }}>{t("costs.colQty")}</span>
+            <span className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".6px", color: "var(--ink-3)", textAlign: "right" }}>{t("costs.colCost")}</span>
           </div>
 
           {breakdown.ingredient_costs.length === 0 ? (
             <div style={{ padding: "24px 20px" }}>
-              <p className="text-3" style={{ margin: 0, fontSize: "13px" }}>Sem ingredientes nesta receita.</p>
+              <p className="text-3" style={{ margin: 0, fontSize: "13px" }}>{t("costs.noIngredients")}</p>
             </div>
           ) : (
             breakdown.ingredient_costs.map((ic, idx) => (
@@ -261,7 +263,7 @@ export default function CostsPage() {
                   {ic.is_approximate ? (
                     <span
                       className="mono"
-                      title={ic.approximation_note ?? "Custo aproximado"}
+                      title={ic.approximation_note ?? t("costs.approxCost")}
                       style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--approx)", borderBottom: "1px dotted var(--approx)", cursor: "help" }}
                     >
                       ≈ {eur(ic.total_cost)}
@@ -277,7 +279,7 @@ export default function CostsPage() {
           )}
 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", background: "var(--inset)" }}>
-            <span style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>Total da receita</span>
+            <span style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>{t("costs.totalRecipe")}</span>
             <span className="mono" style={{ fontSize: "16px", fontWeight: 600, color: "var(--ink)" }}>{eur(breakdown.total_cost)}</span>
           </div>
         </div>
@@ -285,28 +287,28 @@ export default function CostsPage() {
         {/* Summary + margin */}
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div style={{ background: "var(--ember)", borderRadius: "14px", padding: "20px", color: "var(--ember-ink)" }}>
-            <div className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".8px", opacity: 0.85 }}>Custo por porção</div>
+            <div className="mono" style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: ".8px", opacity: 0.85 }}>{t("costs.costPerPortion")}</div>
             <div className="mono" style={{ fontSize: "40px", fontWeight: 600, lineHeight: 1, marginTop: "8px" }}>
               {eur(breakdown.cost_per_portion)}
             </div>
             <div style={{ display: "flex", gap: "20px", marginTop: "16px", paddingTop: "14px", borderTop: "1px solid rgba(255,255,255,.22)" }}>
               <div>
-                <div className="mono" style={{ fontSize: "9px", opacity: 0.8, textTransform: "uppercase" }}>Food-cost</div>
+                <div className="mono" style={{ fontSize: "9px", opacity: 0.8, textTransform: "uppercase" }}>{t("costs.foodCost")}</div>
                 <div className="mono" style={{ fontSize: "16px", fontWeight: 600, marginTop: "2px" }}>{foodCostPct.toFixed(0)}%</div>
               </div>
               <div>
-                <div className="mono" style={{ fontSize: "9px", opacity: 0.8, textTransform: "uppercase" }}>Preço sug.</div>
+                <div className="mono" style={{ fontSize: "9px", opacity: 0.8, textTransform: "uppercase" }}>{t("costs.suggestedPrice")}</div>
                 <div className="mono" style={{ fontSize: "16px", fontWeight: 600, marginTop: "2px" }}>{eur(analysis.suggested_price_per_portion)}</div>
               </div>
               <div>
-                <div className="mono" style={{ fontSize: "9px", opacity: 0.8, textTransform: "uppercase" }}>Margem</div>
+                <div className="mono" style={{ fontSize: "9px", opacity: 0.8, textTransform: "uppercase" }}>{t("costs.margin")}</div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: "1px", marginTop: "2px" }}>
                   <input
                     type="number"
                     className="mono"
                     value={margin}
                     onChange={handleMarginChange}
-                    aria-label="Margem (%)"
+                    aria-label={t("costs.marginAria")}
                     min={0}
                     max={500}
                     step={1}
@@ -326,13 +328,13 @@ export default function CostsPage() {
             <div style={{ background: "var(--approx-soft)", border: "1px solid var(--approx)", borderRadius: "14px", padding: "16px 18px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "9px" }}>
                 <span className="ms" style={{ fontSize: 20, color: "var(--approx)" }}>rule</span>
-                <span style={{ fontWeight: 600, fontSize: "13.5px", color: "var(--ink)" }}>Contém custos aproximados</span>
+                <span style={{ fontWeight: 600, fontSize: "13.5px", color: "var(--ink)" }}>{t("costs.hasApproxTitle")}</span>
               </div>
               <div style={{ fontSize: "12.5px", color: "var(--ink-2)", lineHeight: 1.5, marginTop: "9px" }}>
-                Alguns ingredientes usam conversões inexatas (contagem→peso, «q.b.»). Os valores marcados com ≈ são estimativas — passa o rato para ver o motivo.
+                {t("costs.hasApproxDesc")}
               </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "12px", paddingTop: "11px", borderTop: "1px solid var(--approx)" }}>
-                <span className="mono" style={{ fontSize: "11px", color: "var(--approx)" }}>≈ do total é estimado</span>
+                <span className="mono" style={{ fontSize: "11px", color: "var(--approx)" }}>{t("costs.estimatedOfTotal")}</span>
                 <span className="mono" style={{ fontSize: "13px", fontWeight: 600, color: "var(--approx)" }}>
                   {eur(approxSum)} · {approxPct.toFixed(1)}%
                 </span>

@@ -56,7 +56,7 @@ export default function Sidebar() {
           <div className="brand-tag">en place</div>
         </div>
       </div>
-      <nav className="sidebar-scroll" aria-label="Navegação principal">
+      <nav className="sidebar-scroll" aria-label={t("nav.ariaLabel")}>
         {groups.map((g) => (
           <div key={g.label} className="nav-group">
             <p className="nav-group-label" style={{ margin: "0 0 6px 4px" }}>{g.label}</p>

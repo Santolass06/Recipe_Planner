@@ -1,4 +1,7 @@
+import { useI18n } from "../i18n";
+
 export default function PlaceholderPage({ name }: { name: string }) {
+  const { t } = useI18n();
   const capitalized = name.charAt(0).toUpperCase() + name.slice(1);
   return (
     <div className="content">
@@ -10,7 +13,7 @@ export default function PlaceholderPage({ name }: { name: string }) {
           <line x1="3" y1="10" x2="21" y2="10"/>
         </svg>
         <p className="empty-title">{capitalized}</p>
-        <p className="empty-desc">Esta funcionalidade será implementada no próximo sprint.</p>
+        <p className="empty-desc">{t("common.placeholderDesc")}</p>
       </div>
     </div>
   );
