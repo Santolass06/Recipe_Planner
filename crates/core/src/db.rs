@@ -3708,6 +3708,22 @@ pub async fn image_delete(db: &Database, id: i64) -> LibsqlResult<()> {
     Ok(())
 }
 
+/// Read an image file's bytes as base64, for display via data: URL
+pub async fn image_read_base64(db: &Database, id: i64) -> LibsqlResult<String> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    let conn = get_conn(db).await?;
+    let mut rows = conn.query("SELECT path FROM images WHERE id = ?1", params![id]).await?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    let path: String = row.get(0)?;
+
+    let data_dir = dirs::data_dir().unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let bytes = std::fs::read(data_dir.join("mise").join(&path))
+        .map_err(|e| libsql::Error::Misuse(e.to_string()))?;
+
+    Ok(STANDARD.encode(bytes))
+}
+
 /// Set image as primary
 pub async fn image_set_primary(db: &Database, id: i64) -> LibsqlResult<Image> {
     let conn = get_conn(db).await?;

@@ -1,18 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useToast } from "../components/ui/Toast";
-import { invoke } from "../lib/devInvoke";
+import { invoke, openExternal } from "../lib/devInvoke";
 import { useI18n } from "../i18n";
 import { applyTheme } from "../theme";
-
-// WebKitGTK bloqueia <a href> externos — abrir via plugin opener
-// (capability opener:default já inclui allow-default-urls para https/http).
-async function openExternal(url: string) {
-  try {
-    await invoke("plugin:opener|open_url", { url });
-  } catch (e) {
-    console.error("Erro ao abrir link:", e);
-  }
-}
 
 type SettingsMap = Record<string, string>;
 

@@ -131,6 +131,7 @@ pub fn run() {
             mise_tauri::commands::image_delete,
             mise_tauri::commands::image_set_primary,
             mise_tauri::commands::image_get,
+            mise_tauri::commands::image_read_base64,
             mise_tauri::commands::image_search_proxy,
             // Receipts (OCR) — Lote 2 (backend only; frontend ReceiptScannerPage fora de scope)
             mise_tauri::commands::receipt_scan,

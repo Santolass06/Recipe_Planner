@@ -417,6 +417,10 @@ impl AppDb {
         mise_core::db::image_get(&self.db, entity_type, entity_id).await.map_err(|e| e.to_string())
     }
 
+    pub async fn image_read_base64(&self, id: i64) -> Result<String, String> {
+        mise_core::db::image_read_base64(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
     pub async fn image_search_proxy(&self, query: String, per_page: Option<u32>) -> Result<Vec<ProxyImageResult>, String> {
         mise_core::db::image_search_proxy(query, per_page).await.map_err(|e| e.to_string())
     }
@@ -1168,6 +1172,14 @@ pub mod commands {
         entity_id: i64,
     ) -> Result<Vec<Image>, String> {
         db.image_get(entity_type, entity_id).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn image_read_base64(
+        db: tauri::State<'_, crate::AppDb>,
+        id: i64,
+    ) -> Result<String, String> {
+        db.image_read_base64(id).await.map_err(|e| e.to_string())
     }
 
     #[tauri::command]
