@@ -223,10 +223,14 @@ body {
   position: fixed; inset: 0; background: var(--bg-modal-backdrop);
   backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
   display: flex; align-items: center; justify-content: center; z-index: 100;
+  padding: 24px;
 }
 .modal {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg);
   padding: 24px; width: 100%; max-width: 480px; position: relative; box-shadow: var(--shadow-modal);
+  /* ponytail: without this, a modal taller than the viewport (e.g. a recipe
+     with many ingredients) has no way to reach its own footer buttons. */
+  max-height: calc(100vh - 48px); overflow-y: auto;
 }
 .modal.wide { max-width: 720px; }
 .modal-title { font-family: var(--serif); font-size: 19px; font-weight: 600; margin: 0 0 18px; color: var(--ink); }

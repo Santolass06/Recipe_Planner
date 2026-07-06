@@ -10,6 +10,7 @@ import SearchBar from "../components/ui/SearchBar";
 import { useI18n } from "../i18n";
 import type { RecipeWithIngredients as Recipe } from "../../crates/core/bindings/RecipeWithIngredients";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
+import type { RecipeImportPreview } from "../../crates/core/bindings/RecipeImportPreview";
 import { UNIT_LABELS_FULL as UNIT_LABELS, UNIT_LABELS_SHORT as UNIT_SHORT } from "../lib/units";
 
 export type T = (key: string, params?: Record<string, string | number>) => string;
@@ -31,8 +32,10 @@ export const EMPTY_FORM = {
   category: "Prato principal",
   portions: 4,
   instructions: "",
-  ingredients: [] as { ingredient_id: number; quantity: number; unit: string }[],
+  ingredients: [] as { ingredient_id: number; quantity: number; unit: string; import_hint?: string }[],
   image_path: null as string | null,
+  prep_time_minutes: null as number | null,
+  cook_time_minutes: null as number | null,
 };
 
 const CARD_TONES = ["var(--ember)", "var(--approx)", "var(--green)", "var(--amber)"];
@@ -261,14 +264,14 @@ function RecipeDetail({
           <span className="ms" style={{ fontSize: 20, color: "var(--ink-3)" }}>timer</span>
           <div>
             <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>{t("recipes.prepTime")}</div>
-            <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>—</div>
+            <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>{recipe.prep_time_minutes != null ? `${recipe.prep_time_minutes} min` : "—"}</div>
           </div>
         </div>
         <div style={{ flex: "1 1 140px", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 11, padding: "13px 15px", display: "flex", alignItems: "center", gap: 10 }}>
           <span className="ms" style={{ fontSize: 20, color: "var(--ink-3)" }}>skillet</span>
           <div>
             <div className="mono" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>{t("recipes.cookTime")}</div>
-            <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>—</div>
+            <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>{recipe.cook_time_minutes != null ? `${recipe.cook_time_minutes} min` : "—"}</div>
           </div>
         </div>
         <div style={{ flex: "1 1 140px", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 11, padding: "13px 15px", display: "flex", alignItems: "center", gap: 10 }}>
@@ -396,6 +399,30 @@ export function RecipeFormContent({ form, setForm, ingredients, isView, handleSa
             disabled={isView}
           />
         </div>
+        <div className="field" style={{ flex: 1 }}>
+          <label className="field-label" htmlFor="recipe-prep-time">{t("recipes.prepTime")}</label>
+          <input
+            id="recipe-prep-time"
+            type="number"
+            className="input input-num"
+            min="0"
+            value={form.prep_time_minutes ?? ""}
+            onChange={e => setForm((f: any) => ({ ...f, prep_time_minutes: e.target.value === "" ? null : parseInt(e.target.value) || 0 }))}
+            disabled={isView}
+          />
+        </div>
+        <div className="field" style={{ flex: 1 }}>
+          <label className="field-label" htmlFor="recipe-cook-time">{t("recipes.cookTime")}</label>
+          <input
+            id="recipe-cook-time"
+            type="number"
+            className="input input-num"
+            min="0"
+            value={form.cook_time_minutes ?? ""}
+            onChange={e => setForm((f: any) => ({ ...f, cook_time_minutes: e.target.value === "" ? null : parseInt(e.target.value) || 0 }))}
+            disabled={isView}
+          />
+        </div>
       </div>
 
       <div className="field">
@@ -449,6 +476,11 @@ export function RecipeFormContent({ form, setForm, ingredients, isView, handleSa
                         <option key={i.id} value={i.id}>{i.name} ({UNIT_LABELS[i.unit] ?? i.unit})</option>
                       ))}
                     </select>
+                    {!isView && ing.ingredient_id === 0 && ing.import_hint && (
+                      <p className="text-4 mono" style={{ marginTop: 4, color: "var(--approx)" }}>
+                        {t("recipes.form.importHint", { text: ing.import_hint })}
+                      </p>
+                    )}
                   </td>
                   <td>
                     <input
@@ -548,6 +580,9 @@ export default function RecipesPage() {
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [servings, setServings] = useState(4);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importUrl, setImportUrl] = useState("");
+  const [importBusy, setImportBusy] = useState(false);
 
   const { showToast } = useToast();
   const { t } = useI18n();
@@ -607,6 +642,8 @@ export default function RecipesPage() {
         unit: ing.unit,
       })),
       image_path: recipe.image_path ?? null,
+      prep_time_minutes: recipe.prep_time_minutes ?? null,
+      cook_time_minutes: recipe.cook_time_minutes ?? null,
     });
     setEditing(recipe);
     setModal("edit");
@@ -634,10 +671,10 @@ export default function RecipesPage() {
               quantity: ing.quantity,
               unit: ing.unit,
             })),
-            // Campos do RecipeInput sem UI no formulário: enviados explicitamente
-            // para o serde não rejeitar por "missing field" (tags é Vec, obrigatório).
-            prep_time_minutes: null,
-            cook_time_minutes: null,
+            prep_time_minutes: form.prep_time_minutes,
+            cook_time_minutes: form.cook_time_minutes,
+            // tags: sem UI no formulário; enviado explicitamente porque o serde
+            // rejeita "missing field" (Vec é obrigatório).
             tags: [],
             image_base64: null,
           },
@@ -656,9 +693,8 @@ export default function RecipesPage() {
               quantity: ing.quantity,
               unit: ing.unit,
             })),
-            // Campos do RecipeInput sem UI no formulário.
-            prep_time_minutes: null,
-            cook_time_minutes: null,
+            prep_time_minutes: form.prep_time_minutes,
+            cook_time_minutes: form.cook_time_minutes,
             tags: [],
             image_base64: null,
           },
@@ -671,6 +707,46 @@ export default function RecipesPage() {
       showToast(t("recipes.saveError"), "err");
     } finally {
       setLoading(false);
+    }
+  }
+
+  function openImport() {
+    setImportUrl("");
+    setImportOpen(true);
+  }
+
+  function closeImport() {
+    setImportOpen(false);
+    setImportUrl("");
+  }
+
+  async function handleImport() {
+    if (!importUrl.trim()) return;
+    setImportBusy(true);
+    try {
+      const preview = await invoke<RecipeImportPreview>("recipe_import_from_url", { url: importUrl.trim() });
+      setForm({
+        ...EMPTY_FORM,
+        name: preview.name,
+        portions: preview.portions ?? EMPTY_FORM.portions,
+        instructions: preview.instructions,
+        prep_time_minutes: preview.prep_time_minutes ?? null,
+        cook_time_minutes: preview.cook_time_minutes ?? null,
+        ingredients: preview.ingredients.map(ing => ({
+          ingredient_id: ing.matched_ingredient_id ?? 0,
+          quantity: ing.quantity,
+          unit: ing.unit,
+          import_hint: ing.matched_ingredient_id == null ? ing.name_guess : undefined,
+        })),
+      });
+      setEditing(null);
+      setModal("create");
+      closeImport();
+      showToast(t("recipes.import.success"), "ok");
+    } catch (e) {
+      showToast(typeof e === "string" && e ? e : t("recipes.import.error"), "err");
+    } finally {
+      setImportBusy(false);
     }
   }
 
@@ -692,10 +768,16 @@ export default function RecipesPage() {
         title={t("recipes.title")}
         subtitle={t("recipes.subtitle", { count: recipes.length })}
         actions={
-          <button className="btn btn-primary" onClick={openCreate}>
-            <span className="ms" style={{ fontSize: 16 }}>add</span>
-            {t("recipes.newRecipe")}
-          </button>
+          <>
+            <button className="btn btn-secondary" onClick={openImport}>
+              <span className="ms" style={{ fontSize: 16 }}>link</span>
+              {t("recipes.importFromUrl")}
+            </button>
+            <button className="btn btn-primary" onClick={openCreate}>
+              <span className="ms" style={{ fontSize: 16 }}>add</span>
+              {t("recipes.newRecipe")}
+            </button>
+          </>
         }
       />
 
@@ -789,6 +871,39 @@ export default function RecipesPage() {
         onCancel={() => setConfirmDelete(null)}
         danger
       />
+
+      <Modal
+        open={importOpen}
+        onClose={closeImport}
+        title={t("recipes.import.title")}
+        footer={
+          <>
+            <button className="btn btn-secondary" onClick={closeImport}>{t("common.cancel")}</button>
+            <button
+              className="btn btn-primary"
+              onClick={handleImport}
+              disabled={importBusy || !importUrl.trim()}
+            >
+              {importBusy ? t("recipes.import.loading") : t("recipes.import.submit")}
+            </button>
+          </>
+        }
+      >
+        <div className="field">
+          <label className="field-label" htmlFor="recipe-import-url">{t("recipes.import.urlLabel")}</label>
+          <input
+            id="recipe-import-url"
+            className="input"
+            autoFocus
+            value={importUrl}
+            onChange={e => setImportUrl(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") handleImport(); }}
+            placeholder={t("recipes.import.urlPlaceholder")}
+            disabled={importBusy}
+          />
+        </div>
+        <p className="text-4 mono" style={{ marginTop: "var(--space-2)" }}>{t("recipes.import.unmatchedNote")}</p>
+      </Modal>
     </div>
   );
 }

@@ -2568,6 +2568,257 @@ pub async fn recipe_promote_to_catalog(db: &Database, id: i64) -> LibsqlResult<R
     row_to_recipe_with_ingredients(db, recipe).await
 }
 
+/// Find the schema.org `Recipe` node in a page's JSON-LD blocks, if any (Fase 3.4).
+/// Recipe sites publish this for search engines; NYT Cooking, AllRecipes and most
+/// food blogs all use it, so no per-site scraping logic is needed.
+fn extract_recipe_json_ld(html: &str) -> Option<serde_json::Value> {
+    let re = regex::Regex::new(r#"(?s)<script type="application/ld\+json"[^>]*>(.*?)</script>"#).ok()?;
+    for caps in re.captures_iter(html) {
+        let raw = caps.get(1)?.as_str();
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else { continue };
+        if let Some(recipe) = find_recipe_node(&value) {
+            return Some(recipe.clone());
+        }
+    }
+    None
+}
+
+/// Recipe nodes can be a bare object, or nested inside an `@graph` array — walk both.
+fn find_recipe_node(value: &serde_json::Value) -> Option<&serde_json::Value> {
+    match value {
+        serde_json::Value::Object(map) => {
+            let is_recipe = match map.get("@type") {
+                Some(serde_json::Value::String(s)) => s == "Recipe",
+                Some(serde_json::Value::Array(types)) => types.iter().any(|t| t.as_str() == Some("Recipe")),
+                _ => false,
+            };
+            if is_recipe {
+                return Some(value);
+            }
+            map.get("@graph").and_then(find_recipe_node)
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(find_recipe_node),
+        _ => None,
+    }
+}
+
+fn extract_instructions(recipe: &serde_json::Value) -> String {
+    match &recipe["recipeInstructions"] {
+        serde_json::Value::Array(steps) => steps.iter()
+            .filter_map(|s| s.as_str().map(|s| s.to_string()).or_else(|| s["text"].as_str().map(|t| t.to_string())))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        serde_json::Value::String(s) => s.clone(),
+        _ => String::new(),
+    }
+}
+
+fn extract_portions(recipe: &serde_json::Value) -> Option<u32> {
+    let text = match &recipe["recipeYield"] {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(arr) => arr.first()?.as_str()?.to_string(),
+        serde_json::Value::Number(n) => return n.as_u64().map(|v| v as u32),
+        _ => return None,
+    };
+    regex::Regex::new(r"\d+").ok()?.find(&text)?.as_str().parse().ok()
+}
+
+fn extract_image_url(recipe: &serde_json::Value) -> Option<String> {
+    match &recipe["image"] {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Array(arr) => arr.first().and_then(|first| match first {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Object(_) => first["url"].as_str().map(|s| s.to_string()),
+            _ => None,
+        }),
+        serde_json::Value::Object(_) => recipe["image"]["url"].as_str().map(|s| s.to_string()),
+        _ => None,
+    }
+}
+
+/// Parse an ISO 8601 duration (`PT15M`, `PT1H30M`) into whole minutes.
+fn parse_iso8601_duration_minutes(duration: &str) -> Option<u32> {
+    let caps = regex::Regex::new(r"^PT(?:(\d+)H)?(?:(\d+)M)?$").ok()?.captures(duration)?;
+    let hours: u32 = caps.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+    let minutes: u32 = caps.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+    Some(hours * 60 + minutes)
+}
+
+/// Match a recipe-ingredient-line unit word (English, singular or plural) to `Unit`.
+/// Deliberately a separate vocabulary from `parse_unit_str` above: that one matches the
+/// canonical snake_case strings this app stores, this one matches free-text recipe prose.
+fn unit_from_ingredient_word(word: &str) -> Option<Unit> {
+    match word.to_lowercase().trim_end_matches('s') {
+        "gram" | "g" => Some(Unit::Gram),
+        "kilogram" | "kg" => Some(Unit::Kilogram),
+        "milligram" | "mg" => Some(Unit::Milligram),
+        "ounce" | "oz" => Some(Unit::Ounce),
+        "pound" | "lb" => Some(Unit::Pound),
+        "milliliter" | "ml" => Some(Unit::Milliliter),
+        "liter" | "l" => Some(Unit::Liter),
+        "cup" => Some(Unit::Cup),
+        "pint" => Some(Unit::Pint),
+        "quart" => Some(Unit::Quart),
+        "gallon" => Some(Unit::Gallon),
+        "teaspoon" | "tsp" => Some(Unit::Teaspoon),
+        "tablespoon" | "tbsp" | "tbs" => Some(Unit::Tablespoon),
+        "piece" | "pc" => Some(Unit::Piece),
+        "dozen" | "doz" => Some(Unit::Dozen),
+        "pinch" => Some(Unit::Pinch),
+        "bunch" => Some(Unit::Bunch),
+        "clove" => Some(Unit::Clove),
+        "slice" => Some(Unit::Slice),
+        _ => None,
+    }
+}
+
+/// Strip a leading quantity (mixed fraction, simple fraction, or decimal) off an
+/// ingredient line, defaulting to 1 when none is found. Returns (quantity, rest).
+fn parse_quantity_prefix(s: &str) -> (f64, &str) {
+    let s = s.trim_start();
+    if let Ok(re) = regex::Regex::new(r"^(\d+)\s+(\d+)/(\d+)\s*(.*)$") {
+        if let Some(caps) = re.captures(s) {
+            let whole: f64 = caps[1].parse().unwrap_or(0.0);
+            let num: f64 = caps[2].parse().unwrap_or(0.0);
+            let den: f64 = caps[3].parse().unwrap_or(1.0);
+            let rest_start = caps.get(4).map(|m| m.start()).unwrap_or(s.len());
+            return (whole + num / den.max(1.0), s[rest_start..].trim_start());
+        }
+    }
+    if let Ok(re) = regex::Regex::new(r"^(\d+)/(\d+)\s*(.*)$") {
+        if let Some(caps) = re.captures(s) {
+            let num: f64 = caps[1].parse().unwrap_or(0.0);
+            let den: f64 = caps[2].parse().unwrap_or(1.0);
+            let rest_start = caps.get(3).map(|m| m.start()).unwrap_or(s.len());
+            return (num / den.max(1.0), s[rest_start..].trim_start());
+        }
+    }
+    if let Ok(re) = regex::Regex::new(r"^(\d+(?:\.\d+)?)\s*(.*)$") {
+        if let Some(caps) = re.captures(s) {
+            let qty: f64 = caps[1].parse().unwrap_or(1.0);
+            let rest_start = caps.get(2).map(|m| m.start()).unwrap_or(s.len());
+            return (qty, s[rest_start..].trim_start());
+        }
+    }
+    (1.0, s)
+}
+
+/// Recipe sites commonly write quantities with vulgar fraction glyphs ("½ cup") instead
+/// of ASCII ("1/2 cup") — normalize the common ones so `parse_quantity_prefix` sees them.
+fn normalize_vulgar_fractions(s: &str) -> String {
+    s.replace('½', "1/2").replace('¼', "1/4").replace('¾', "3/4")
+        .replace('⅓', "1/3").replace('⅔', "2/3")
+        .replace('⅛', "1/8").replace('⅜', "3/8").replace('⅝', "5/8").replace('⅞', "7/8")
+}
+
+/// Strip the descriptive clauses recipe ingredient lines often carry — text after the
+/// first comma, and any parenthetical asides — before scanning for a unit or matching
+/// against the catalog. E.g. "grated Parmesan, divided, more for garnish" -> "grated
+/// Parmesan"; "small baguette... (about 8 ounces), preferably day-old..." -> "small
+/// baguette...". Deliberately does NOT try to recover a quantity from inside these
+/// clauses (e.g. "about 8 ounces") — parenthetical numbers are usually an approximate
+/// aside on the primary count/unit already parsed, not a more precise replacement for
+/// it, and there's no reliable rule to tell the two apart from text alone.
+fn strip_descriptive_clauses(s: &str) -> String {
+    let without_parens = regex::Regex::new(r"\([^)]*\)")
+        .map(|re| re.replace_all(s, "").to_string())
+        .unwrap_or_else(|_| s.to_string());
+    without_parens.split(',').next().unwrap_or(&without_parens).trim().to_string()
+}
+
+/// Best-effort parse of a free-text recipe ingredient line ("3 tablespoons olive oil")
+/// into quantity + unit + ingredient name. Scans the (cleaned) words after the leading
+/// quantity for the first recognized unit word, wherever it falls — handles both
+/// "quantity unit name" ("3 tablespoons olive oil") and "quantity name unit" ("5 garlic
+/// cloves") orderings. No unit word found -> falls back to quantity 1 / Piece with the
+/// cleaned line as the name guess, left for manual review.
+fn parse_ingredient_line(raw: &str) -> RecipeImportIngredient {
+    let trimmed = raw.trim();
+    let normalized = normalize_vulgar_fractions(trimmed);
+    let (quantity, rest) = parse_quantity_prefix(&normalized);
+    let core = strip_descriptive_clauses(rest);
+    let words: Vec<&str> = core.split_whitespace().collect();
+
+    let (unit, name_guess) = match words.iter().position(|w| unit_from_ingredient_word(w).is_some()) {
+        Some(idx) => {
+            let unit = unit_from_ingredient_word(words[idx]).unwrap();
+            let name = words.iter().enumerate()
+                .filter(|(i, _)| *i != idx)
+                .map(|(_, w)| *w)
+                .collect::<Vec<_>>()
+                .join(" ");
+            (unit, name)
+        }
+        None => (Unit::Piece, core.clone()),
+    };
+
+    RecipeImportIngredient {
+        raw_text: trimmed.to_string(),
+        quantity,
+        unit,
+        name_guess: if name_guess.is_empty() { trimmed.to_string() } else { name_guess },
+        matched_ingredient_id: None,
+    }
+}
+
+/// Import a recipe preview from a URL's schema.org/Recipe JSON-LD (Fase 3.4).
+/// Read-only: never writes to the DB, only looks up existing ingredients by exact
+/// name to pre-fill `matched_ingredient_id` where possible. Saving is a separate,
+/// explicit step the user takes after reviewing the preview.
+pub async fn recipe_import_from_url(db: &Database, url: String) -> Result<RecipeImportPreview, String> {
+    let client = reqwest::Client::new();
+    let html = client
+        .get(&url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .text()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let recipe_json = extract_recipe_json_ld(&html)
+        .ok_or_else(|| "Não foi possível encontrar dados de receita (schema.org/Recipe) nesta página.".to_string())?;
+
+    let name = recipe_json["name"].as_str().unwrap_or("").to_string();
+    if name.is_empty() {
+        return Err("Os dados de receita encontrados não têm nome.".to_string());
+    }
+
+    let instructions = extract_instructions(&recipe_json);
+    let portions = extract_portions(&recipe_json);
+    let prep_time_minutes = recipe_json["prepTime"].as_str().and_then(parse_iso8601_duration_minutes);
+    let cook_time_minutes = recipe_json["cookTime"].as_str().and_then(parse_iso8601_duration_minutes);
+    let image_url = extract_image_url(&recipe_json);
+
+    let conn = get_conn(db).await.map_err(|e| e.to_string())?;
+    let mut ingredients = Vec::new();
+    if let Some(lines) = recipe_json["recipeIngredient"].as_array() {
+        for line in lines {
+            let Some(text) = line.as_str() else { continue };
+            let mut parsed = parse_ingredient_line(text);
+            let mut rows = conn.query(
+                "SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?1) LIMIT 1",
+                params![parsed.name_guess.clone()],
+            ).await.map_err(|e| e.to_string())?;
+            if let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
+                parsed.matched_ingredient_id = Some(row.get(0).map_err(|e| e.to_string())?);
+            }
+            ingredients.push(parsed);
+        }
+    }
+
+    Ok(RecipeImportPreview {
+        name,
+        portions,
+        instructions,
+        prep_time_minutes,
+        cook_time_minutes,
+        image_url,
+        ingredients,
+    })
+}
+
 /// List price quotes for ingredient
 pub async fn price_quotes_list(db: &Database, ingredient_id: i64) -> LibsqlResult<Vec<PriceQuote>> {
     let conn = get_conn(db).await?;
@@ -5031,5 +5282,114 @@ mod fase3_stock_tests {
 
         delete_all_data(&db).await.unwrap();
         assert!(events_list(&db).await.unwrap().is_empty());
+    }
+
+    #[test]
+    fn parse_ingredient_line_splits_quantity_unit_and_name() {
+        let parsed = parse_ingredient_line("3 tablespoons extra-virgin olive oil");
+        assert_eq!(parsed.quantity, 3.0);
+        assert_eq!(parsed.unit, Unit::Tablespoon);
+        assert_eq!(parsed.name_guess, "extra-virgin olive oil");
+    }
+
+    /// Regression test: caught live against a real NYT Cooking page, where over half
+    /// the ingredient lines use vulgar fraction glyphs ("½ cup") instead of ASCII —
+    /// without normalizing these first, quantity parsing silently fails on them.
+    #[test]
+    fn parse_ingredient_line_handles_vulgar_fractions() {
+        let parsed = parse_ingredient_line("½ cup finely chopped onion");
+        assert_eq!(parsed.quantity, 0.5);
+        assert_eq!(parsed.unit, Unit::Cup);
+        assert_eq!(parsed.name_guess, "finely chopped onion");
+
+        let mixed = parse_ingredient_line("1 ½ cups rice");
+        assert_eq!(mixed.quantity, 1.5);
+        assert_eq!(mixed.unit, Unit::Cup);
+        assert_eq!(mixed.name_guess, "rice");
+    }
+
+    #[test]
+    fn parse_ingredient_line_finds_unit_after_the_name_too() {
+        // "cloves" comes after the ingredient name here, not right after the quantity —
+        // the descriptive clause ("thinly sliced") is dropped along with the comma.
+        let parsed = parse_ingredient_line("5 garlic cloves, thinly sliced");
+        assert_eq!(parsed.quantity, 5.0);
+        assert_eq!(parsed.unit, Unit::Clove);
+        assert_eq!(parsed.name_guess, "garlic");
+    }
+
+    /// The Parmesan case reported live: without stripping the trailing clauses, the
+    /// name guess ("grated Parmesan, divided, more for garnish") never matches an
+    /// existing catalog ingredient even when one exists.
+    #[test]
+    fn parse_ingredient_line_strips_descriptive_clauses_from_name() {
+        let parsed = parse_ingredient_line("½ cup grated Parmesan, divided, more for garnish");
+        assert_eq!(parsed.quantity, 0.5);
+        assert_eq!(parsed.unit, Unit::Cup);
+        assert_eq!(parsed.name_guess, "grated Parmesan");
+    }
+
+    /// No leading quantity, and the only numbers are approximate parenthetical asides
+    /// ("about 8 ounces") — deliberately NOT extracted as the quantity (see
+    /// strip_descriptive_clauses doc comment): there's no reliable way to tell an
+    /// approximate aside from the true primary measure. Falls back to quantity 1 /
+    /// Piece, but with a clean name instead of the full messy line.
+    #[test]
+    fn parse_ingredient_line_ignores_parenthetical_quantities() {
+        let parsed = parse_ingredient_line(
+            "small baguette or chunk of sourdough bread (about 8 ounces), preferably day-old, torn or cut into bite-size pieces (about 4 cups)"
+        );
+        assert_eq!(parsed.quantity, 1.0);
+        assert_eq!(parsed.unit, Unit::Piece);
+        assert_eq!(parsed.name_guess, "small baguette or chunk of sourdough bread");
+    }
+
+    #[test]
+    fn parse_iso8601_duration_minutes_handles_hours_and_minutes() {
+        assert_eq!(parse_iso8601_duration_minutes("PT1H30M"), Some(90));
+        assert_eq!(parse_iso8601_duration_minutes("PT15M"), Some(15));
+        assert_eq!(parse_iso8601_duration_minutes("garbage"), None);
+    }
+
+    /// Fixture mirrors the shape confirmed against a real NYT Cooking page
+    /// (JSON-LD Recipe, `data-next-head` attribute on the script tag).
+    #[test]
+    fn extract_recipe_json_ld_finds_recipe_node_and_fields_parse() {
+        let html = r#"<html><head>
+            <script type="application/ld+json" data-next-head="">
+            {"@context":"https://schema.org","@type":"Recipe","name":"Vegetable Paella",
+             "recipeYield":"4 servings","prepTime":"PT15M","cookTime":"PT30M",
+             "image":[{"@type":"ImageObject","url":"https://example.com/paella.jpg"}],
+             "recipeIngredient":["3 tablespoons olive oil","1 cup rice"],
+             "recipeInstructions":[{"@type":"HowToStep","text":"Heat oil."},{"@type":"HowToStep","text":"Add rice."}]}
+            </script>
+            </head><body></body></html>"#;
+
+        let recipe = extract_recipe_json_ld(html).expect("should find the Recipe JSON-LD node");
+        assert_eq!(recipe["name"].as_str(), Some("Vegetable Paella"));
+        assert_eq!(extract_portions(&recipe), Some(4));
+        assert_eq!(extract_image_url(&recipe).as_deref(), Some("https://example.com/paella.jpg"));
+        assert_eq!(extract_instructions(&recipe), "Heat oil.\nAdd rice.");
+        assert_eq!(recipe["prepTime"].as_str().and_then(parse_iso8601_duration_minutes), Some(15));
+        assert_eq!(recipe["cookTime"].as_str().and_then(parse_iso8601_duration_minutes), Some(30));
+    }
+
+    #[tokio::test]
+    async fn recipe_import_from_url_matches_existing_ingredient_by_name() {
+        let db = test_db().await;
+        create_ingredient(&db, IngredientInput {
+            name: "Rice".into(), unit: Unit::Gram, price_per_unit: 0.002, category: None,
+        }).await.unwrap();
+
+        // Exercise the same ingredient-matching path recipe_import_from_url uses,
+        // without a real network fetch: parse a line, then look up by name_guess.
+        let parsed = parse_ingredient_line("1 cup rice");
+        assert_eq!(parsed.name_guess, "rice");
+        let conn = get_conn(&db).await.unwrap();
+        let mut rows = conn.query(
+            "SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?1) LIMIT 1",
+            params![parsed.name_guess.clone()],
+        ).await.unwrap();
+        assert!(rows.next().await.unwrap().is_some());
     }
 }
