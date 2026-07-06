@@ -16,7 +16,6 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 specta = { workspace = true }
 ts-rs = { workspace = true }
-thiserror = { workspace = true }
 libsql = { workspace = true }
 chrono = { workspace = true }
 
