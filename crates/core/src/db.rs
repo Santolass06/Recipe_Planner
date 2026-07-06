@@ -2534,11 +2534,35 @@ pub async fn recipe_copy_to_event(db: &Database, recipe_id: i64, event_id: i64) 
 /// Move a recipe out of its event and into the shared catalog for good —
 /// the reverse of recipe_copy_to_event's snapshot. Loses the base_recipe_id
 /// link since it no longer makes sense once the recipe is independent.
+///
+/// If a catalog recipe already has the same name, the promoted recipe is
+/// renamed to "Name (Event Name)" so the two don't look identical in lists.
 pub async fn recipe_promote_to_catalog(db: &Database, id: i64) -> LibsqlResult<RecipeWithIngredients> {
     let conn = get_conn(db).await?;
+
+    let mut rows = conn.query("SELECT name, event_id FROM recipes WHERE id = ?1", params![id]).await?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    let (name, event_id): (String, Option<i64>) = (row.get(0)?, row.get(1)?);
+    drop(rows);
+
+    let mut final_name = name.clone();
+    if let Some(event_id) = event_id {
+        let mut dup_rows = conn.query(
+            "SELECT 1 FROM recipes WHERE event_id IS NULL AND name = ?1 AND id != ?2",
+            params![name.clone(), id],
+        ).await?;
+        if dup_rows.next().await?.is_some() {
+            let mut event_rows = conn.query("SELECT name FROM events WHERE id = ?1", params![event_id]).await?;
+            if let Some(event_row) = event_rows.next().await? {
+                let event_name: String = event_row.get(0)?;
+                final_name = format!("{} ({})", name, event_name);
+            }
+        }
+    }
+
     conn.execute(
-        "UPDATE recipes SET event_id = NULL, base_recipe_id = NULL, updated_at = datetime('now') WHERE id = ?1",
-        params![id],
+        "UPDATE recipes SET name = ?1, event_id = NULL, base_recipe_id = NULL, updated_at = datetime('now') WHERE id = ?2",
+        params![final_name, id],
     ).await?;
     let recipe = get_recipe(db, id).await?;
     row_to_recipe_with_ingredients(db, recipe).await
@@ -4959,6 +4983,38 @@ mod fase3_stock_tests {
         assert!(catalog_after.iter().any(|r| r.recipe.id == exclusive.recipe.id));
         let event_recipes_after = event_recipes_list(&db, event.id).await.unwrap();
         assert!(event_recipes_after.is_empty());
+    }
+
+    /// Promoting a recipe whose name collides with an existing catalog recipe
+    /// appends "(Event Name)" so the two aren't indistinguishable in lists.
+    #[tokio::test]
+    async fn promoting_recipe_with_duplicate_name_appends_event_name() {
+        let db = test_db().await;
+        let ingredient = create_ingredient(&db, IngredientInput {
+            name: "Farinha".into(), unit: Unit::Gram, price_per_unit: 0.002, category: None,
+        }).await.unwrap();
+        let event = create_event(&db, EventInput {
+            name: "Casamento".into(), event_date: None, notes: None,
+        }).await.unwrap();
+
+        create_recipe(&db, RecipeInput {
+            name: "Bolo".into(), category: "Sobremesa".into(), portions: 10,
+            instructions: "Cozer".into(),
+            ingredients: vec![RecipeIngredientInput { ingredient_id: ingredient.id, quantity: 100.0, unit: Unit::Gram }],
+            prep_time_minutes: None, cook_time_minutes: None, tags: vec![], image_base64: None,
+            event_id: None,
+        }).await.unwrap();
+
+        let exclusive = create_recipe(&db, RecipeInput {
+            name: "Bolo".into(), category: "Sobremesa".into(), portions: 60,
+            instructions: "Cozer mais".into(),
+            ingredients: vec![RecipeIngredientInput { ingredient_id: ingredient.id, quantity: 600.0, unit: Unit::Gram }],
+            prep_time_minutes: None, cook_time_minutes: None, tags: vec![], image_base64: None,
+            event_id: Some(event.id),
+        }).await.unwrap();
+
+        let promoted = recipe_promote_to_catalog(&db, exclusive.recipe.id).await.unwrap();
+        assert_eq!(promoted.recipe.name, "Bolo (Casamento)");
     }
 
     /// seed_demo_data must include a demo event (copied + exclusive recipe),
