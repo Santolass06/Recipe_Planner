@@ -6,49 +6,12 @@ import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
 import StatusPill from "../components/ui/StatusPill";
 import { useI18n } from "../i18n";
+import type { DashboardStats } from "../../crates/core/bindings/DashboardStats";
+import type { ActivityItem } from "../../crates/core/bindings/ActivityItem";
+import type { MealPlanEntryWithRecipe } from "../../crates/core/bindings/MealPlanEntryWithRecipe";
+import type { StockItemWithIngredient } from "../../crates/core/bindings/StockItemWithIngredient";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
-
-interface DashboardStats {
-  low_stock_count: number;
-  expiring_soon_count: number;
-  meals_this_week: number;
-  total_stock_value: number;
-  total_recipes: number;
-  total_ingredients: number;
-  pending_shopping_items: number;
-}
-
-interface ActivityItem {
-  id: number;
-  activity_type: string;
-  description: string;
-  entity_id: number | null;
-  entity_type: string | null;
-  timestamp: string;
-}
-
-interface MealPlanEntryWithRecipe {
-  id: number;
-  meal_plan_id: number;
-  recipe_id: number;
-  recipe_name: string;
-  day_of_week: string;
-  meal_type: string;
-  portions: number;
-  planned_date: string;
-}
-
-interface StockItemWithIngredient {
-  id: number;
-  ingredient_id: number;
-  ingredient_name: string;
-  ingredient_unit: string;
-  quantity: number;
-  min_quantity: number;
-  price_per_unit: number;
-  updated_at: string;
-}
 
 const getDowShort = (t: T) => [
   t("dashboard.dow.sun"), t("dashboard.dow.mon"), t("dashboard.dow.tue"),

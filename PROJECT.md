@@ -54,18 +54,50 @@ bloqueantes, antes de qualquer feature nova.
 - [x] Ficheiros órfãos da reescrita (`orig.tsx`, `rewrite.py`, `scratch.py`,
   `test-recipe.tsx`) — já não existem no repo.
 - [x] Newline final em `src-tauri/Cargo.toml` — já presente.
-- [ ] **Padronizar a convenção de argumentos Tauri v2 em todo o frontend.**
-  Um grep rápido (2026-07) encontrou ~31-34 chamadas `invoke()` sem o padrão
-  `{ input: ... }` esperado — precisa de auditoria dedicada (o grep foi só
-  uma estimativa grosseira, não confiar sem verificar caso a caso). Ver regra
-  já confirmada em memória de sessão: `Tauri v2 arg convention` — chaves
-  top-level de `invoke()` em camelCase, campos de structs aninhados
-  mantêm-se em snake_case.
-- [ ] Importar os bindings TypeScript gerados pelo `ts-rs`
-  (`crates/core/bindings/`) em vez de o frontend redefinir interfaces à mão.
-  Ainda não usado em `src/` (confirmado 2026-07).
-- [ ] Limpeza do `mise.db` órfão (ficheiro antigo num path diferente do
-  atual).
+- [x] **Padronizar a convenção de argumentos Tauri v2 em todo o frontend.**
+  Auditoria dedicada (2026-07-05): as 36 chamadas `invoke()` em `src/` foram
+  comparadas uma a uma contra as assinaturas reais em
+  `crates/tauri/src/lib.rs`. Todas já seguem a convenção corretamente
+  (chaves top-level `listId`/`itemId`/`mealPlanId`/`ingredientId`/`input`
+  em camelCase, campos aninhados dentro de `input` em snake_case). A
+  estimativa de "~31-34 violações" do grep anterior era falso positivo —
+  contava chaves snake_case dentro do `input`, que estão corretas por
+  definição da convenção. Nada para corrigir.
+- [x] **Importar os bindings TypeScript gerados pelo `ts-rs`
+  (`crates/core/bindings/`) em vez de o frontend redefinir interfaces à
+  mão.** Feito em 2026-07-05, em duas partes:
+  1. Descoberta durante a auditoria: os bindings declaravam `bigint` para
+     todos os campos `i64` (comportamento por omissão do `ts-rs`), mas o
+     IPC do Tauri serializa sempre como JSON `number` — o tipo nunca batia
+     com o valor real em runtime. Corrigido anotando `i64`/`Option<i64>`/
+     `Vec<i64>` em `domain.rs` com `#[ts(type = "...")]` (`number`,
+     `number | null`, `Array<number>`) e regenerando os 74 bindings via
+     `cargo test -p mise-core export_bindings`.
+  2. Substituídas as interfaces duplicadas manualmente em 11 ficheiros
+     (`IngredientsPage`, `ImageUpload`, `SuppliersPage`, `StockPage`,
+     `MealPlannerPage`, `ShoppingListPage`, `RecipesPage`, `CostsPage`,
+     `ReportsPage`, `DashboardPage`, `CalendarPage`, `ReceiptScannerPage`)
+     por `import type` dos bindings. Ficaram de fora, propositadamente,
+     tipos sem equivalente real no backend: `CostAnalysis`/`CostLine`
+     (cálculo de margem só no frontend, sem endpoint), `ParsedLine`
+     (parsing heurístico de OCR), `BarListRow`/`SupplierWithQuotes`
+     (composição de UI). Corrigidos dois usos de um campo `category`
+     inexistente em `Ingredient` (sempre `undefined` em runtime,
+     mascarado por fallback `|| "Outros"`) descobertos pelo type-check ao
+     trocar o tipo. Validado com `cargo check -p mise-core -p mise-tauri`,
+     `npx tsc --noEmit` e `npm run build`, todos limpos.
+- [x] **Limpeza do `mise.db` órfão.** Encontrados dois ficheiros nesta
+  máquina: `~/.local/share/com.recipe-planner.app/mise.db` (10 de junho,
+  órfão, path de antes da resolução atual) e
+  `.../mise/mise/mise.db` (ativo, escrito durante esta sessão). Renomeado
+  o órfão para `mise.db.orphan-2026-07-05.bak` em vez de apagado
+  (reversível). **Achado à parte, não corrigido aqui:** o path ativo tem
+  `mise` duplicado (`.../mise/mise/mise.db`) porque `open_db()`
+  (`crates/core/src/db.rs`) faz `dir.join("mise")` sobre um
+  `app_data_dir` que o Tauri já resolve para `.../mise` — bug real, mas
+  corrigi-lo agora mudaria o path que a app já usa em produção nesta
+  máquina, haveria de vir com migração dos dados existentes. Fica para
+  Fase 2, não é bloqueante.
 - [ ] **Bug: câmara não abre no Scanner de recibos** (sessão de 2026-07-05,
   máquina de desenvolvimento Ubuntu + Nix misturados — mesma família de
   problema que o fix de EGL/TLS acima). Sintoma: `getUserMedia` falha

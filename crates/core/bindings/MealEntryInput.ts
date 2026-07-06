@@ -2,4 +2,4 @@
 import type { DayOfWeek } from "./DayOfWeek";
 import type { MealType } from "./MealType";
 
-export interface MealEntryInput { recipe_id: bigint, day_of_week: DayOfWeek, meal_type: MealType, portions: number, }
+export interface MealEntryInput { recipe_id: number, day_of_week: DayOfWeek, meal_type: MealType, portions: number, }

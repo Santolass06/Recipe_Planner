@@ -131,6 +131,7 @@ pub enum UnitGroup { Weight, Volume, Count }
 #[ts(export, export_to = "bindings/")]
 pub struct RecipeIngredientInput {
     #[validate(range(min = 1))]
+    #[ts(type = "number")]
     pub ingredient_id: i64,
     pub quantity: f64,
     pub unit: Unit,
@@ -140,8 +141,11 @@ pub struct RecipeIngredientInput {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct RecipeIngredient {
+    #[ts(type = "number")]
     pub id: i64,
+    #[ts(type = "number")]
     pub recipe_id: i64,
+    #[ts(type = "number")]
     pub ingredient_id: i64,
     pub ingredient_name: String,
     pub quantity: f64,
@@ -171,6 +175,7 @@ pub struct RecipeInput {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct Recipe {
+    #[ts(type = "number")]
     pub id: i64,
     pub name: String,
     pub category: String,
@@ -212,10 +217,12 @@ pub struct IngredientInput {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct Ingredient {
+    #[ts(type = "number")]
     pub id: i64,
     pub name: String,
     pub unit: Unit,
     pub price_per_unit: f64,
+    #[ts(type = "number | null")]
     pub category_id: Option<i64>,
     pub favorite: bool,
     #[ts(type = "string")]
@@ -229,6 +236,7 @@ pub struct Ingredient {
 #[ts(export, export_to = "bindings/")]
 pub struct StockInput {
     #[validate(range(min = 1))]
+    #[ts(type = "number")]
     pub ingredient_id: i64,
     #[validate(range(min = 0.0))]
     pub quantity: f64,
@@ -240,7 +248,9 @@ pub struct StockInput {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct StockItem {
+    #[ts(type = "number")]
     pub id: i64,
+    #[ts(type = "number")]
     pub ingredient_id: i64,
     pub ingredient_name: String,
     pub ingredient_unit: Unit,
@@ -272,6 +282,7 @@ impl StockItem {
 #[ts(export, export_to = "bindings/")]
 pub struct ShoppingItemInput {
     #[validate(range(min = 1))]
+    #[ts(type = "number | null")]
     pub ingredient_id: Option<i64>,
     #[validate(length(min = 1, max = 200))]
     pub ingredient_name: String,
@@ -294,7 +305,9 @@ pub struct ShoppingItemInput {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct ShoppingItem {
+    #[ts(type = "number")]
     pub id: i64,
+    #[ts(type = "number | null")]
     pub ingredient_id: Option<i64>,
     pub ingredient_name: String,
     pub ingredient_unit: Unit,
@@ -315,6 +328,7 @@ pub struct ShoppingItem {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct ShoppingList {
+    #[ts(type = "number | null")]
     pub id: Option<i64>,
     pub name: String,
     pub items: Vec<ShoppingItem>,
@@ -345,6 +359,7 @@ pub struct SuggestedRecipe {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct MissingIngredient {
+    #[ts(type = "number")]
     pub ingredient_id: i64,
     pub ingredient_name: String,
     pub needed: f64,
@@ -380,6 +395,7 @@ pub struct IngredientCost {
 #[ts(export, export_to = "bindings/")]
 pub struct PriceQuoteInput {
     #[validate(range(min = 1))]
+    #[ts(type = "number")]
     pub ingredient_id: i64,
     #[validate(length(min = 1, max = 200))]
     pub supplier: String,
@@ -395,7 +411,9 @@ pub struct PriceQuoteInput {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct PriceQuote {
+    #[ts(type = "number")]
     pub id: i64,
+    #[ts(type = "number")]
     pub ingredient_id: i64,
     pub supplier: String,
     pub price_per_unit: f64,
@@ -529,6 +547,7 @@ pub struct SettingsInput {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct Category {
+    #[ts(type = "number")]
     pub id: i64,
     pub name: String,
     pub kind: CategoryKind, // "ingredient" | "recipe"
@@ -554,6 +573,7 @@ pub struct SupplierInput {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct Supplier {
+    #[ts(type = "number")]
     pub id: i64,
     pub name: String,
     pub contact: Option<String>,
@@ -670,6 +690,7 @@ pub struct MealPlanInput {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct MealPlan {
+    #[ts(type = "number")]
     pub id: i64,
     pub name: String,
     #[ts(type = "string")]
@@ -687,6 +708,7 @@ pub struct MealPlan {
 #[ts(export, export_to = "bindings/")]
 pub struct MealEntryInput {
     #[validate(range(min = 1))]
+    #[ts(type = "number")]
     pub recipe_id: i64,
     pub day_of_week: DayOfWeek,
     pub meal_type: MealType,
@@ -698,8 +720,11 @@ pub struct MealEntryInput {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct MealPlanEntry {
+    #[ts(type = "number")]
     pub id: i64,
+    #[ts(type = "number")]
     pub meal_plan_id: i64,
+    #[ts(type = "number")]
     pub recipe_id: i64,
     pub recipe_name: String, // denormalized for display
     pub day_of_week: DayOfWeek,
@@ -729,6 +754,7 @@ pub struct MealPlanWithEntries {
 pub struct MealPlanShoppingList {
     pub shopping_list: ShoppingList,
     pub total_portions: u32,
+    #[ts(type = "Array<number>")]
     pub recipes_used: Vec<i64>,
 }
 
@@ -737,6 +763,7 @@ pub struct MealPlanShoppingList {
 #[ts(export, export_to = "bindings/")]
 pub struct Paginated<T> {
     pub items: Vec<T>,
+    #[ts(type = "number")]
     pub total: i64,
     pub page: u32,
     pub per_page: u32,
@@ -747,12 +774,18 @@ pub struct Paginated<T> {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct DashboardStats {
+    #[ts(type = "number")]
     pub low_stock_count: i64,
+    #[ts(type = "number")]
     pub expiring_soon_count: i64,
+    #[ts(type = "number")]
     pub meals_this_week: i64,
     pub total_stock_value: f64,
+    #[ts(type = "number")]
     pub total_recipes: i64,
+    #[ts(type = "number")]
     pub total_ingredients: i64,
+    #[ts(type = "number")]
     pub pending_shopping_items: i64,
 }
 
@@ -760,9 +793,11 @@ pub struct DashboardStats {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct ActivityItem {
+    #[ts(type = "number")]
     pub id: i64,
     pub activity_type: String, // "recipe_created", "stock_updated", "meal_planned", "shopping_purchased", etc.
     pub description: String,
+    #[ts(type = "number | null")]
     pub entity_id: Option<i64>,
     pub entity_type: Option<String>, // "recipe", "ingredient", "meal_plan", "shopping_list"
     #[ts(type = "string")]
@@ -773,8 +808,11 @@ pub struct ActivityItem {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct MealPlanEntryWithRecipe {
+    #[ts(type = "number")]
     pub id: i64,
+    #[ts(type = "number")]
     pub meal_plan_id: i64,
+    #[ts(type = "number")]
     pub recipe_id: i64,
     pub recipe_name: String,
     pub day_of_week: DayOfWeek,
@@ -788,7 +826,9 @@ pub struct MealPlanEntryWithRecipe {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct StockItemWithIngredient {
+    #[ts(type = "number")]
     pub id: i64,
+    #[ts(type = "number")]
     pub ingredient_id: i64,
     pub ingredient_name: String,
     pub ingredient_unit: Unit,
@@ -803,10 +843,12 @@ pub struct StockItemWithIngredient {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct PriceQuoteStats {
+    #[ts(type = "number")]
     pub ingredient_id: i64,
     pub avg_price: f64,
     pub min_price: f64,
     pub max_price: f64,
+    #[ts(type = "number")]
     pub quote_count: i64,
 }
 
@@ -814,7 +856,9 @@ pub struct PriceQuoteStats {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct PriceQuoteWithIngredient {
+    #[ts(type = "number")]
     pub id: i64,
+    #[ts(type = "number")]
     pub ingredient_id: i64,
     pub ingredient_name: String,
     pub ingredient_unit: Unit,
@@ -855,6 +899,7 @@ pub struct CategoryCost {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct RecipeCost {
+    #[ts(type = "number")]
     pub recipe_id: i64,
     pub recipe_name: String,
     pub total_cost: f64,
@@ -883,6 +928,7 @@ pub struct WasteReport {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct IngredientWaste {
+    #[ts(type = "number")]
     pub ingredient_id: i64,
     pub ingredient_name: String,
     pub unit: Unit,
@@ -904,6 +950,7 @@ pub struct CategoryWaste {
 pub struct StockSnapshot {
     #[ts(type = "string")]
     pub date: DateTime<Utc>,
+    #[ts(type = "number")]
     pub ingredient_id: i64,
     pub ingredient_name: String,
     pub quantity: f64,
@@ -932,6 +979,7 @@ pub struct MealTypeStat {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct RecipeMealStat {
+    #[ts(type = "number")]
     pub recipe_id: i64,
     pub recipe_name: String,
     pub count: u32,
@@ -981,8 +1029,10 @@ impl ImageEntityType {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct Image {
+    #[ts(type = "number")]
     pub id: i64,
     pub entity_type: ImageEntityType,
+    #[ts(type = "number")]
     pub entity_id: i64,
     pub path: String,
     pub mime_type: String,
@@ -996,6 +1046,7 @@ pub struct Image {
 #[ts(export, export_to = "bindings/")]
 pub struct ImageUploadInput {
     pub entity_type: ImageEntityType,
+    #[ts(type = "number")]
     pub entity_id: i64,
     #[validate(length(min = 1))]
     pub base64: String,
@@ -1025,6 +1076,7 @@ pub struct ProxyImageResult {
 #[ts(export, export_to = "bindings/")]
 pub struct StockPurchaseInput {
     #[validate(range(min = 1))]
+    #[ts(type = "number")]
     pub ingredient_id: i64,
     #[validate(range(min = 0.001))]
     pub quantity: f64,
@@ -1038,6 +1090,7 @@ pub struct StockPurchaseInput {
     pub discount_percent: f64,
     #[ts(type = "string")]
     pub purchase_date: DateTime<Utc>,
+    #[ts(type = "number | null")]
     pub supplier_id: Option<i64>,
     pub notes: Option<String>,
 }
@@ -1046,7 +1099,9 @@ pub struct StockPurchaseInput {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct StockPurchase {
+    #[ts(type = "number")]
     pub id: i64,
+    #[ts(type = "number")]
     pub ingredient_id: i64,
     pub ingredient_name: String, // denormalized
     pub ingredient_unit: Unit,
@@ -1058,6 +1113,7 @@ pub struct StockPurchase {
     pub discount_percent: f64,
     #[ts(type = "string")]
     pub purchase_date: DateTime<Utc>,
+    #[ts(type = "number | null")]
     pub supplier_id: Option<i64>,
     pub supplier_name: Option<String>, // denormalized
     pub notes: Option<String>,
@@ -1085,6 +1141,7 @@ pub enum ReceiptStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct ReceiptImport {
+    #[ts(type = "number")]
     pub id: i64,
     pub image_path: String,
     pub raw_text: Option<String>,
@@ -1105,6 +1162,7 @@ pub struct ParsedReceiptItem {
     pub total_price: f64,
     pub is_discount: bool,
     pub discount_percent: f64,
+    #[ts(type = "number | null")]
     pub matched_ingredient_id: Option<i64>,
     pub confidence: f64, // 0.0 - 1.0
     pub notes: Option<String>,
@@ -1122,6 +1180,7 @@ pub struct ReceiptScanInput {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub struct ReceiptParseResult {
+    #[ts(type = "number")]
     pub import_id: i64,
     pub raw_text: String,
     pub items: Vec<ParsedReceiptItem>,
@@ -1132,6 +1191,7 @@ pub struct ReceiptParseResult {
 #[ts(export, export_to = "bindings/")]
 pub struct ReceiptConfirmInput {
     #[validate(range(min = 1))]
+    #[ts(type = "number")]
     pub import_id: i64,
     pub items: Vec<ParsedReceiptItem>, // User-corrected items
 }

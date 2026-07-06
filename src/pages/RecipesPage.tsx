@@ -8,32 +8,10 @@ import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
 import SearchBar from "../components/ui/SearchBar";
 import { useI18n } from "../i18n";
+import type { RecipeWithIngredients as Recipe } from "../../crates/core/bindings/RecipeWithIngredients";
+import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
-
-interface RecipeIngredient {
-  ingredient_id: number;
-  ingredient_name?: string;
-  quantity: number;
-  unit: string;
-}
-
-interface Recipe {
-  id: number;
-  name: string;
-  category: string;
-  ingredients: RecipeIngredient[];
-  portions: number;
-  instructions: string;
-  image_path?: string | null;
-}
-
-interface Ingredient {
-  id: number;
-  name: string;
-  unit: string;
-  price_per_unit: number;
-}
 
 const getUnitGroups = (t: T) => [
   { label: t("ingredients.unitGroups.weight"), units: ["gram", "kilogram", "milligram", "ounce", "pound", "pinch", "bunch", "clove", "slice"] },

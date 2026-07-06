@@ -4,48 +4,12 @@ import { useToast } from "../components/ui/Toast";
 import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
 import { useI18n } from "../i18n";
+import type { RecipeWithIngredients as Recipe } from "../../crates/core/bindings/RecipeWithIngredients";
+import type { Ingredient } from "../../crates/core/bindings/Ingredient";
+import type { CostBreakdown } from "../../crates/core/bindings/CostBreakdown";
 
-interface RecipeIngredient {
-  ingredient_id: number;
-  ingredient_name: string;
-  quantity: number;
-  unit: string;
-}
-
-interface Recipe {
-  id: number;
-  name: string;
-  category: string;
-  ingredients: RecipeIngredient[];
-  portions: number;
-  instructions: string;
-}
-
-interface Ingredient {
-  id: number;
-  name: string;
-  unit: string;
-  price_per_unit: number;
-}
-
-interface IngredientCost {
-  name: string;
-  quantity: number;
-  unit: string;
-  price_per_unit: number;
-  total_cost: number;
-  is_approximate: boolean;
-  approximation_note?: string | null;
-  promo_price_per_unit?: number | null;
-  promo_total_cost?: number | null;
-}
-
-interface CostBreakdown {
-  total_cost: number;
-  cost_per_portion: number;
-  ingredient_costs: IngredientCost[];
-}
-
+// Cálculo só no frontend (não há endpoint de análise de margem no backend) —
+// sem binding correspondente.
 interface CostAnalysis {
   breakdown: CostBreakdown;
   breakdown_with_promo: CostBreakdown | null;
