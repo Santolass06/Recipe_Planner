@@ -5,9 +5,6 @@ use crate::domain::*;
 use std::path::PathBuf;
 use dirs;
 use chrono::{DateTime, Utc, TimeZone};
-use serde::{Deserialize, Serialize};
-use specta::Type;
-use ts_rs::TS;
 use serde_json;
 
 /// Open database connection with WAL mode and connection pooling
@@ -815,20 +812,6 @@ fn row_to_price_quote(row: &Row) -> LibsqlResult<PriceQuote> {
     })
 }
 
-/// Map a libsql Row to Setting
-fn row_to_setting(row: &Row) -> LibsqlResult<Setting> {
-    let updated_at_str: String = row.get(2)?;
-    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
-
-    Ok(Setting {
-        key: row.get(0)?,
-        value: row.get(1)?,
-        updated_at,
-    })
-}
-
 // =====================================================================
 // PUBLIC QUERY METHODS
 // =====================================================================
@@ -1338,7 +1321,7 @@ pub async fn create_shopping_list(db: &Database, name: String, items: Vec<Shoppi
 }
 
 /// Create shopping list from recipes
-pub async fn create_shopping_list_from_recipes(db: &Database, recipe_ids: Vec<i64>, portions_multiplier: u32) -> LibsqlResult<ShoppingList> {
+pub async fn create_shopping_list_from_recipes(db: &Database, _recipe_ids: Vec<i64>, _portions_multiplier: u32) -> LibsqlResult<ShoppingList> {
     // This is a complex query - simplified implementation
     let name = format!("Compras {}", chrono::Local::now().format("%d/%m/%Y %H:%M"));
     create_shopping_list(db, name, Vec::new()).await
@@ -1523,7 +1506,7 @@ pub async fn shopping_list_reorder_items(
     // For simplicity, we'll use a sorting index stored in a new column or just return the re-ordered items
     // Since we don't have a sort_order column, we'll just return the items in the requested order
     let mut items = Vec::new();
-    for (index, item_id) in item_ids.iter().enumerate() {
+    for (_index, item_id) in item_ids.iter().enumerate() {
         // We could add a sort_order column, but for now just verify the items belong to the list
         let mut rows = conn.query(
             "SELECT id, shopping_list_id, ingredient_id, ingredient_name, ingredient_unit, needed_quantity, stock_quantity, to_buy_quantity, category, estimated_cost, purchased, notes, purchased_at, created_at
@@ -1531,7 +1514,7 @@ pub async fn shopping_list_reorder_items(
             params![item_id, list_id],
         ).await?;
         if let Some(row) = rows.next().await? {
-            let mut item = row_to_shopping_item(&row)?;
+            let item = row_to_shopping_item(&row)?;
             items.push(item);
         }
     }
@@ -1572,7 +1555,7 @@ pub async fn shopping_list_clear_purchased(
 }
 
 /// Suggest recipes based on stock
-pub async fn suggest_recipes(db: &Database) -> LibsqlResult<Vec<SuggestedRecipe>> {
+pub async fn suggest_recipes(_db: &Database) -> LibsqlResult<Vec<SuggestedRecipe>> {
     // Simplified implementation - return empty
     Ok(Vec::new())
 }
@@ -2754,7 +2737,6 @@ pub async fn generate_shopping_list_from_meal_plan(db: &Database, plan_id: i64, 
     // Get stock quantities
     let conn = get_conn(db).await?;
     let mut shopping_items = Vec::new();
-    let mut total_estimated_cost = 0.0;
 
     for (ingredient_id, (name, unit, needed_qty, category, price)) in ingredient_map {
         let mut rows = conn.query(
@@ -2765,7 +2747,6 @@ pub async fn generate_shopping_list_from_meal_plan(db: &Database, plan_id: i64, 
 
         let to_buy_qty = (needed_qty - stock_qty).max(0.0);
         let estimated_cost = to_buy_qty * price;
-        total_estimated_cost += estimated_cost;
 
         shopping_items.push(ShoppingItem {
             id: 0, // Will be assigned on insert
@@ -3359,11 +3340,11 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
 pub async fn get_waste_report(db: &Database, days: u32) -> LibsqlResult<WasteReport> {
     let conn = get_conn(db).await?;
     let start_date = Utc::now() - chrono::Duration::days(days as i64);
-    let start_str = start_date.to_rfc3339();
+    let _start_str = start_date.to_rfc3339();
 
     // For waste estimation, we look at stock quantity decreases that aren't explained by recipes
     // This is a simplified implementation - in a real app you'd have a waste_log table
-    let mut rows = conn.query(
+    let _rows = conn.query(
         r#"
         SELECT i.id, i.name, i.unit, i.price_per_unit,
                COALESCE(s.quantity, 0) as current_qty
@@ -3388,7 +3369,7 @@ pub async fn get_waste_report(db: &Database, days: u32) -> LibsqlResult<WasteRep
 pub async fn get_stock_trends(db: &Database, days: u32) -> LibsqlResult<Vec<StockSnapshot>> {
     let conn = get_conn(db).await?;
     let start_date = Utc::now() - chrono::Duration::days(days as i64);
-    let start_str = start_date.to_rfc3339();
+    let _start_str = start_date.to_rfc3339();
 
     // Since we don't have historical stock snapshots, we generate daily snapshots
     // based on current stock and simulate the trend
@@ -3427,7 +3408,7 @@ pub async fn get_stock_trends(db: &Database, days: u32) -> LibsqlResult<Vec<Stoc
     let mut snapshots = Vec::new();
     for day_offset in 0..days {
         let snapshot_date = start_date + chrono::Duration::days(day_offset as i64);
-        for (ingredient_id, ingredient_name, unit, quantity, price_per_unit) in &current_stock {
+        for (ingredient_id, ingredient_name, _unit, quantity, price_per_unit) in &current_stock {
             // Add some variation for demo purposes
             let variation = 1.0 + (day_offset as f64 * 0.02) - 0.05; // slight trend
             let qty = (*quantity * variation).max(0.0);
@@ -3476,7 +3457,7 @@ pub async fn get_meal_stats(db: &Database, days: u32) -> LibsqlResult<MealStats>
         let meal_type_str: String = row.get(4)?;
         let portions: u32 = row.get(5)?;
         let plan_start_str: String = row.get(6)?;
-        let plan_end_str: String = row.get(7)?;
+        let _plan_end_str: String = row.get(7)?;
         
         let day_of_week = match day_str.as_str() {
             "monday" => DayOfWeek::Monday,
@@ -3630,7 +3611,7 @@ fn row_to_image(row: &Row) -> LibsqlResult<Image> {
 /// Save base64 image to file system and return path
 async fn save_base64_image(base64: &str, entity_type: &str, entity_id: i64) -> Result<String, String> {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
-    use std::path::PathBuf;
+    
     use dirs;
 
     // Decode base64
@@ -3982,7 +3963,7 @@ pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> Lib
     let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
     let ingredient_name: String = row.get(0)?;
     let ingredient_unit_str: String = row.get(1)?;
-    let ingredient_unit = match ingredient_unit_str.as_str() {
+    let _ingredient_unit = match ingredient_unit_str.as_str() {
         "gram" => Unit::Gram, "kilogram" => Unit::Kilogram, "milligram" => Unit::Milligram,
         "ounce" => Unit::Ounce, "pound" => Unit::Pound,
         "milliliter" => Unit::Milliliter, "liter" => Unit::Liter, "fluid_ounce" => Unit::FluidOunce,
@@ -3994,7 +3975,7 @@ pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> Lib
     };
     
     // Get supplier name if provided
-    let supplier_name = if let Some(supplier_id) = input.supplier_id {
+    let _supplier_name = if let Some(supplier_id) = input.supplier_id {
         let mut rows = conn.query("SELECT name FROM suppliers WHERE id = ?1", params![supplier_id]).await?;
         rows.next().await?.map(|r| r.get::<String>(0).unwrap_or_default())
     } else {
@@ -4081,37 +4062,10 @@ pub async fn stock_purchase_delete(db: &Database, id: i64) -> LibsqlResult<()> {
 // RECEIPT OCR
 // =====================================================================
 
-/// Map a libsql Row to ReceiptImport
-fn row_to_receipt_import(row: &Row) -> LibsqlResult<ReceiptImport> {
-    let status_str: String = row.get(4)?;
-    let status = match status_str.as_str() {
-        "pending" => ReceiptStatus::Pending,
-        "scanned" => ReceiptStatus::Scanned,
-        "parsed" => ReceiptStatus::Parsed,
-        "confirmed" => ReceiptStatus::Confirmed,
-        "failed" => ReceiptStatus::Failed,
-        _ => ReceiptStatus::Pending,
-    };
-
-    let created_at_str: String = row.get(5)?;
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
-
-    Ok(ReceiptImport {
-        id: row.get(0)?,
-        image_path: row.get(1)?,
-        raw_text: row.get(2)?,
-        parsed_json: row.get(3)?,
-        status,
-        created_at,
-    })
-}
-
 /// Save base64 image for receipt and return path
 async fn save_receipt_image(base64: &str) -> Result<String, String> {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
-    use std::path::PathBuf;
+    
     use dirs;
 
     let bytes = STANDARD.decode(base64).map_err(|e| e.to_string())?;
@@ -4333,7 +4287,7 @@ async fn parse_receipt_text(text: &str) -> Vec<ParsedReceiptItem> {
 }
 
 /// Parse raw receipt text (for re-parsing)
-pub async fn receipt_parse(db: &Database, raw_text: String) -> LibsqlResult<Vec<ParsedReceiptItem>> {
+pub async fn receipt_parse(_db: &Database, raw_text: String) -> LibsqlResult<Vec<ParsedReceiptItem>> {
     let items = parse_receipt_text(&raw_text).await;
     Ok(items)
 }
@@ -4384,7 +4338,7 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
         let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
         let ingredient_name: String = row.get(0)?;
         let ingredient_unit_str: String = row.get(1)?;
-        let ingredient_unit = match ingredient_unit_str.as_str() {
+        let _ingredient_unit = match ingredient_unit_str.as_str() {
             "gram" => Unit::Gram, "kilogram" => Unit::Kilogram, "milligram" => Unit::Milligram,
             "ounce" => Unit::Ounce, "pound" => Unit::Pound,
             "milliliter" => Unit::Milliliter, "liter" => Unit::Liter, "fluid_ounce" => Unit::FluidOunce,

@@ -4,7 +4,6 @@
 //! Uses libSQL directly with connection pooling.
 
 #![forbid(unsafe_code)]
-#![warn(missing_docs)]
 
 pub mod db;
 pub mod domain;

@@ -133,8 +133,18 @@ denso, amber `#f5a524`, tabular numbers) como base.
 
 ## Fase 2 — Higiene técnica
 
-- [ ] Limpar os ~466 warnings do Rust (maioria `missing_docs` por
-  `#![warn(missing_docs)]`, imports não usados — mecânico, baixo risco).
+- [x] **Limpar os ~466 warnings do Rust.** 441 eram `missing_docs`
+  (`#![warn(missing_docs)]` em `crates/core/src/lib.rs`) sobre campos
+  triviais de DTOs (`id`, `name`, `price_per_unit`...) — lint nunca
+  honrado, removido em vez de forçar comentários sem valor. Os ~25
+  restantes eram reais: `cargo fix` tratou imports/variáveis não usados
+  automaticamente; removidas à mão duas funções mortas nunca chamadas
+  (`row_to_setting`, `row_to_receipt_import`) e um acumulador morto
+  (`total_estimated_cost` em `generate_shopping_list_from_meal_plan`,
+  calculado mas nunca devolvido — `MealPlanShoppingList` não tem campo de
+  custo total, cada `ShoppingItem` já traz o seu `estimated_cost`).
+  `cargo check --workspace` limpo (0 warnings), `cargo test --workspace`
+  (74 testes) e `npx tsc --noEmit` sem erros.
 - [ ] Definir uma CSP no `tauri.conf.json` (ainda `null`).
 - [ ] `tauri-plugin-opener` para links externos — plugin já inicializado;
   falta chamar `opener.openUrl()` onde há links para fora da app (nota:

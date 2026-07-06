@@ -8,7 +8,6 @@ use libsql::Database;
 use tauri::Manager;
 use tauri::path::BaseDirectory;
 use chrono::{DateTime, Utc};
-use std::collections::HashMap;
 
 /// Whether the desktop environment prefers a dark color scheme.
 ///
