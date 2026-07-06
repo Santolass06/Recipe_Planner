@@ -414,12 +414,35 @@ dependência nova necessária.
   ingrediente sem correspondência mostram o texto original por baixo do
   seletor para o utilizador escolher/criar manualmente. Nada é gravado sem
   confirmação explícita do utilizador no formulário.
-- Validado: `cargo check --workspace`, `cargo test --workspace` (92 testes),
-  `npx tsc --noEmit`, `npm run build`, e teste real de ponta a ponta contra a
-  página da NYT Cooking usada na investigação inicial (ad-hoc, removido
-  depois de confirmado — não é teste de rede permanente no repositório).
-  Confirmação visual pendente (a app já estava a correr numa sessão
-  anterior; por reiniciar para ver a funcionalidade nova).
+- Validado: `cargo check --workspace`, `cargo test --workspace`, `npx tsc
+  --noEmit`, `npm run build`, e teste real de ponta a ponta contra a página
+  da NYT Cooking usada na investigação inicial (ad-hoc, removido depois de
+  confirmado — não é teste de rede permanente no repositório).
+
+**Correções pós-teste visual (2026-07-06), a partir de feedback real:**
+- **Bug: modal sem scroll.** `.modal` não tinha `max-height`/`overflow-y` —
+  qualquer modal mais alto que a janela (não só o de importação; qualquer
+  receita com muitos ingredientes) ficava sem forma de chegar ao rodapé
+  (Guardar/Cancelar). Corrigido em `theme.css`
+  (`max-height: calc(100vh - 48px); overflow-y: auto`).
+- **Parsing de ingrediente mais esperto, âmbito limitado deliberadamente.**
+  Consultado o Opus (advisor) antes de decidir o alcance. Implementado:
+  1. `strip_descriptive_clauses` — corta cláusulas depois da 1ª vírgula e
+     parênteses antes de procurar unidade/nome (ex. "grated Parmesan,
+     divided, more for garnish" → "grated Parmesan").
+  2. `parse_ingredient_line` agora procura a unidade em qualquer posição das
+     palavras já limpas, não só na primeira — cobre "quantidade unidade
+     nome" e "quantidade nome unidade" (ex. "5 garlic cloves" → Clove +
+     "garlic"). Testado contra a página real da NYT: 12 de 13 ingredientes
+     ficaram limpos (antes: 7 de 13).
+  **Deliberadamente fora de âmbito** (risco identificado pelo advisor,
+  confirmado pelo próprio exemplo do André): tentar recuperar quantidade de
+  dentro de parênteses (ex. "(about 8 ounces)" dentro de uma linha sem
+  quantidade inicial) — são aproximações, não a medida principal, e não há
+  regra fiável para distinguir uma da outra; e mover texto descritivo a
+  mais para os passos da receita — sem regra fiável de "isto é um passo",
+  mexeria num campo que o utilizador não escreveu. Estes casos continuam a
+  cair no fallback manual (esperado, não é bug).
 
 ---
 

@@ -2711,28 +2711,52 @@ fn normalize_vulgar_fractions(s: &str) -> String {
         .replace('⅛', "1/8").replace('⅜', "3/8").replace('⅝', "5/8").replace('⅞', "7/8")
 }
 
+/// Strip the descriptive clauses recipe ingredient lines often carry — text after the
+/// first comma, and any parenthetical asides — before scanning for a unit or matching
+/// against the catalog. E.g. "grated Parmesan, divided, more for garnish" -> "grated
+/// Parmesan"; "small baguette... (about 8 ounces), preferably day-old..." -> "small
+/// baguette...". Deliberately does NOT try to recover a quantity from inside these
+/// clauses (e.g. "about 8 ounces") — parenthetical numbers are usually an approximate
+/// aside on the primary count/unit already parsed, not a more precise replacement for
+/// it, and there's no reliable rule to tell the two apart from text alone.
+fn strip_descriptive_clauses(s: &str) -> String {
+    let without_parens = regex::Regex::new(r"\([^)]*\)")
+        .map(|re| re.replace_all(s, "").to_string())
+        .unwrap_or_else(|_| s.to_string());
+    without_parens.split(',').next().unwrap_or(&without_parens).trim().to_string()
+}
+
 /// Best-effort parse of a free-text recipe ingredient line ("3 tablespoons olive oil")
-/// into quantity + unit + ingredient name. Only handles the common "quantity, unit,
-/// name" ordering — lines like "5 garlic cloves" (unit after the name) fall back to
-/// quantity 1 / Piece with the full line as the name guess, left for manual review.
+/// into quantity + unit + ingredient name. Scans the (cleaned) words after the leading
+/// quantity for the first recognized unit word, wherever it falls — handles both
+/// "quantity unit name" ("3 tablespoons olive oil") and "quantity name unit" ("5 garlic
+/// cloves") orderings. No unit word found -> falls back to quantity 1 / Piece with the
+/// cleaned line as the name guess, left for manual review.
 fn parse_ingredient_line(raw: &str) -> RecipeImportIngredient {
     let trimmed = raw.trim();
     let normalized = normalize_vulgar_fractions(trimmed);
     let (quantity, rest) = parse_quantity_prefix(&normalized);
-    let first_word_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
-    let (first_word, remainder) = (&rest[..first_word_end], rest[first_word_end..].trim_start());
+    let core = strip_descriptive_clauses(rest);
+    let words: Vec<&str> = core.split_whitespace().collect();
 
-    let (unit, name_guess) = match unit_from_ingredient_word(first_word) {
-        Some(u) if !remainder.is_empty() => (u, remainder),
-        _ => (Unit::Piece, rest),
+    let (unit, name_guess) = match words.iter().position(|w| unit_from_ingredient_word(w).is_some()) {
+        Some(idx) => {
+            let unit = unit_from_ingredient_word(words[idx]).unwrap();
+            let name = words.iter().enumerate()
+                .filter(|(i, _)| *i != idx)
+                .map(|(_, w)| *w)
+                .collect::<Vec<_>>()
+                .join(" ");
+            (unit, name)
+        }
+        None => (Unit::Piece, core.clone()),
     };
-    let name_guess = name_guess.trim_end_matches(|c: char| c == ',' || c.is_whitespace());
 
     RecipeImportIngredient {
         raw_text: trimmed.to_string(),
         quantity,
         unit,
-        name_guess: if name_guess.is_empty() { trimmed.to_string() } else { name_guess.to_string() },
+        name_guess: if name_guess.is_empty() { trimmed.to_string() } else { name_guess },
         matched_ingredient_id: None,
     }
 }
@@ -5285,13 +5309,39 @@ mod fase3_stock_tests {
     }
 
     #[test]
-    fn parse_ingredient_line_falls_back_when_unit_is_not_leading() {
+    fn parse_ingredient_line_finds_unit_after_the_name_too() {
         // "cloves" comes after the ingredient name here, not right after the quantity —
-        // documented MVP limitation: falls back to Piece with the full remainder as the name.
+        // the descriptive clause ("thinly sliced") is dropped along with the comma.
         let parsed = parse_ingredient_line("5 garlic cloves, thinly sliced");
         assert_eq!(parsed.quantity, 5.0);
+        assert_eq!(parsed.unit, Unit::Clove);
+        assert_eq!(parsed.name_guess, "garlic");
+    }
+
+    /// The Parmesan case reported live: without stripping the trailing clauses, the
+    /// name guess ("grated Parmesan, divided, more for garnish") never matches an
+    /// existing catalog ingredient even when one exists.
+    #[test]
+    fn parse_ingredient_line_strips_descriptive_clauses_from_name() {
+        let parsed = parse_ingredient_line("½ cup grated Parmesan, divided, more for garnish");
+        assert_eq!(parsed.quantity, 0.5);
+        assert_eq!(parsed.unit, Unit::Cup);
+        assert_eq!(parsed.name_guess, "grated Parmesan");
+    }
+
+    /// No leading quantity, and the only numbers are approximate parenthetical asides
+    /// ("about 8 ounces") — deliberately NOT extracted as the quantity (see
+    /// strip_descriptive_clauses doc comment): there's no reliable way to tell an
+    /// approximate aside from the true primary measure. Falls back to quantity 1 /
+    /// Piece, but with a clean name instead of the full messy line.
+    #[test]
+    fn parse_ingredient_line_ignores_parenthetical_quantities() {
+        let parsed = parse_ingredient_line(
+            "small baguette or chunk of sourdough bread (about 8 ounces), preferably day-old, torn or cut into bite-size pieces (about 4 cups)"
+        );
+        assert_eq!(parsed.quantity, 1.0);
         assert_eq!(parsed.unit, Unit::Piece);
-        assert_eq!(parsed.name_guess, "garlic cloves, thinly sliced");
+        assert_eq!(parsed.name_guess, "small baguette or chunk of sourdough bread");
     }
 
     #[test]
