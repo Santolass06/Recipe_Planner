@@ -12,21 +12,21 @@ import type { RecipeWithIngredients as Recipe } from "../../crates/core/bindings
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import { UNIT_LABELS_FULL as UNIT_LABELS, UNIT_LABELS_SHORT as UNIT_SHORT } from "../lib/units";
 
-type T = (key: string, params?: Record<string, string | number>) => string;
+export type T = (key: string, params?: Record<string, string | number>) => string;
 
-const getUnitGroups = (t: T) => [
+export const getUnitGroups = (t: T) => [
   { label: t("ingredients.unitGroups.weight"), units: ["gram", "kilogram", "milligram", "ounce", "pound", "pinch", "bunch", "clove", "slice"] },
   { label: t("ingredients.unitGroups.volume"), units: ["milliliter", "liter", "fluid_ounce", "cup", "pint", "quart", "gallon"] },
   { label: t("ingredients.unitGroups.culinary"), units: ["teaspoon", "tablespoon"] },
   { label: t("ingredients.unitGroups.count"), units: ["piece", "dozen"] },
 ];
 
-const CATEGORIES = [
+export const CATEGORIES = [
   "Entrada", "Prato principal", "Sobremesa", "Acompanhamento",
   "Sopa", "Salada", "Molho", "Pão", "Bebida", "Outro",
 ];
 
-const EMPTY_FORM = {
+export const EMPTY_FORM = {
   name: "",
   category: "Prato principal",
   portions: 4,
@@ -37,12 +37,12 @@ const EMPTY_FORM = {
 
 const CARD_TONES = ["var(--ember)", "var(--approx)", "var(--green)", "var(--amber)"];
 
-function eur(n: number) {
+export function eur(n: number) {
   if (!isFinite(n)) return "€0,00";
   return "€" + n.toFixed(2).replace(".", ",");
 }
 
-function fmtQty(n: number) {
+export function fmtQty(n: number) {
   const r = Math.round(n * 100) / 100;
   return (Number.isInteger(r) ? r : r.toFixed(r < 10 ? 2 : 1)).toString().replace(".", ",");
 }
@@ -58,7 +58,7 @@ interface CostLine {
   title?: string;
 }
 
-function computeCostLines(recipe: Recipe, servings: number, ingredients: Ingredient[], t: T): CostLine[] {
+export function computeCostLines(recipe: Recipe, servings: number, ingredients: Ingredient[], t: T): CostLine[] {
   const factor = servings / (recipe.portions || 1);
   return (recipe.ingredients ?? []).map(ing => {
     const stock = ingredients.find(i => i.id === ing.ingredient_id);
@@ -327,7 +327,7 @@ function RecipeDetail({
   );
 }
 
-function RecipeFormContent({ form, setForm, ingredients, isView, handleSave, editingId, t }: any) {
+export function RecipeFormContent({ form, setForm, ingredients, isView, handleSave, editingId, t }: any) {
   const unitGroups = getUnitGroups(t);
   function addIngredientRow() {
     setForm((f: any) => ({ ...f, ingredients: [...f.ingredients, { ingredient_id: 0, quantity: 0, unit: "gram" }] }));

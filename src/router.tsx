@@ -11,6 +11,8 @@ import MealPlannerPage from "./pages/MealPlannerPage";
 import CalendarPage from "./pages/CalendarPage";
 import SettingsPage from "./pages/SettingsPage";
 import SuppliersPage from "./pages/SuppliersPage";
+import EventsPage from "./pages/EventsPage";
+import EventDetailPage from "./pages/EventDetailPage";
 import ReportsPage from "./pages/ReportsPage";
 import ReceiptScannerPage from "./pages/ReceiptScannerPage";
 import HelpPage from "./pages/HelpPage";
@@ -27,6 +29,8 @@ export const router = createBrowserRouter([
       { path: "custos", element: <CostsPage /> },
       { path: "armazem", element: <StockPage /> },
       { path: "compras", element: <ShoppingListPage /> },
+      { path: "eventos", element: <EventsPage /> },
+      { path: "eventos/:id", element: <EventDetailPage /> },
       { path: "planeamento", element: <MealPlannerPage /> },
       { path: "calendario", element: <CalendarPage /> },
       { path: "sugestor", element: <PlaceholderPage name="sugestor" /> },

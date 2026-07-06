@@ -276,32 +276,65 @@ fornecedor).
 
 **Impacto:** Ingredientes, Stock, Compras, Custos, Fornecedores, Relatórios.
 
-### 3.2 — Event mode (modo Evento/Ocasião)
+### 3.2 — Event mode (modo Evento/Ocasião) — ✅ CONCLUÍDA
 
-**Modelo escolhido:** híbrido:
-- Base = catálogo partilhado; quantidades e preços do evento isolados da
-  base principal.
-- + Capacidade de criar variantes de receita dentro do evento (marca
-  diferente e/ou quantidades diferentes) sem alterar a receita do catálogo
-  principal.
-- + Ao criar o evento, o utilizador escolhe que receitas copiar para dentro
-  dele, em vez de copiar tudo ou nada automaticamente.
-- Opt-in explícito — a app arranca sempre no contexto principal; entrar num
-  evento é uma ação deliberada.
+**Modelo implementado:**
+- Base = catálogo partilhado; `recipes.event_id` (NULL = catálogo principal)
+  + `recipes.base_recipe_id` (de que receita do catálogo nasceu a variante,
+  quando copiada).
+- Congelado, não ao vivo: copiar uma receita do catálogo para um evento tira
+  um snapshot independente — editar a receita-base depois não propaga para
+  a variante do evento, e vice-versa.
+- Nova secção "Eventos" na sidebar (grupo Planeamento), `EventsPage` +
+  `EventDetailPage`, para gerir vários eventos em paralelo.
+- Dentro de um evento: copiar uma receita existente do catálogo (linha
+  inteira clicável no seletor), ou criar uma receita nova exclusiva ao
+  evento (nunca aparece no catálogo principal).
+- "Tornar receita global" (`recipe_promote_to_catalog`): qualquer receita de
+  evento — copiada ou criada de raiz — pode ser promovida ao catálogo
+  principal (limpa `event_id` e `base_recipe_id`).
+- Apagar um evento apaga em cascata (manual, não FK — ver nota em
+  Migration 017 no `db.rs`) todas as suas receitas e ingredientes de receita.
 
-**Modelo de dados (esboço):** receitas de evento precisam de
-`base_recipe_id` (de que receita do catálogo nasceu a variante) e `event_id`
-(a que evento pertence; NULL = catálogo principal).
+**Adiado para depois (ver 3.3):** stock/ingredientes isolados por evento.
 
-**Decisão a fechar antes de implementar:** quando uma receita do catálogo
-principal é editada enquanto um evento está ativo, o evento deve ver essa
-mudança ao vivo, ou ficar congelado como estava quando foi copiada?
+---
 
-**Dependência:** desenhar depois da feature de marca (3.1) — as variantes de
-evento também vão lidar com marcas.
+### 3.3 — Stock isolado por evento (proposto, não decidido)
 
-**Feature relacionada, iteração posterior:** "promover" conteúdo do evento
-de volta para o catálogo principal.
+Pedido do André após testar o 3.2: um evento poder ter também ingredientes
+exclusivos e stock isolado do catálogo principal — e ao confirmar um recibo
+(scanner ou manual) poder escolher se a compra alimenta o stock normal ou o
+stock de um evento específico.
+
+**Por que não é só um afinamento do 3.2:** hoje `stock` e `stock_purchases`
+assumem uma linha por ingrediente (`stock.ingredient_id` é `UNIQUE`). Isolar
+por evento implica escolher entre dois modelos com custos bem diferentes:
+
+- **(a) Ingrediente exclusivo ao evento** — mesmo padrão do `event_id` já
+  usado em `recipes`: um ingrediente criado "só para o evento X" é uma linha
+  própria, invisível no catálogo principal de Ingredientes. Reaproveita
+  quase tudo (stock e stock_purchases já isolam por `ingredient_id`, nada
+  muda aí). Não resolve o caso "é a mesma Farinha do catálogo, mas quero a
+  quantidade comprada para o evento contada à parte".
+- **(b) Stock duplo para o mesmo ingrediente partilhado** — resolve esse
+  caso, mas obriga a mudar a chave de `stock`/`stock_purchases` de
+  `ingredient_id` para `(ingredient_id, event_id)`, o que toca em custo
+  ponderado (`weighted_avg_stock_price`), geração de lista de compras,
+  `ReceiptConfirmInput`/scanner de recibos, e `ShoppingListMarkPurchasedInput`.
+
+**Decisões a fechar antes de implementar:**
+1. Modelo (a), (b), ou os dois (ingredientes exclusivos E stock duplo para
+   partilhados)?
+2. Se (b): o scanner de recibos e o "marcar comprado" da lista de compras
+   precisam de um seletor "stock normal vs. evento X" — onde é que esse
+   contexto de evento vem (evento ativo selecionado globalmente? escolha
+   manual por recibo?).
+3. Custo de receita (`calculate_cost`) de uma receita de evento: usa o
+   weighted-average do stock do evento, do catálogo, ou combina os dois?
+
+**Estado:** só implementar quando o André decidir avançar — não começar sem
+essa conversa de design.
 
 ---
 

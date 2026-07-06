@@ -75,6 +75,14 @@ pub fn run() {
             mise_tauri::commands::supplier_create,
             mise_tauri::commands::supplier_update,
             mise_tauri::commands::supplier_delete,
+            // Events
+            mise_tauri::commands::events_list,
+            mise_tauri::commands::event_create,
+            mise_tauri::commands::event_update,
+            mise_tauri::commands::event_delete,
+            mise_tauri::commands::event_recipes_list,
+            mise_tauri::commands::recipe_copy_to_event,
+            mise_tauri::commands::recipe_promote_to_catalog,
             // Price quotes
             mise_tauri::commands::price_quotes_list,
             mise_tauri::commands::price_quote_create,

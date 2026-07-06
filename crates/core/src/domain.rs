@@ -169,6 +169,11 @@ pub struct RecipeInput {
     pub cook_time_minutes: Option<u32>,
     pub tags: Vec<String>,
     pub image_base64: Option<String>,
+    /// Set on create to scope a brand-new recipe to an event (Fase 3.2).
+    /// `#[serde(default)]` so existing catalog create/update callers that
+    /// never send this field keep working.
+    #[serde(default)]
+    pub event_id: Option<i64>,
 }
 
 /// Recipe (stored)
@@ -599,6 +604,31 @@ pub struct Supplier {
     pub id: i64,
     pub name: String,
     pub contact: Option<String>,
+    pub notes: Option<String>,
+    #[ts(type = "string")]
+    pub created_at: DateTime<Utc>,
+    #[ts(type = "string")]
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Event input (create/update)
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct EventInput {
+    #[validate(length(min = 1, max = 200))]
+    pub name: String,
+    pub event_date: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// Event (stored) — an isolated planning context that recipes can be copied into
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct Event {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub name: String,
+    pub event_date: Option<String>,
     pub notes: Option<String>,
     #[ts(type = "string")]
     pub created_at: DateTime<Utc>,
