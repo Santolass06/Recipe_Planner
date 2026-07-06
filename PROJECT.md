@@ -338,6 +338,67 @@ essa conversa de design.
 
 ---
 
+### 3.4 — Importar receita por URL (proposto, a aprovar)
+
+**Pedido do André (2026-07-06):** uma app que a madrinha já usa permite colar
+o URL de uma receita (ex. NYT Cooking) e descarregá-la automaticamente para
+a app. Avaliado antes de planear: exequível.
+
+**Viabilidade confirmada (2026-07-06):** testado com uma página real da NYT
+Cooking (`cooking.nytimes.com/recipes/1020044-vegetable-paella-with-chorizo`).
+O HTML público (sem login) contém um bloco `<script type="application/ld+json"
+data-next-head="">` com `"@type":"Recipe"` (schema.org, o mesmo standard que
+motores de busca leem) com nome, `recipeIngredient` (array de linhas em texto
+livre), `recipeInstructions` (array de `HowToStep`, cada um com `.text`),
+`recipeYield`, imagem. É o standard de facto do setor (usado por
+AllRecipes, Serious Eats, Bon Appétit, etc., e pela lib Python
+`recipe-scrapers`). `reqwest` e `regex` já são dependências do workspace
+(usadas hoje no scanner de recibos, `db.rs:4109` e `db.rs:4509`) — nenhuma
+dependência nova necessária.
+
+**Alcance do MVP proposto:**
+- Novo comando Tauri `recipe_import_from_url(url) -> RecipeImportPreview`,
+  **read-only** — nunca grava na BD diretamente.
+- Extração: `reqwest` com User-Agent de browser (alguns sites bloqueiam UAs
+  de bot), localizar o(s) `<script type="application/ld+json" ...>` cujo
+  conteúdo tem `"@type":"Recipe"` (pode vir solto ou dentro de um array/
+  `@graph`), `serde_json` para os campos: `name`, `recipeIngredient[]`,
+  `recipeInstructions[]` (concatenar `.text` de cada `HowToStep`),
+  `recipeYield` (parse heurístico do nº de porções), `image` (1º URL),
+  `prepTime`/`cookTime` (duração ISO 8601 → minutos, quando presente).
+- Ingredientes: cada linha de `recipeIngredient` devolvida como texto bruto +
+  tentativa de parse por regex ("quantidade + unidade conhecida + resto =
+  nome"), mapeando para o enum `Unit` só quando a unidade bate certo (ex.
+  "tablespoon" → `Tablespoon`, "cup" → `Cup`). Tentativa de correspondência
+  automática a um ingrediente já existente no catálogo por nome exato
+  (case-insensitive); sem correspondência, o `ingredient_id` fica por
+  preencher e o texto original aparece para o utilizador escolher/criar à
+  mão. Reaproveita o seletor de ingredientes que já existe no formulário de
+  Receitas — sem UI nova de matching.
+- Frontend: botão "Importar de URL" em Receitas → input de URL → chama o
+  comando → pré-preenche o formulário de criação de receita já existente
+  (nome, porções, instruções, tempo); ingredientes ficam por confirmar antes
+  de gravar (nunca grava automaticamente).
+
+**Fora de âmbito do MVP:**
+- Conversão de frações/unidades imperiais complexas — só regex simples
+  para os casos comuns.
+- Sites sem `schema.org/Recipe` em JSON-LD: erro claro, sem scraping de
+  HTML ad-hoc por site (frágil, quebra a cada redesign do site).
+- Download automático da imagem para `image_base64` — fica só o URL de
+  referência na primeira iteração.
+
+**Decisões a confirmar com o André antes de implementar:**
+1. Âmbito do MVP acima (parse read-only + pré-preencher formulário
+   existente, sem gravação automática nem download de imagem) — aprovado?
+2. Fallback sem JSON-LD Recipe: aceitável mostrar erro e pedir preenchimento
+   manual (sem 2ª estratégia de scraping)?
+
+**Estado:** a aguardar aprovação do André. Não implementar sem confirmação
+explícita.
+
+---
+
 ## Roadmap i18n
 
 Implementado agora (branch `feature/i18n-full-translation`): PT/EN completos
