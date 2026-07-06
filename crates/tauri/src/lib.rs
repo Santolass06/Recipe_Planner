@@ -274,6 +274,35 @@ impl AppDb {
         mise_core::db::delete_supplier(&self.db, id).await.map_err(|e| e.to_string())
     }
 
+    // Events (Fase 3.2)
+    pub async fn events_list(&self) -> Result<Vec<Event>, String> {
+        mise_core::db::events_list(&self.db).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn create_event(&self, input: EventInput) -> Result<Event, String> {
+        mise_core::db::create_event(&self.db, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn update_event(&self, id: i64, input: EventInput) -> Result<Event, String> {
+        mise_core::db::update_event(&self.db, id, input).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn delete_event(&self, id: i64) -> Result<(), String> {
+        mise_core::db::delete_event(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn event_recipes_list(&self, event_id: i64) -> Result<Vec<RecipeWithIngredients>, String> {
+        mise_core::db::event_recipes_list(&self.db, event_id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn recipe_copy_to_event(&self, recipe_id: i64, event_id: i64) -> Result<RecipeWithIngredients, String> {
+        mise_core::db::recipe_copy_to_event(&self.db, recipe_id, event_id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn recipe_promote_to_catalog(&self, id: i64) -> Result<RecipeWithIngredients, String> {
+        mise_core::db::recipe_promote_to_catalog(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
     // Price quotes
     pub async fn price_quotes_list(&self, ingredient_id: i64) -> Result<Vec<PriceQuote>, String> {
         mise_core::db::price_quotes_list(&self.db, ingredient_id).await.map_err(|e| e.to_string())
@@ -909,6 +938,64 @@ pub mod commands {
         id: i64,
     ) -> Result<(), String> {
         db.delete_supplier(id).await.map_err(|e| e.to_string())
+    }
+
+    // Events (Fase 3.2)
+    #[tauri::command]
+    pub async fn events_list(
+        db: tauri::State<'_, crate::AppDb>,
+    ) -> Result<Vec<Event>, String> {
+        db.events_list().await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn event_create(
+        db: tauri::State<'_, crate::AppDb>,
+        input: EventInput,
+    ) -> Result<Event, String> {
+        db.create_event(input).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn event_update(
+        db: tauri::State<'_, crate::AppDb>,
+        id: i64,
+        input: EventInput,
+    ) -> Result<Event, String> {
+        db.update_event(id, input).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn event_delete(
+        db: tauri::State<'_, crate::AppDb>,
+        id: i64,
+    ) -> Result<(), String> {
+        db.delete_event(id).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn event_recipes_list(
+        db: tauri::State<'_, crate::AppDb>,
+        event_id: i64,
+    ) -> Result<Vec<RecipeWithIngredients>, String> {
+        db.event_recipes_list(event_id).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn recipe_copy_to_event(
+        db: tauri::State<'_, crate::AppDb>,
+        recipe_id: i64,
+        event_id: i64,
+    ) -> Result<RecipeWithIngredients, String> {
+        db.recipe_copy_to_event(recipe_id, event_id).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn recipe_promote_to_catalog(
+        db: tauri::State<'_, crate::AppDb>,
+        id: i64,
+    ) -> Result<RecipeWithIngredients, String> {
+        db.recipe_promote_to_catalog(id).await.map_err(|e| e.to_string())
     }
 
     // Price quotes

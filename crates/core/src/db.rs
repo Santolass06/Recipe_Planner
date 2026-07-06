@@ -404,6 +404,25 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
     // Migration 016: brand on stock_purchases (multi-brand stock, Fase 3.1)
     add_column_if_missing(&conn, "stock_purchases", "brand", "TEXT").await?;
 
+    // Migration 017: Events (Fase 3.2 — event mode)
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            event_date TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        "#,
+        (),
+    ).await?;
+    // ponytail: no FK/ON DELETE CASCADE — this codebase never enables
+    // `PRAGMA foreign_keys`, so cascades are handled manually (see delete_event).
+    add_column_if_missing(&conn, "recipes", "event_id", "INTEGER").await?;
+    add_column_if_missing(&conn, "recipes", "base_recipe_id", "INTEGER").await?;
+
     Ok(())
 }
 
@@ -942,7 +961,7 @@ pub async fn recipes_list(db: &Database) -> LibsqlResult<Vec<RecipeWithIngredien
     let conn = get_conn(db).await?;
     let mut rows = conn.query(
         "SELECT id, name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, image_path, created_at, updated_at
-         FROM recipes ORDER BY created_at DESC",
+         FROM recipes WHERE event_id IS NULL ORDER BY created_at DESC",
         (),
     ).await?;
 
@@ -1005,12 +1024,12 @@ pub async fn recipes_paginated(db: &Database, page: u32, per_page: u32) -> Libsq
     let conn = get_conn(db).await?;
     let offset = (page - 1) * per_page;
 
-    let mut rows = conn.query("SELECT COUNT(*) FROM recipes", ()).await?;
+    let mut rows = conn.query("SELECT COUNT(*) FROM recipes WHERE event_id IS NULL", ()).await?;
     let total: i64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
 
     let mut rows = conn.query(
         "SELECT id, name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, image_path, created_at, updated_at
-         FROM recipes ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+         FROM recipes WHERE event_id IS NULL ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
         params![per_page, offset],
     ).await?;
 
@@ -1047,9 +1066,9 @@ pub async fn create_recipe(db: &Database, input: RecipeInput) -> LibsqlResult<Re
     let tags_json = serde_json::to_string(&input.tags).unwrap_or_else(|_| "[]".to_string());
 
     conn.execute(
-        "INSERT INTO recipes (name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, image_path)
-         VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8)",
-        params![input.name, input.category, input.portions, input.instructions, input.prep_time_minutes, input.cook_time_minutes, tags_json, input.image_base64],
+        "INSERT INTO recipes (name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, image_path, event_id)
+         VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9)",
+        params![input.name, input.category, input.portions, input.instructions, input.prep_time_minutes, input.cook_time_minutes, tags_json, input.image_base64, input.event_id],
     ).await?;
 
     let recipe_id = conn.last_insert_rowid();
@@ -1860,6 +1879,7 @@ pub async fn delete_all_data(db: &Database) -> LibsqlResult<()> {
     conn.execute("DELETE FROM suppliers", ()).await?;
     conn.execute("DELETE FROM categories", ()).await?;
     conn.execute("DELETE FROM settings", ()).await?;
+    conn.execute("DELETE FROM events", ()).await?;
     Ok(())
 }
 
@@ -2233,6 +2253,49 @@ pub async fn seed_demo_data(db: &Database) -> LibsqlResult<()> {
         }
     }
 
+    // 10. Event (Fase 3.2) — one demo event with a recipe copied from the
+    // catalog (scaled up, showing the frozen/isolated quantities) and one
+    // recipe authored directly inside the event (never shown in the
+    // catalog until promoted).
+    conn.execute(
+        "INSERT INTO events (name, event_date, notes) VALUES (?1, ?2, ?3)",
+        params![
+            "Casamento Ana & Pedro",
+            (now + chrono::Duration::days(45)).format("%Y-%m-%d").to_string(),
+            "120 convidados, buffet volante"
+        ],
+    ).await?;
+    let event_id = conn.last_insert_rowid();
+
+    let base_recipe_id = recipe_ids["Bolo de Chocolate"];
+    conn.execute(
+        "INSERT INTO recipes (name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, event_id, base_recipe_id)
+         VALUES ('Bolo de Chocolate', 'Sobremesas', 60, ?1, 0, 15, 40, '[]', ?2, ?3)",
+        params![
+            "Misturar farinha, chocolate, leite, ovos e manteiga. Cozer a 180ºC durante 40 min.",
+            event_id, base_recipe_id
+        ],
+    ).await?;
+    let event_recipe_id = conn.last_insert_rowid();
+    for (ing_name, quantity, unit) in [("Farinha", 1500.0, "gram"), ("Chocolate em pó", 1125.0, "gram"), ("Leite", 1875.0, "milliliter"), ("Ovos", 30.0, "piece"), ("Manteiga", 750.0, "gram")] {
+        let ing_id = ing_ids[ing_name];
+        conn.execute(
+            "INSERT INTO recipe_ingredients (recipe_id, ingredient_id, ingredient_name, quantity, unit) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![event_recipe_id, ing_id, ing_name, quantity, unit],
+        ).await?;
+    }
+
+    conn.execute(
+        "INSERT INTO recipes (name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, event_id)
+         VALUES ('Bolo dos Noivos', 'Sobremesas', 1, 'Bolo decorativo, apenas para a mesa principal.', 0, 60, 90, '[]', ?1)",
+        params![event_id],
+    ).await?;
+    let exclusive_recipe_id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO recipe_ingredients (recipe_id, ingredient_id, ingredient_name, quantity, unit) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![exclusive_recipe_id, ing_ids["Chocolate em pó"], "Chocolate em pó", 2000.0, "gram"],
+    ).await?;
+
     Ok(())
 }
 
@@ -2333,6 +2396,152 @@ pub async fn delete_supplier(db: &Database, id: i64) -> LibsqlResult<()> {
     let conn = get_conn(db).await?;
     conn.execute("DELETE FROM suppliers WHERE id = ?1", params![id]).await?;
     Ok(())
+}
+
+/// Map a libsql Row to Event
+fn row_to_event(row: &Row) -> LibsqlResult<Event> {
+    let created_at_str: String = row.get(4)?;
+    let updated_at_str: String = row.get(5)?;
+    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+
+    Ok(Event {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        event_date: row.get(2)?,
+        notes: row.get(3)?,
+        created_at,
+        updated_at,
+    })
+}
+
+/// List events
+pub async fn events_list(db: &Database) -> LibsqlResult<Vec<Event>> {
+    let conn = get_conn(db).await?;
+    let mut rows = conn.query(
+        "SELECT id, name, event_date, notes, created_at, updated_at FROM events ORDER BY event_date IS NULL, event_date, created_at DESC",
+        (),
+    ).await?;
+    let mut events = Vec::new();
+    while let Some(row) = rows.next().await? {
+        events.push(row_to_event(&row)?);
+    }
+    Ok(events)
+}
+
+/// Create event
+pub async fn create_event(db: &Database, input: EventInput) -> LibsqlResult<Event> {
+    let conn = get_conn(db).await?;
+    conn.execute(
+        "INSERT INTO events (name, event_date, notes) VALUES (?1, ?2, ?3)",
+        params![input.name, input.event_date, input.notes],
+    ).await?;
+    let id = conn.last_insert_rowid();
+    let mut rows = conn.query("SELECT id, name, event_date, notes, created_at, updated_at FROM events WHERE id = ?1", params![id]).await?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    row_to_event(&row)
+}
+
+/// Update event
+pub async fn update_event(db: &Database, id: i64, input: EventInput) -> LibsqlResult<Event> {
+    let conn = get_conn(db).await?;
+    conn.execute(
+        "UPDATE events SET name = ?1, event_date = ?2, notes = ?3, updated_at = datetime('now') WHERE id = ?4",
+        params![input.name, input.event_date, input.notes, id],
+    ).await?;
+    let mut rows = conn.query("SELECT id, name, event_date, notes, created_at, updated_at FROM events WHERE id = ?1", params![id]).await?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    row_to_event(&row)
+}
+
+/// Delete event, and every recipe variant copied into it (manual cascade — see Migration 017).
+pub async fn delete_event(db: &Database, id: i64) -> LibsqlResult<()> {
+    let conn = get_conn(db).await?;
+    conn.execute(
+        "DELETE FROM recipe_ingredients WHERE recipe_id IN (SELECT id FROM recipes WHERE event_id = ?1)",
+        params![id],
+    ).await?;
+    conn.execute("DELETE FROM recipes WHERE event_id = ?1", params![id]).await?;
+    conn.execute("DELETE FROM events WHERE id = ?1", params![id]).await?;
+    Ok(())
+}
+
+/// List recipe variants copied into an event
+pub async fn event_recipes_list(db: &Database, event_id: i64) -> LibsqlResult<Vec<RecipeWithIngredients>> {
+    let conn = get_conn(db).await?;
+    let mut rows = conn.query(
+        "SELECT id, name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, image_path, created_at, updated_at
+         FROM recipes WHERE event_id = ?1 ORDER BY created_at DESC",
+        params![event_id],
+    ).await?;
+
+    let mut recipes = Vec::new();
+    while let Some(row) = rows.next().await? {
+        recipes.push(row_to_recipe(&row)?);
+    }
+
+    let mut final_recipes = Vec::with_capacity(recipes.len());
+    for recipe in recipes {
+        final_recipes.push(row_to_recipe_with_ingredients(db, recipe).await?);
+    }
+    Ok(final_recipes)
+}
+
+/// Copy a catalog recipe (and its ingredient lines) into an event as a frozen,
+/// independently editable variant. Later edits to the base recipe do not
+/// propagate — this is a one-time snapshot, per the Fase 3.2 decision.
+pub async fn recipe_copy_to_event(db: &Database, recipe_id: i64, event_id: i64) -> LibsqlResult<RecipeWithIngredients> {
+    let conn = get_conn(db).await?;
+    let mut rows = conn.query(
+        "SELECT name, category, portions, instructions, prep_time_minutes, cook_time_minutes, tags, image_path
+         FROM recipes WHERE id = ?1",
+        params![recipe_id],
+    ).await?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    let (name, category, portions, instructions, prep_time_minutes, cook_time_minutes, tags, image_path): (String, String, u32, String, Option<u32>, Option<u32>, String, Option<String>) =
+        (row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?);
+    drop(rows);
+
+    conn.execute(
+        "INSERT INTO recipes (name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, image_path, event_id, base_recipe_id)
+         VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![name, category, portions, instructions, prep_time_minutes, cook_time_minutes, tags, image_path, event_id, recipe_id],
+    ).await?;
+    let new_id = conn.last_insert_rowid();
+
+    let mut rows = conn.query(
+        "SELECT ingredient_id, ingredient_name, quantity, unit FROM recipe_ingredients WHERE recipe_id = ?1",
+        params![recipe_id],
+    ).await?;
+    while let Some(row) = rows.next().await? {
+        let (ingredient_id, ingredient_name, quantity, unit): (i64, String, f64, String) =
+            (row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?);
+        conn.execute(
+            "INSERT INTO recipe_ingredients (recipe_id, ingredient_id, ingredient_name, quantity, unit) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![new_id, ingredient_id, ingredient_name, quantity, unit],
+        ).await?;
+    }
+    drop(rows);
+
+    let recipe = get_recipe(db, new_id).await?;
+    row_to_recipe_with_ingredients(db, recipe).await
+}
+
+/// Move a recipe out of its event and into the shared catalog for good —
+/// the reverse of recipe_copy_to_event's snapshot. Loses the base_recipe_id
+/// link since it no longer makes sense once the recipe is independent.
+pub async fn recipe_promote_to_catalog(db: &Database, id: i64) -> LibsqlResult<RecipeWithIngredients> {
+    let conn = get_conn(db).await?;
+    conn.execute(
+        "UPDATE recipes SET event_id = NULL, base_recipe_id = NULL, updated_at = datetime('now') WHERE id = ?1",
+        params![id],
+    ).await?;
+    let recipe = get_recipe(db, id).await?;
+    row_to_recipe_with_ingredients(db, recipe).await
 }
 
 /// List price quotes for ingredient
@@ -4632,7 +4841,7 @@ mod fase3_stock_tests {
         let recipe = create_recipe(&db, RecipeInput {
             name: "Salada".into(), category: "Geral".into(), portions: 1,
             instructions: String::new(), prep_time_minutes: None, cook_time_minutes: None,
-            tags: vec![], image_base64: None,
+            tags: vec![], image_base64: None, event_id: None,
             ingredients: vec![RecipeIngredientInput { ingredient_id: ingredient.id, quantity: 2.0, unit: Unit::Liter }],
         }).await.unwrap();
 
@@ -4665,5 +4874,106 @@ mod fase3_stock_tests {
         let purchases = stock_purchases_list(&db, ingredient.id).await.unwrap();
         assert_eq!(purchases.len(), 1);
         assert_eq!(purchases[0].brand.as_deref(), Some("Mimosa"));
+    }
+
+    /// Fase 3.2: copying a catalog recipe into an event snapshots it — later
+    /// edits to either side must not leak into the other, and the copy must
+    /// not show up in the main catalog listing.
+    #[tokio::test]
+    async fn event_recipe_copy_is_isolated_from_catalog() {
+        let db = test_db().await;
+        let ingredient = create_ingredient(&db, IngredientInput {
+            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.0, category: None,
+        }).await.unwrap();
+        let base = create_recipe(&db, RecipeInput {
+            name: "Pão".into(), category: "Pão".into(), portions: 4,
+            instructions: "Amassar".into(),
+            ingredients: vec![RecipeIngredientInput { ingredient_id: ingredient.id, quantity: 1.0, unit: Unit::Kilogram }],
+            prep_time_minutes: None, cook_time_minutes: None, tags: vec![], image_base64: None, event_id: None,
+        }).await.unwrap();
+
+        let event = create_event(&db, EventInput {
+            name: "Casamento".into(), event_date: Some("2026-08-01".into()), notes: None,
+        }).await.unwrap();
+
+        let variant = recipe_copy_to_event(&db, base.recipe.id, event.id).await.unwrap();
+        assert_eq!(variant.recipe.name, "Pão");
+        assert_ne!(variant.recipe.id, base.recipe.id);
+
+        // Catalog listing must not include the event variant.
+        let catalog = recipes_list(&db).await.unwrap();
+        assert!(catalog.iter().all(|r| r.recipe.id != variant.recipe.id));
+
+        // Editing the variant's quantity must not affect the base recipe.
+        update_recipe(&db, variant.recipe.id, RecipeInput {
+            name: "Pão (evento)".into(), category: "Pão".into(), portions: 100,
+            instructions: "Amassar mais".into(),
+            ingredients: vec![RecipeIngredientInput { ingredient_id: ingredient.id, quantity: 20.0, unit: Unit::Kilogram }],
+            prep_time_minutes: None, cook_time_minutes: None, tags: vec![], image_base64: None, event_id: None,
+        }).await.unwrap();
+        let base_after = get_recipe(&db, base.recipe.id).await.unwrap();
+        assert_eq!(base_after.portions, 4);
+
+        let event_recipes = event_recipes_list(&db, event.id).await.unwrap();
+        assert_eq!(event_recipes.len(), 1);
+        assert_eq!(event_recipes[0].recipe.portions, 100);
+
+        // Deleting the event must cascade-remove its recipe variants.
+        delete_event(&db, event.id).await.unwrap();
+        let events_after = events_list(&db).await.unwrap();
+        assert!(events_after.is_empty());
+        let event_recipes_after = event_recipes_list(&db, event.id).await.unwrap();
+        assert!(event_recipes_after.is_empty());
+    }
+
+    /// A recipe authored directly inside an event (not copied from the
+    /// catalog) must stay invisible to the catalog until explicitly
+    /// promoted, at which point it behaves like any other catalog recipe.
+    #[tokio::test]
+    async fn event_exclusive_recipe_can_be_promoted_to_catalog() {
+        let db = test_db().await;
+        let ingredient = create_ingredient(&db, IngredientInput {
+            name: "Ovos".into(), unit: Unit::Piece, price_per_unit: 0.2, category: None,
+        }).await.unwrap();
+        let event = create_event(&db, EventInput {
+            name: "Aniversário".into(), event_date: None, notes: None,
+        }).await.unwrap();
+
+        let exclusive = create_recipe(&db, RecipeInput {
+            name: "Bolo especial".into(), category: "Sobremesa".into(), portions: 10,
+            instructions: "Bater".into(),
+            ingredients: vec![RecipeIngredientInput { ingredient_id: ingredient.id, quantity: 6.0, unit: Unit::Piece }],
+            prep_time_minutes: None, cook_time_minutes: None, tags: vec![], image_base64: None,
+            event_id: Some(event.id),
+        }).await.unwrap();
+
+        // Invisible to the catalog while scoped to the event.
+        let catalog = recipes_list(&db).await.unwrap();
+        assert!(catalog.iter().all(|r| r.recipe.id != exclusive.recipe.id));
+        let event_recipes = event_recipes_list(&db, event.id).await.unwrap();
+        assert_eq!(event_recipes.len(), 1);
+
+        recipe_promote_to_catalog(&db, exclusive.recipe.id).await.unwrap();
+
+        let catalog_after = recipes_list(&db).await.unwrap();
+        assert!(catalog_after.iter().any(|r| r.recipe.id == exclusive.recipe.id));
+        let event_recipes_after = event_recipes_list(&db, event.id).await.unwrap();
+        assert!(event_recipes_after.is_empty());
+    }
+
+    /// seed_demo_data must include a demo event (copied + exclusive recipe),
+    /// and delete_all_data must clear it back out again.
+    #[tokio::test]
+    async fn seed_demo_data_includes_event_and_reset_clears_it() {
+        let db = test_db().await;
+        seed_demo_data(&db).await.unwrap();
+
+        let events = events_list(&db).await.unwrap();
+        assert_eq!(events.len(), 1);
+        let event_recipes = event_recipes_list(&db, events[0].id).await.unwrap();
+        assert_eq!(event_recipes.len(), 2);
+
+        delete_all_data(&db).await.unwrap();
+        assert!(events_list(&db).await.unwrap().is_empty());
     }
 }

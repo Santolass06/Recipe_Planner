@@ -36,6 +36,7 @@ export default function Sidebar() {
       { to: "/planeamento", icon: "calendar_view_week", label: t("nav.planning") },
       { to: "/calendario", icon: "calendar_month", label: t("nav.calendar") },
       { to: "/compras", icon: "shopping_cart", label: t("nav.shopping") },
+      { to: "/eventos", icon: "celebration", label: t("nav.events") },
     ] },
     { label: t("nav.analytics"), items: [
       { to: "/relatorios", icon: "monitoring", label: t("nav.reports") },
