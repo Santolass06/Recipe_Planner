@@ -175,6 +175,10 @@ impl AppDb {
         mise_core::db::shopping_list_toggle_item(&self.db, list_id, item_id, purchased).await.map_err(|e| e.to_string())
     }
 
+    pub async fn shopping_list_mark_purchased(&self, input: ShoppingListMarkPurchasedInput) -> Result<ShoppingItem, String> {
+        mise_core::db::shopping_list_mark_purchased(&self.db, input).await.map_err(|e| e.to_string())
+    }
+
     pub async fn shopping_list_remove_item(&self, list_id: i64, item_id: i64) -> Result<(), String> {
         mise_core::db::shopping_list_remove_item(&self.db, list_id, item_id).await.map_err(|e| e.to_string())
     }
@@ -708,6 +712,14 @@ pub mod commands {
         db.shopping_list_toggle_item(list_id, item_id, purchased)
             .await
             .map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn shopping_list_mark_purchased(
+        db: tauri::State<'_, crate::AppDb>,
+        input: ShoppingListMarkPurchasedInput,
+    ) -> Result<ShoppingItem, String> {
+        db.shopping_list_mark_purchased(input).await.map_err(|e| e.to_string())
     }
 
     #[tauri::command]

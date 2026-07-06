@@ -301,6 +301,28 @@ pub struct ShoppingItemInput {
     pub notes: Option<String>,
 }
 
+/// Marks a shopping list item as purchased and, when it has a linked
+/// ingredient, records the real lot bought (brand/supplier/price) as a
+/// stock_purchase — the single event that raises stock (Fase 3.1).
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct ShoppingListMarkPurchasedInput {
+    #[validate(range(min = 1))]
+    #[ts(type = "number")]
+    pub list_id: i64,
+    #[validate(range(min = 1))]
+    #[ts(type = "number")]
+    pub item_id: i64,
+    #[validate(range(min = 0.001))]
+    pub quantity: f64,
+    #[validate(range(min = 0.0))]
+    pub price_per_unit: f64,
+    pub brand: Option<String>,
+    #[ts(type = "number | null")]
+    pub supplier_id: Option<i64>,
+    pub notes: Option<String>,
+}
+
 /// Shopping list item (stored)
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
@@ -1092,6 +1114,7 @@ pub struct StockPurchaseInput {
     pub purchase_date: DateTime<Utc>,
     #[ts(type = "number | null")]
     pub supplier_id: Option<i64>,
+    pub brand: Option<String>,
     pub notes: Option<String>,
 }
 
@@ -1116,6 +1139,7 @@ pub struct StockPurchase {
     #[ts(type = "number | null")]
     pub supplier_id: Option<i64>,
     pub supplier_name: Option<String>, // denormalized
+    pub brand: Option<String>,
     pub notes: Option<String>,
     #[ts(type = "string")]
     pub created_at: DateTime<Utc>,
@@ -1165,6 +1189,7 @@ pub struct ParsedReceiptItem {
     #[ts(type = "number | null")]
     pub matched_ingredient_id: Option<i64>,
     pub confidence: f64, // 0.0 - 1.0
+    pub brand: Option<String>,
     pub notes: Option<String>,
 }
 
@@ -1194,4 +1219,6 @@ pub struct ReceiptConfirmInput {
     #[ts(type = "number")]
     pub import_id: i64,
     pub items: Vec<ParsedReceiptItem>, // User-corrected items
+    #[ts(type = "number | null")]
+    pub supplier_id: Option<i64>, // one supplier per receipt (single store visit)
 }

@@ -319,6 +319,7 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
             discount_percent REAL NOT NULL DEFAULT 0,
             purchase_date TEXT NOT NULL,
             supplier_id INTEGER,
+            brand TEXT,
             notes TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE RESTRICT,
@@ -400,6 +401,21 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
         (),
     ).await?;
 
+    // Migration 016: brand on stock_purchases (multi-brand stock, Fase 3.1)
+    add_column_if_missing(&conn, "stock_purchases", "brand", "TEXT").await?;
+
+    Ok(())
+}
+
+async fn add_column_if_missing(conn: &Connection, table: &str, column: &str, decl: &str) -> LibsqlResult<()> {
+    let mut rows = conn.query(&format!("PRAGMA table_info({table})"), ()).await?;
+    while let Some(row) = rows.next().await? {
+        let name: String = row.get(1)?;
+        if name == column {
+            return Ok(());
+        }
+    }
+    conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"), ()).await?;
     Ok(())
 }
 
@@ -1480,6 +1496,62 @@ pub async fn shopping_list_toggle_item(
     row_to_shopping_item(&row)
 }
 
+/// Mark a shopping list item as purchased and record the real lot bought
+/// (brand/supplier/price) as a stock_purchase — the single path that raises
+/// stock (Fase 3.1). Quick-add items (no linked ingredient) only flip the
+/// flag, since there's no ingredient to raise stock for.
+pub async fn shopping_list_mark_purchased(
+    db: &Database,
+    input: ShoppingListMarkPurchasedInput,
+) -> LibsqlResult<ShoppingItem> {
+    // ponytail: a fresh short-lived connection per step (not one held across
+    // the stock_purchase_add call) — reusing one connection across another
+    // connection's writes hit SQLITE_BUSY_SNAPSHOT under WAL (see
+    // [[SQLite concurrency risk]]).
+    let (ingredient_id, ingredient_unit_str) = {
+        let conn = get_conn(db).await?;
+        let mut rows = conn.query(
+            "SELECT ingredient_id, ingredient_unit FROM shopping_list_items WHERE id = ?1 AND shopping_list_id = ?2",
+            params![input.item_id, input.list_id],
+        ).await?;
+        let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+        let ingredient_id: Option<i64> = row.get(0)?;
+        let ingredient_unit_str: String = row.get(1)?;
+        (ingredient_id, ingredient_unit_str)
+    };
+
+    if let Some(ingredient_id) = ingredient_id {
+        stock_purchase_add(db, StockPurchaseInput {
+            ingredient_id,
+            quantity: input.quantity,
+            unit: parse_unit_str(&ingredient_unit_str),
+            price_per_unit: input.price_per_unit,
+            total_price: input.quantity * input.price_per_unit,
+            is_discount: false,
+            discount_percent: 0.0,
+            purchase_date: chrono::Utc::now(),
+            supplier_id: input.supplier_id,
+            brand: input.brand,
+            notes: input.notes,
+        }).await?;
+    }
+
+    let purchased_at = chrono::Utc::now().to_rfc3339();
+    let conn = get_conn(db).await?;
+    conn.execute(
+        "UPDATE shopping_list_items SET purchased = 1, purchased_at = ?1 WHERE id = ?2 AND shopping_list_id = ?3",
+        params![purchased_at, input.item_id, input.list_id],
+    ).await?;
+
+    let mut rows = conn.query(
+        "SELECT id, shopping_list_id, ingredient_id, ingredient_name, ingredient_unit, needed_quantity, stock_quantity, to_buy_quantity, category, estimated_cost, purchased, notes, purchased_at, created_at
+         FROM shopping_list_items WHERE id = ?1 AND shopping_list_id = ?2",
+        params![input.item_id, input.list_id],
+    ).await?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    row_to_shopping_item(&row)
+}
+
 /// Remove item from shopping list
 pub async fn shopping_list_remove_item(
     db: &Database,
@@ -1560,6 +1632,30 @@ pub async fn suggest_recipes(_db: &Database) -> LibsqlResult<Vec<SuggestedRecipe
     Ok(Vec::new())
 }
 
+/// Weighted-average price per unit across an ingredient's purchase history
+/// (Fase 3.1: multiple brands/suppliers in stock, weighted by quantity
+/// bought). Falls back to `ingredients.price_per_unit` when there's no
+/// purchase history yet. ponytail: no lot-depletion tracking exists today
+/// (stock consumption is a manual aggregate set, see PROJECT.md 3.1), so
+/// this weights by quantity ever purchased, not quantity currently on the
+/// shelf — revisit if/when lot-remaining tracking is built.
+async fn weighted_avg_stock_price(conn: &Connection, ingredient_id: i64, fallback: f64) -> LibsqlResult<f64> {
+    let mut rows = conn.query(
+        "SELECT SUM(quantity * price_per_unit), SUM(quantity) FROM stock_purchases WHERE ingredient_id = ?1",
+        params![ingredient_id],
+    ).await?;
+    if let Some(row) = rows.next().await? {
+        let weighted_sum: Option<f64> = row.get(0)?;
+        let total_qty: Option<f64> = row.get(1)?;
+        if let (Some(sum), Some(qty)) = (weighted_sum, total_qty) {
+            if qty > 0.0 {
+                return Ok(sum / qty);
+            }
+        }
+    }
+    Ok(fallback)
+}
+
 /// Calculate recipe cost
 pub async fn calculate_cost(db: &Database, recipe_id: i64) -> LibsqlResult<CostBreakdown> {
     let conn = get_conn(db).await?;
@@ -1578,7 +1674,7 @@ pub async fn calculate_cost(db: &Database, recipe_id: i64) -> LibsqlResult<CostB
     // from ri.unit (the unit chosen for this recipe line) — e.g. an
     // ingredient priced per kilogram used as grams in a recipe.
     let mut rows = conn.query(
-        r#"SELECT ri.ingredient_name, ri.quantity, ri.unit, i.price_per_unit, i.unit
+        r#"SELECT ri.ingredient_name, ri.quantity, ri.unit, i.price_per_unit, i.unit, ri.ingredient_id
            FROM recipe_ingredients ri
            JOIN ingredients i ON ri.ingredient_id = i.id
            WHERE ri.recipe_id = ?1"#,
@@ -1606,7 +1702,8 @@ pub async fn calculate_cost(db: &Database, recipe_id: i64) -> LibsqlResult<CostB
         let quantity: f64 = row.get(1)?;
         let unit_str: String = row.get(2)?;
         let unit = parse_unit(&unit_str);
-        let price_per_unit: f64 = row.get(3)?;
+        let ingredient_id: i64 = row.get(5)?;
+        let price_per_unit = weighted_avg_stock_price(&conn, ingredient_id, row.get(3)?).await?;
         let ingredient_unit = parse_unit(&row.get::<String>(4)?);
 
         // Convert the recipe line's quantity into the ingredient's priced
@@ -3876,10 +3973,9 @@ pub async fn image_search_proxy(query: String, per_page: Option<u32>) -> Result<
 // STOCK PURCHASES
 // =====================================================================
 
-/// Map a libsql Row to StockPurchase
-fn row_to_stock_purchase(row: &Row) -> LibsqlResult<StockPurchase> {
-    let unit_str: String = row.get(3)?;
-    let unit = match unit_str.as_str() {
+/// Parse a unit column string into Unit, defaulting to Gram on unknown values.
+fn parse_unit_str(unit_str: &str) -> Unit {
+    match unit_str {
         "gram" => Unit::Gram,
         "kilogram" => Unit::Kilogram,
         "milligram" => Unit::Milligram,
@@ -3901,39 +3997,26 @@ fn row_to_stock_purchase(row: &Row) -> LibsqlResult<StockPurchase> {
         "clove" => Unit::Clove,
         "slice" => Unit::Slice,
         _ => Unit::Gram,
-    };
-    
-    let ingredient_unit_str: String = row.get(4)?;
-    let ingredient_unit = match ingredient_unit_str.as_str() {
-        "gram" => Unit::Gram,
-        "kilogram" => Unit::Kilogram,
-        "milligram" => Unit::Milligram,
-        "ounce" => Unit::Ounce,
-        "pound" => Unit::Pound,
-        "milliliter" => Unit::Milliliter,
-        "liter" => Unit::Liter,
-        "fluid_ounce" => Unit::FluidOunce,
-        "cup" => Unit::Cup,
-        "pint" => Unit::Pint,
-        "quart" => Unit::Quart,
-        "gallon" => Unit::Gallon,
-        "teaspoon" => Unit::Teaspoon,
-        "tablespoon" => Unit::Tablespoon,
-        "piece" => Unit::Piece,
-        "dozen" => Unit::Dozen,
-        "pinch" => Unit::Pinch,
-        "bunch" => Unit::Bunch,
-        "clove" => Unit::Clove,
-        "slice" => Unit::Slice,
-        _ => Unit::Gram,
-    };
+    }
+}
 
-    let purchase_date_str: String = row.get(8)?;
+/// Map a libsql Row to StockPurchase. Expects columns in exactly this order:
+/// sp.id, sp.ingredient_id, i.name, i.unit, sp.quantity, sp.unit, sp.price_per_unit,
+/// sp.total_price, sp.is_discount, sp.discount_percent, sp.purchase_date, sp.supplier_id,
+/// s.name, sp.brand, sp.notes, sp.created_at
+fn row_to_stock_purchase(row: &Row) -> LibsqlResult<StockPurchase> {
+    let ingredient_unit_str: String = row.get(3)?;
+    let ingredient_unit = parse_unit_str(&ingredient_unit_str);
+
+    let unit_str: String = row.get(5)?;
+    let unit = parse_unit_str(&unit_str);
+
+    let purchase_date_str: String = row.get(10)?;
     let purchase_date = DateTime::parse_from_rfc3339(&purchase_date_str)
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_else(|_| Utc::now());
-    
-    let created_at_str: String = row.get(12)?;
+
+    let created_at_str: String = row.get(15)?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_else(|_| Utc::now());
@@ -3943,16 +4026,17 @@ fn row_to_stock_purchase(row: &Row) -> LibsqlResult<StockPurchase> {
         ingredient_id: row.get(1)?,
         ingredient_name: row.get(2)?,
         ingredient_unit,
-        quantity: row.get(3)?,
+        quantity: row.get(4)?,
         unit,
-        price_per_unit: row.get(5)?,
-        total_price: row.get(6)?,
-        is_discount: row.get(7)?,
-        discount_percent: row.get(8)?,
+        price_per_unit: row.get(6)?,
+        total_price: row.get(7)?,
+        is_discount: row.get(8)?,
+        discount_percent: row.get(9)?,
         purchase_date,
-        supplier_id: row.get(9)?,
-        supplier_name: row.get(10)?,
-        notes: row.get(11)?,
+        supplier_id: row.get(11)?,
+        supplier_name: row.get(12)?,
+        brand: row.get(13)?,
+        notes: row.get(14)?,
         created_at,
     })
 }
@@ -4001,9 +4085,9 @@ pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> Lib
     // Insert stock purchase
     conn.execute(
         r#"
-        INSERT INTO stock_purchases 
-        (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date, supplier_id, notes)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        INSERT INTO stock_purchases
+        (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date, supplier_id, brand, notes)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
         "#,
         params![
             input.ingredient_id,
@@ -4015,6 +4099,7 @@ pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> Lib
             input.discount_percent,
             input.purchase_date.to_rfc3339(),
             input.supplier_id,
+            input.brand,
             input.notes,
         ],
     ).await?;
@@ -4031,7 +4116,7 @@ pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> Lib
     let mut rows = conn.query(
         r#"
         SELECT sp.id, sp.ingredient_id, i.name, i.unit, sp.quantity, sp.unit, sp.price_per_unit, sp.total_price,
-               sp.is_discount, sp.discount_percent, sp.purchase_date, sp.supplier_id, s.name, sp.notes, sp.created_at
+               sp.is_discount, sp.discount_percent, sp.purchase_date, sp.supplier_id, s.name, sp.brand, sp.notes, sp.created_at
         FROM stock_purchases sp
         JOIN ingredients i ON sp.ingredient_id = i.id
         LEFT JOIN suppliers s ON sp.supplier_id = s.id
@@ -4050,7 +4135,7 @@ pub async fn stock_purchases_list(db: &Database, ingredient_id: i64) -> LibsqlRe
     let mut rows = conn.query(
         r#"
         SELECT sp.id, sp.ingredient_id, i.name, i.unit, sp.quantity, sp.unit, sp.price_per_unit, sp.total_price,
-               sp.is_discount, sp.discount_percent, sp.purchase_date, sp.supplier_id, s.name, sp.notes, sp.created_at
+               sp.is_discount, sp.discount_percent, sp.purchase_date, sp.supplier_id, s.name, sp.brand, sp.notes, sp.created_at
         FROM stock_purchases sp
         JOIN ingredients i ON sp.ingredient_id = i.id
         LEFT JOIN suppliers s ON sp.supplier_id = s.id
@@ -4295,6 +4380,7 @@ async fn parse_receipt_text(text: &str) -> Vec<ParsedReceiptItem> {
             discount_percent,
             matched_ingredient_id,
             confidence,
+            brand: None,
             notes: None,
         });
     }
@@ -4380,9 +4466,9 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
         let purchase_date = chrono::Utc::now(); // Could parse from receipt but using now
         conn.execute(
             r#"
-            INSERT INTO stock_purchases 
-            (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date, notes)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            INSERT INTO stock_purchases
+            (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date, supplier_id, brand, notes)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             "#,
             params![
                 ingredient_id,
@@ -4393,7 +4479,9 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
                 item.is_discount as i32,
                 item.discount_percent,
                 purchase_date.to_rfc3339(),
-                input.items.iter().find(|i| i.ingredient_name == item.ingredient_name).and_then(|i| i.notes.clone()),
+                input.supplier_id,
+                item.brand.clone(),
+                item.notes.clone(),
             ],
         ).await?;
         
@@ -4411,7 +4499,7 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
         let mut rows = conn.query(
             r#"
             SELECT sp.id, sp.ingredient_id, i.name, i.unit, sp.quantity, sp.unit, sp.price_per_unit, sp.total_price,
-                   sp.is_discount, sp.discount_percent, sp.purchase_date, sp.supplier_id, s.name, sp.notes, sp.created_at
+                   sp.is_discount, sp.discount_percent, sp.purchase_date, sp.supplier_id, s.name, sp.brand, sp.notes, sp.created_at
             FROM stock_purchases sp
             JOIN ingredients i ON sp.ingredient_id = i.id
             LEFT JOIN suppliers s ON sp.supplier_id = s.id
@@ -4467,4 +4555,115 @@ pub struct CategoryInput {
     pub color: Option<String>,
     pub icon: Option<String>,
     pub sort_order: i32,
+}
+
+#[cfg(test)]
+mod fase3_stock_tests {
+    use super::*;
+
+    async fn test_db() -> Database {
+        // ponytail: each get_conn() opens a fresh connection; a real
+        // ":memory:" DB is per-connection, so tests need a temp file to
+        // share state across the multiple connections db:: functions open.
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("mise_test_{unique}.db"));
+        let db = Builder::new_local(path.to_str().unwrap()).build().await.unwrap();
+        let _ = get_conn(&db).await.unwrap().query("PRAGMA journal_mode = WAL;", ()).await.unwrap();
+        run_migrations(&db).await.unwrap();
+        db
+    }
+
+    /// Regression test for the row_to_stock_purchase column-index bug:
+    /// brand/supplier/price/quantity must round-trip through the SELECT
+    /// unscrambled (they were previously off by one after i.name/i.unit
+    /// were joined in without updating the row.get() indices).
+    #[tokio::test]
+    async fn stock_purchase_round_trips_brand_and_supplier() {
+        let db = test_db().await;
+        let ingredient = create_ingredient(&db, IngredientInput {
+            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.0, category: None,
+        }).await.unwrap();
+        let supplier = create_supplier(&db, SupplierInput {
+            name: "Continente".into(), contact: None, notes: None,
+        }).await.unwrap();
+
+        let purchase = stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: ingredient.id,
+            quantity: 2.0,
+            unit: Unit::Kilogram,
+            price_per_unit: 1.5,
+            total_price: 3.0,
+            is_discount: false,
+            discount_percent: 0.0,
+            purchase_date: Utc::now(),
+            supplier_id: Some(supplier.id),
+            brand: Some("Marca X".into()),
+            notes: None,
+        }).await.unwrap();
+
+        assert_eq!(purchase.quantity, 2.0);
+        assert_eq!(purchase.price_per_unit, 1.5);
+        assert_eq!(purchase.brand.as_deref(), Some("Marca X"));
+        assert_eq!(purchase.supplier_id, Some(supplier.id));
+        assert_eq!(purchase.supplier_name.as_deref(), Some("Continente"));
+
+        let stock = stock_list(&db).await.unwrap();
+        assert_eq!(stock.iter().find(|s| s.ingredient_id == ingredient.id).unwrap().quantity, 2.0);
+    }
+
+    #[tokio::test]
+    async fn recipe_cost_uses_weighted_average_across_brands() {
+        let db = test_db().await;
+        let ingredient = create_ingredient(&db, IngredientInput {
+            name: "Azeite".into(), unit: Unit::Liter, price_per_unit: 10.0, category: None,
+        }).await.unwrap();
+
+        // 1L at 4€ + 3L at 8€ -> weighted avg = (4 + 24) / 4 = 7€/L
+        for (qty, price) in [(1.0, 4.0), (3.0, 8.0)] {
+            stock_purchase_add(&db, StockPurchaseInput {
+                ingredient_id: ingredient.id, quantity: qty, unit: Unit::Liter,
+                price_per_unit: price, total_price: qty * price, is_discount: false,
+                discount_percent: 0.0, purchase_date: Utc::now(), supplier_id: None,
+                brand: None, notes: None,
+            }).await.unwrap();
+        }
+
+        let recipe = create_recipe(&db, RecipeInput {
+            name: "Salada".into(), category: "Geral".into(), portions: 1,
+            instructions: String::new(), prep_time_minutes: None, cook_time_minutes: None,
+            tags: vec![], image_base64: None,
+            ingredients: vec![RecipeIngredientInput { ingredient_id: ingredient.id, quantity: 2.0, unit: Unit::Liter }],
+        }).await.unwrap();
+
+        let cost = calculate_cost(&db, recipe.recipe.id).await.unwrap();
+        assert!((cost.total_cost - 14.0).abs() < 0.001, "expected 2L * 7€/L = 14€, got {}", cost.total_cost);
+    }
+
+    #[tokio::test]
+    async fn marking_shopping_item_purchased_creates_a_lot() {
+        let db = test_db().await;
+        let ingredient = create_ingredient(&db, IngredientInput {
+            name: "Leite".into(), unit: Unit::Liter, price_per_unit: 1.0, category: None,
+        }).await.unwrap();
+        let list = create_shopping_list(&db, "Lista".into(), vec![]).await.unwrap();
+        let item = shopping_list_add_item(&db, list.id.unwrap(), ShoppingItemInput {
+            ingredient_id: Some(ingredient.id), ingredient_name: "Leite".into(),
+            ingredient_unit: Unit::Liter, needed_quantity: 2.0, stock_quantity: 0.0,
+            to_buy_quantity: 2.0, category: "".into(), estimated_cost: 2.0,
+            purchased: false, notes: None,
+        }).await.unwrap();
+
+        let updated = shopping_list_mark_purchased(&db, ShoppingListMarkPurchasedInput {
+            list_id: list.id.unwrap(), item_id: item.id, quantity: 2.0, price_per_unit: 1.2,
+            brand: Some("Mimosa".into()), supplier_id: None, notes: None,
+        }).await.unwrap();
+
+        assert!(updated.purchased);
+        let stock = stock_list(&db).await.unwrap();
+        assert_eq!(stock.iter().find(|s| s.ingredient_id == ingredient.id).unwrap().quantity, 2.0);
+        let purchases = stock_purchases_list(&db, ingredient.id).await.unwrap();
+        assert_eq!(purchases.len(), 1);
+        assert_eq!(purchases[0].brand.as_deref(), Some("Mimosa"));
+    }
 }
