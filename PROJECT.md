@@ -86,8 +86,18 @@ bloqueantes, antes de qualquer feature nova.
      mascarado por fallback `|| "Outros"`) descobertos pelo type-check ao
      trocar o tipo. Validado com `cargo check -p mise-core -p mise-tauri`,
      `npx tsc --noEmit` e `npm run build`, todos limpos.
-- [ ] Limpeza do `mise.db` órfão (ficheiro antigo num path diferente do
-  atual).
+- [x] **Limpeza do `mise.db` órfão.** Encontrados dois ficheiros nesta
+  máquina: `~/.local/share/com.recipe-planner.app/mise.db` (10 de junho,
+  órfão, path de antes da resolução atual) e
+  `.../mise/mise/mise.db` (ativo, escrito durante esta sessão). Renomeado
+  o órfão para `mise.db.orphan-2026-07-05.bak` em vez de apagado
+  (reversível). **Achado à parte, não corrigido aqui:** o path ativo tem
+  `mise` duplicado (`.../mise/mise/mise.db`) porque `open_db()`
+  (`crates/core/src/db.rs`) faz `dir.join("mise")` sobre um
+  `app_data_dir` que o Tauri já resolve para `.../mise` — bug real, mas
+  corrigi-lo agora mudaria o path que a app já usa em produção nesta
+  máquina, haveria de vir com migração dos dados existentes. Fica para
+  Fase 2, não é bloqueante.
 - [ ] **Bug: câmara não abre no Scanner de recibos** (sessão de 2026-07-05,
   máquina de desenvolvimento Ubuntu + Nix misturados — mesma família de
   problema que o fix de EGL/TLS acima). Sintoma: `getUserMedia` falha
