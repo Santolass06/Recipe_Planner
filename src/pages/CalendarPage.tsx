@@ -3,9 +3,10 @@ import { invoke } from "../lib/devInvoke";
 import { useToast } from "../components/ui/Toast";
 import PageHeader from "../components/ui/PageHeader";
 import { useI18n } from "../i18n";
+import type { DayOfWeek } from "../../crates/core/bindings/DayOfWeek";
+import type { MealType } from "../../crates/core/bindings/MealType";
+import type { MealPlanEntryWithRecipe } from "../../crates/core/bindings/MealPlanEntryWithRecipe";
 
-type DayOfWeek = "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday";
-type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 type ViewMode = "month" | "week";
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -27,17 +28,6 @@ const getMealLabels = (t: T): Record<MealType, string> => ({
   breakfast: t("calendar.meals.breakfast"), lunch: t("calendar.meals.lunch"),
   dinner: t("calendar.meals.dinner"), snack: t("calendar.meals.snack"),
 });
-
-interface MealPlanEntryWithRecipe {
-  id: number;
-  meal_plan_id: number;
-  recipe_id: number;
-  recipe_name: string;
-  day_of_week: string;
-  meal_type: string;
-  portions: number;
-  planned_date: string;
-}
 
 export default function CalendarPage() {
   const [entries, setEntries] = useState<MealPlanEntryWithRecipe[]>([]);

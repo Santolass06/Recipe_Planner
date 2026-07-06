@@ -8,48 +8,12 @@ import EmptyState from "../components/ui/EmptyState";
 import StatusPill from "../components/ui/StatusPill";
 import SearchBar from "../components/ui/SearchBar";
 import { useI18n } from "../i18n";
+import type { StockItem } from "../../crates/core/bindings/StockItem";
+import type { Ingredient } from "../../crates/core/bindings/Ingredient";
+import type { Supplier } from "../../crates/core/bindings/Supplier";
+import type { StockPurchase } from "../../crates/core/bindings/StockPurchase";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
-
-interface StockItem {
-  id: number;
-  ingredient_id: number;
-  ingredient_name: string;
-  ingredient_unit: string;
-  quantity: number;
-  min_quantity: number;
-}
-
-interface Ingredient {
-  id: number;
-  name: string;
-  unit: string;
-  price_per_unit: number;
-}
-
-interface Supplier {
-  id: number;
-  name: string;
-  contact?: string;
-  notes?: string;
-}
-
-interface StockPurchase {
-  id: number;
-  ingredient_id: number;
-  ingredient_name: string;
-  ingredient_unit: string;
-  quantity: number;
-  unit: string;
-  price_per_unit: number;
-  total_price: number;
-  is_discount: boolean;
-  discount_percent: number;
-  purchase_date: string;
-  supplier_id?: number;
-  supplier_name?: string;
-  notes?: string;
-}
 
 const UNIT_LABELS: Record<string, string> = {
   gram: "g — Grama", kilogram: "kg — Quilograma", milligram: "mg — Miligrama",

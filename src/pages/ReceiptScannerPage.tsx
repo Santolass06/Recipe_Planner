@@ -4,19 +4,11 @@ import { useToast } from "../components/ui/Toast";
 import { createWorker } from "tesseract.js";
 import PageHeader from "../components/ui/PageHeader";
 import { useI18n } from "../i18n";
+import type { Ingredient } from "../../crates/core/bindings/Ingredient";
+import type { Supplier } from "../../crates/core/bindings/Supplier";
 
-interface Ingredient {
-  id: number;
-  name: string;
-  unit: string;
-  price_per_unit: number;
-}
-
-interface Supplier {
-  id: number;
-  name: string;
-}
-
+// Forma solta de item ainda por confirmar (parsing de OCR heurístico) —
+// sem binding correspondente, propositadamente fora do âmbito do i18n.
 interface ParsedLine {
   name: string;
   quantity: number;

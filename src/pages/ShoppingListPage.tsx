@@ -8,40 +8,11 @@ import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
 import SearchBar from "../components/ui/SearchBar";
 import { useI18n } from "../i18n";
+import type { ShoppingItem } from "../../crates/core/bindings/ShoppingItem";
+import type { ShoppingList } from "../../crates/core/bindings/ShoppingList";
+import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
-
-interface ShoppingItem {
-  id: number;
-  ingredient_id: number;
-  ingredient_name: string;
-  ingredient_unit: string;
-  needed_quantity: number;
-  stock_quantity: number;
-  to_buy_quantity: number;
-  category: string;
-  estimated_cost: number;
-  purchased: boolean;
-  notes?: string;
-  purchased_at?: string;
-  created_at: string;
-}
-
-interface ShoppingList {
-  id?: number;
-  name: string;
-  items: ShoppingItem[];
-  total_estimated_cost: number;
-  created_at: string;
-}
-
-interface Ingredient {
-  id: number;
-  name: string;
-  unit: string;
-  price_per_unit: number;
-  category?: string;
-}
 
 const UNIT_LABELS: Record<string, string> = {
   gram: "g", kilogram: "kg", milligram: "mg",
@@ -139,7 +110,7 @@ function ShoppingItemRow({ item, listId, onToggle, onDelete, t }: {
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
           <input type="text" value={editing.ingredient_name || item.ingredient_name} onChange={(e) => setEditing({ ...editing!, ingredient_name: e.target.value })} style={{ ...inputStyle, fontSize: "13px" }} autoFocus />
           <div style={{ display: "flex", gap: "var(--space-2)" }}>
-            <select value={editing.ingredient_unit || item.ingredient_unit} onChange={(e) => setEditing({ ...editing!, ingredient_unit: e.target.value })} style={{ fontSize: "12px", minWidth: "120px" }}>
+            <select value={editing.ingredient_unit || item.ingredient_unit} onChange={(e) => setEditing({ ...editing!, ingredient_unit: e.target.value as ShoppingItem["ingredient_unit"] })} style={{ fontSize: "12px", minWidth: "120px" }}>
               {Object.entries(UNIT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
             </select>
             <input type="number" step="0.01" min="0" value={editing?.needed_quantity ?? item.needed_quantity} onChange={(e) => setEditing({ ...editing!, needed_quantity: parseFloat(e.target.value) || 0 })} className="mono" style={{ ...inputStyle, fontSize: "12px", width: "80px" }} />
@@ -270,7 +241,7 @@ function AddItemModal({ isOpen, onClose, listId, ingredients, onAdd, t }: {
             needed_quantity: quantity,
             stock_quantity: 0,
             to_buy_quantity: quantity,
-            category: category || selectedIngredient.category || "Outros",
+            category: category || "Outros",
             estimated_cost: quantity * selectedIngredient.price_per_unit,
             purchased: false,
             notes: notes || undefined,
@@ -333,7 +304,7 @@ function AddItemModal({ isOpen, onClose, listId, ingredients, onAdd, t }: {
                     <button
                       key={ing.id}
                       className={`ingredient-option${selectedIngredient?.id === ing.id ? " selected" : ""}`}
-                      onClick={() => { setSelectedIngredient(ing); setUnit(ing.unit); setCategory(ing.category || "Outros"); }}
+                      onClick={() => { setSelectedIngredient(ing); setUnit(ing.unit); setCategory("Outros"); }}
                       style={{
                         display: "flex", alignItems: "center", gap: "var(--space-3)", padding: "var(--space-3)",
                         border: `1px solid ${selectedIngredient?.id === ing.id ? "var(--brand)" : "var(--border)"}`, borderRadius: "var(--radius)",

@@ -4,97 +4,13 @@ import { useToast } from "../components/ui/Toast";
 import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
 import { useI18n } from "../i18n";
+import type { CostReport } from "../../crates/core/bindings/CostReport";
+import type { WasteReport } from "../../crates/core/bindings/WasteReport";
+import type { StockSnapshot } from "../../crates/core/bindings/StockSnapshot";
+import type { MealStats } from "../../crates/core/bindings/MealStats";
+import type { PricePoint } from "../../crates/core/bindings/PricePoint";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
-
-// ============================================================================
-// TYPES
-// ============================================================================
-
-interface CostReport {
-  total_spent: number;
-  by_category: CategoryCost[];
-  by_recipe: RecipeCost[];
-  by_supplier: SupplierCost[];
-  daily_avg: number;
-}
-
-interface CategoryCost {
-  category: string;
-  total: number;
-  percentage: number;
-}
-
-interface RecipeCost {
-  recipe_id: number;
-  recipe_name: string;
-  total_cost: number;
-  portions: number;
-  cost_per_portion: number;
-  count: number;
-}
-
-interface SupplierCost {
-  supplier: string;
-  total: number;
-  percentage: number;
-}
-
-interface WasteReport {
-  total_wasted_value: number;
-  by_ingredient: IngredientWaste[];
-  by_category: CategoryWaste[];
-}
-
-interface IngredientWaste {
-  ingredient_id: number;
-  ingredient_name: string;
-  unit: string;
-  wasted_quantity: number;
-  wasted_value: number;
-}
-
-interface CategoryWaste {
-  category: string;
-  total_wasted_value: number;
-  percentage: number;
-}
-
-interface StockSnapshot {
-  date: string;
-  ingredient_id: number;
-  ingredient_name: string;
-  quantity: number;
-  value: number;
-}
-
-interface MealStats {
-  total_meals: number;
-  avg_portions: number;
-  by_meal_type: MealTypeStat[];
-  by_recipe: RecipeMealStat[];
-}
-
-interface MealTypeStat {
-  meal_type: string;
-  count: number;
-  total_portions: number;
-  percentage: number;
-}
-
-interface RecipeMealStat {
-  recipe_id: number;
-  recipe_name: string;
-  count: number;
-  total_portions: number;
-  avg_portions: number;
-}
-
-interface PricePoint {
-  date: string;
-  price: number;
-  supplier: string;
-}
 
 // ============================================================================
 // BAR-LIST (name + mono amount, 8px rounded meter bar) — mise report pattern

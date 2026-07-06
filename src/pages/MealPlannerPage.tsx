@@ -6,84 +6,17 @@ import ConfirmDialog from "../components/ui/ConfirmDialog";
 import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
 import { useI18n } from "../i18n";
+import type { Recipe } from "../../crates/core/bindings/Recipe";
+import type { MealPlan } from "../../crates/core/bindings/MealPlan";
+import type { MealPlanEntry } from "../../crates/core/bindings/MealPlanEntry";
+import type { MealPlanWithEntries } from "../../crates/core/bindings/MealPlanWithEntries";
+import type { MealPlanInput } from "../../crates/core/bindings/MealPlanInput";
+import type { MealEntryInput } from "../../crates/core/bindings/MealEntryInput";
+import type { MealPlanShoppingList } from "../../crates/core/bindings/MealPlanShoppingList";
+import type { DayOfWeek } from "../../crates/core/bindings/DayOfWeek";
+import type { MealType } from "../../crates/core/bindings/MealType";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
-
-// Types matching the backend
-interface Recipe {
-  id: number;
-  name: string;
-  category: string;
-  portions: number;
-}
-
-interface MealPlan {
-  id: number;
-  name: string;
-  start_date: string;
-  end_date: string;
-  created_at: string;
-  updated_at: string;
-}
-
-interface MealPlanEntry {
-  id: number;
-  meal_plan_id: number;
-  recipe_id: number;
-  recipe_name: string;
-  day_of_week: string;
-  meal_type: string;
-  portions: number;
-  created_at: string;
-  updated_at: string;
-}
-
-interface MealPlanWithEntries {
-  meal_plan: MealPlan;
-  entries: MealPlanEntry[];
-}
-
-interface MealPlanInput {
-  name: string;
-  start_date: string;
-  end_date: string;
-}
-
-interface MealEntryInput {
-  recipe_id: number;
-  day_of_week: string;
-  meal_type: string;
-  portions: number;
-}
-
-interface ShoppingItem {
-  ingredient_id: number;
-  ingredient_name: string;
-  ingredient_unit: string;
-  needed_quantity: number;
-  stock_quantity: number;
-  to_buy_quantity: number;
-  category: string;
-  estimated_cost: number;
-  purchased: boolean;
-}
-
-interface ShoppingList {
-  id: number;
-  name: string;
-  items: ShoppingItem[];
-  total_estimated_cost: number;
-  created_at: string;
-}
-
-interface MealPlanShoppingList {
-  shopping_list: ShoppingList;
-  total_portions: number;
-  recipes_used: number[];
-}
-
-type DayOfWeek = "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday";
-type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 
 const DAYS: DayOfWeek[] = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const MEAL_TYPES: MealType[] = ["breakfast", "lunch", "dinner", "snack"];

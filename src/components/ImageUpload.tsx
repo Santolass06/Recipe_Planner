@@ -1,25 +1,9 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "../i18n";
-
-interface Image {
-  id: number;
-  entity_type: "recipe" | "ingredient" | "supplier" | "receipt" | "profile";
-  entity_id: number;
-  path: string;
-  mime_type: string;
-  is_primary: boolean;
-  created_at: string;
-}
-
-interface ImageUploadInput {
-  entity_type: "recipe" | "ingredient" | "supplier" | "receipt" | "profile";
-  entity_id: number;
-  base64: string;
-  mime_type: string;
-}
-
-type EntityType = "recipe" | "ingredient" | "supplier" | "receipt" | "profile";
+import type { Image } from "../../crates/core/bindings/Image";
+import type { ImageUploadInput } from "../../crates/core/bindings/ImageUploadInput";
+import type { ImageEntityType as EntityType } from "../../crates/core/bindings/ImageEntityType";
 
 interface ImageUploadProps {
   entityType: EntityType;

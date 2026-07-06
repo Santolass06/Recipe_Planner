@@ -5,13 +5,7 @@ import PageHeader from "../components/ui/PageHeader";
 import IngredientAvatar from "../components/IngredientAvatar";
 import ImageUpload from "../components/ImageUpload";
 import { useI18n } from "../i18n";
-
-interface Ingredient {
-  id: number;
-  name: string;
-  unit: string;
-  price_per_unit: number;
-}
+import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 

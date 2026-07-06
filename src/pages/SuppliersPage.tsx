@@ -9,36 +9,11 @@ import EmptyState from "../components/ui/EmptyState";
 import SearchBar from "../components/ui/SearchBar";
 import StatusPill from "../components/ui/StatusPill";
 import { useI18n } from "../i18n";
+import type { Supplier } from "../../crates/core/bindings/Supplier";
+import type { SupplierInput } from "../../crates/core/bindings/SupplierInput";
+import type { PriceQuoteWithIngredient as PriceQuote } from "../../crates/core/bindings/PriceQuoteWithIngredient";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
-
-interface Supplier {
-  id: number;
-  name: string;
-  contact?: string;
-  notes?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-interface SupplierInput {
-  name: string;
-  contact?: string;
-  notes?: string;
-}
-
-interface PriceQuote {
-  id: number;
-  ingredient_id: number;
-  ingredient_name: string;
-  ingredient_unit: string;
-  supplier: string;
-  price_per_unit: number;
-  valid_from: string;
-  valid_to: string | null;
-  is_promo: boolean;
-  created_at: string;
-}
 
 interface SupplierWithQuotes extends Supplier {
   quotes: PriceQuote[];
