@@ -1252,3 +1252,29 @@ pub struct ReceiptConfirmInput {
     #[ts(type = "number | null")]
     pub supplier_id: Option<i64>, // one supplier per receipt (single store visit)
 }
+
+/// Ingredient line parsed from an imported recipe's schema.org `recipeIngredient` array (Fase 3.4)
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct RecipeImportIngredient {
+    pub raw_text: String,
+    pub quantity: f64,
+    pub unit: Unit,
+    pub name_guess: String,
+    #[ts(type = "number | null")]
+    pub matched_ingredient_id: Option<i64>,
+}
+
+/// Recipe extracted from a URL's schema.org/Recipe JSON-LD, for the user to review
+/// before saving it as an actual recipe (Fase 3.4) — never written to the DB by itself.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct RecipeImportPreview {
+    pub name: String,
+    pub portions: Option<u32>,
+    pub instructions: String,
+    pub prep_time_minutes: Option<u32>,
+    pub cook_time_minutes: Option<u32>,
+    pub image_url: Option<String>,
+    pub ingredients: Vec<RecipeImportIngredient>,
+}

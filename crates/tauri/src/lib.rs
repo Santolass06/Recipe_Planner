@@ -483,6 +483,11 @@ impl AppDb {
     pub async fn receipt_confirm(&self, input: ReceiptConfirmInput) -> Result<Vec<StockPurchase>, String> {
         mise_core::db::receipt_confirm(&self.db, input).await.map_err(|e| e.to_string())
     }
+
+    // ===== RECIPE IMPORT (Fase 3.4) =====
+    pub async fn recipe_import_from_url(&self, url: String) -> Result<RecipeImportPreview, String> {
+        mise_core::db::recipe_import_from_url(&self.db, url).await.map_err(|e| e.to_string())
+    }
 }
 
 pub mod commands {
@@ -1338,6 +1343,15 @@ pub mod commands {
         input: ReceiptConfirmInput,
     ) -> Result<Vec<StockPurchase>, String> {
         db.receipt_confirm(input).await.map_err(|e| e.to_string())
+    }
+
+    // ===== RECIPE IMPORT (Fase 3.4) =====
+    #[tauri::command]
+    pub async fn recipe_import_from_url(
+        db: tauri::State<'_, crate::AppDb>,
+        url: String,
+    ) -> Result<RecipeImportPreview, String> {
+        db.recipe_import_from_url(url).await.map_err(|e| e.to_string())
     }
 }
 

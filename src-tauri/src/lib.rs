@@ -146,6 +146,8 @@ pub fn run() {
             mise_tauri::commands::receipt_scan,
             mise_tauri::commands::receipt_parse,
             mise_tauri::commands::receipt_confirm,
+            // Recipe import from URL — Fase 3.4
+            mise_tauri::commands::recipe_import_from_url,
             // Data management — Lote 3
             #[cfg(debug_assertions)]
             mise_tauri::commands::seed_demo_data,
