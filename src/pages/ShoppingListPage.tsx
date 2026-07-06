@@ -11,6 +11,8 @@ import { useI18n } from "../i18n";
 import type { ShoppingItem } from "../../crates/core/bindings/ShoppingItem";
 import type { ShoppingList } from "../../crates/core/bindings/ShoppingList";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
+import type { Supplier } from "../../crates/core/bindings/Supplier";
+import type { ShoppingListMarkPurchasedInput } from "../../crates/core/bindings/ShoppingListMarkPurchasedInput";
 import { UNIT_LABELS_SHORT as UNIT_LABELS } from "../lib/units";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
@@ -20,11 +22,12 @@ const CATEGORIES = [
   "Pantry (Secos)", "Condimentos", "Bebidas", "Outros"
 ];
 
-function CategorySection({ category, items, listId, onToggle, onDelete, expandedCategories, toggleExpand, t }: {
+function CategorySection({ category, items, listId, onToggle, onRequestPurchase, onDelete, expandedCategories, toggleExpand, t }: {
   category: string;
   items: ShoppingItem[];
   listId: number;
   onToggle: (id: number, purchased: boolean) => void;
+  onRequestPurchase: (item: ShoppingItem) => void;
   onDelete: (id: number) => void;
   expandedCategories: Set<string>;
   toggleExpand: (category: string) => void;
@@ -58,7 +61,7 @@ function CategorySection({ category, items, listId, onToggle, onDelete, expanded
       {isExpanded && (
         <div>
           {items.map((item) => (
-            <ShoppingItemRow key={item.id} item={item} listId={listId} onToggle={onToggle} onDelete={onDelete} t={t} />
+            <ShoppingItemRow key={item.id} item={item} listId={listId} onToggle={onToggle} onRequestPurchase={onRequestPurchase} onDelete={onDelete} t={t} />
           ))}
         </div>
       )}
@@ -66,10 +69,11 @@ function CategorySection({ category, items, listId, onToggle, onDelete, expanded
   );
 }
 
-function ShoppingItemRow({ item, listId, onToggle, onDelete, t }: {
+function ShoppingItemRow({ item, listId, onToggle, onRequestPurchase, onDelete, t }: {
   item: ShoppingItem;
   listId: number;
   onToggle: (id: number, purchased: boolean) => void;
+  onRequestPurchase: (item: ShoppingItem) => void;
   onDelete: (id: number) => void;
   t: T;
 }) {
@@ -128,7 +132,7 @@ function ShoppingItemRow({ item, listId, onToggle, onDelete, t }: {
     >
       <button
         type="button"
-        onClick={() => onToggle(item.id, !item.purchased)}
+        onClick={() => item.purchased ? onToggle(item.id, false) : onRequestPurchase(item)}
         aria-pressed={item.purchased}
         title={item.purchased ? t("shoppingList.markUnpurchased") : t("shoppingList.markPurchased")}
         style={{
@@ -343,6 +347,91 @@ function AddItemModal({ isOpen, onClose, listId, ingredients, onAdd, t }: {
   );
 }
 
+function PurchaseConfirmModal({ item, suppliers, onClose, onConfirm, t }: {
+  item: ShoppingItem | null;
+  suppliers: Supplier[];
+  onClose: () => void;
+  onConfirm: (payload: Omit<ShoppingListMarkPurchasedInput, "list_id" | "item_id">) => Promise<void>;
+  t: T;
+}) {
+  const [quantity, setQuantity] = useState(1);
+  const [pricePerUnit, setPricePerUnit] = useState(0);
+  const [brand, setBrand] = useState("");
+  const [supplierId, setSupplierId] = useState<number | "">("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!item) return;
+    const qty = item.to_buy_quantity > 0 ? item.to_buy_quantity : item.needed_quantity;
+    setQuantity(qty);
+    setPricePerUnit(qty > 0 ? item.estimated_cost / qty : 0);
+    setBrand("");
+    setSupplierId("");
+  }, [item]);
+
+  if (!item) return null;
+
+  const unitLabel = UNIT_LABELS[item.ingredient_unit] ?? item.ingredient_unit;
+
+  const handleSubmit = async () => {
+    setSaving(true);
+    try {
+      await onConfirm({
+        quantity,
+        price_per_unit: pricePerUnit,
+        brand: brand.trim() || null,
+        supplier_id: supplierId === "" ? null : supplierId,
+        notes: null,
+      });
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={!!item}
+      onClose={onClose}
+      title={`${t("shoppingList.purchaseModalTitle")} · ${item.ingredient_name}`}
+      footer={
+        <>
+          <button className="btn btn-secondary" onClick={onClose}>{t("common.cancel")}</button>
+          <button className="btn btn-primary" onClick={handleSubmit} disabled={saving}>
+            {saving ? t("shoppingList.addingToList") : t("shoppingList.confirmPurchase")}
+          </button>
+        </>
+      }
+    >
+      <div className="field">
+        <label className="field-label" htmlFor="purchase-qty">{t("shoppingList.purchaseQuantityLabel")}</label>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+          <input id="purchase-qty" type="number" className="input input-num" min="0" step="0.01" value={quantity} onChange={e => setQuantity(parseFloat(e.target.value) || 0)} autoFocus />
+          <span className="mono" style={{ color: "var(--ink-3)", fontSize: 12 }}>{unitLabel}</span>
+        </div>
+      </div>
+      <div className="field">
+        <label className="field-label" htmlFor="purchase-price">{t("shoppingList.purchasePriceLabel")}</label>
+        <input id="purchase-price" type="number" className="input input-num" min="0" step="0.01" value={pricePerUnit} onChange={e => setPricePerUnit(parseFloat(e.target.value) || 0)} />
+      </div>
+      <div className="field">
+        <label className="field-label" htmlFor="purchase-brand">{t("shoppingList.purchaseBrandLabel")}</label>
+        <input id="purchase-brand" className="input" value={brand} onChange={e => setBrand(e.target.value)} placeholder={t("shoppingList.purchaseBrandPlaceholder")} />
+      </div>
+      <div className="field">
+        <label className="field-label" htmlFor="purchase-supplier">{t("shoppingList.purchaseSupplierLabel")}</label>
+        <select id="purchase-supplier" className="select" value={supplierId} onChange={e => setSupplierId(e.target.value === "" ? "" : Number(e.target.value))}>
+          <option value="">{t("shoppingList.purchaseNoSupplier")}</option>
+          {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+      </div>
+      <div className="mono" style={{ fontSize: 13, color: "var(--ink-2)", textAlign: "right", marginTop: "var(--space-2)" }}>
+        {t("shoppingList.purchaseTotalLabel")}: {(quantity * pricePerUnit).toFixed(2)} €
+      </div>
+    </Modal>
+  );
+}
+
 function RenameListModal({ isOpen, onClose, list, onRename, t }: {
   isOpen: boolean; onClose: () => void; list: ShoppingList | null; onRename: (name: string) => void; t: T;
 }) {
@@ -513,20 +602,24 @@ function ShoppingListsView({ lists, onSelectList, onCreateList, onRenameList, on
 function ShoppingListDetailView({
   list,
   ingredients,
+  suppliers,
   onBack,
   onReload,
   onRenameList,
   onToggleItem,
+  onMarkPurchased,
   onDeleteItem,
   onClearPurchased,
   t,
 }: {
   list: ShoppingList;
   ingredients: Ingredient[];
+  suppliers: Supplier[];
   onBack: () => void;
   onReload: () => void;
   onRenameList: (name: string) => Promise<void>;
   onToggleItem: (id: number, purchased: boolean) => Promise<void>;
+  onMarkPurchased: (itemId: number, payload: Omit<ShoppingListMarkPurchasedInput, "list_id" | "item_id">) => Promise<void>;
   onDeleteItem: (id: number) => Promise<void>;
   onClearPurchased: () => Promise<void>;
   t: T;
@@ -535,6 +628,7 @@ function ShoppingListDetailView({
   const [showAddItemModal, setShowAddItemModal] = useState(false);
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [deleteConfirmItem, setDeleteConfirmItem] = useState<number | null>(null);
+  const [purchaseItem, setPurchaseItem] = useState<ShoppingItem | null>(null);
 
   useEffect(() => {
     const cats = new Set<string>();
@@ -621,7 +715,7 @@ function ShoppingListDetailView({
             <CategorySection
               key={category} category={category} items={itemsByCategory[category]}
               listId={list.id!}
-              onToggle={onToggleItem} onDelete={id => setDeleteConfirmItem(id)}
+              onToggle={onToggleItem} onRequestPurchase={setPurchaseItem} onDelete={id => setDeleteConfirmItem(id)}
               expandedCategories={expandedCategories}
               toggleExpand={(cat) => setExpandedCategories(prev => {
                 const next = new Set(prev);
@@ -651,6 +745,14 @@ function ShoppingListDetailView({
         list={list} onRename={onRenameList} t={t}
       />
 
+      <PurchaseConfirmModal
+        item={purchaseItem}
+        suppliers={suppliers}
+        onClose={() => setPurchaseItem(null)}
+        onConfirm={(payload) => onMarkPurchased(purchaseItem!.id, payload)}
+        t={t}
+      />
+
       <ConfirmDialog
         open={!!deleteConfirmItem}
         onCancel={() => setDeleteConfirmItem(null)}
@@ -668,6 +770,7 @@ export default function ShoppingListPage() {
   const { t } = useI18n();
   const [lists, setLists] = useState<ShoppingList[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [selectedListId, setSelectedListId] = useState<number | null>(null);
   const [selectedList, setSelectedList] = useState<ShoppingList | null>(null);
   const [view, setView] = useState<"lists" | "detail">("lists");
@@ -690,10 +793,20 @@ export default function ShoppingListPage() {
     }
   }, []);
 
+  const loadSuppliers = useCallback(async () => {
+    try {
+      const data = await invoke<Supplier[]>("suppliers_list");
+      setSuppliers(data);
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
   useEffect(() => {
     loadLists();
     loadIngredients();
-  }, [loadLists, loadIngredients]);
+    loadSuppliers();
+  }, [loadLists, loadIngredients, loadSuppliers]);
 
   const loadListDetail = useCallback(async (id: number) => {
     try {
@@ -767,6 +880,22 @@ export default function ShoppingListPage() {
     }
   };
 
+  const handleMarkPurchased = async (itemId: number, payload: Omit<ShoppingListMarkPurchasedInput, "list_id" | "item_id">) => {
+    try {
+      const updatedItem = await invoke<ShoppingItem>("shopping_list_mark_purchased", {
+        input: { list_id: selectedListId!, item_id: itemId, ...payload }
+      });
+      setSelectedList(prev => prev ? {
+        ...prev,
+        items: prev.items.map(i => i.id === itemId ? updatedItem : i)
+      } : null);
+      showToast(t("shoppingList.purchaseRecorded"), "ok");
+    } catch (e) {
+      showToast(t("shoppingList.purchaseError"), "err");
+      throw e;
+    }
+  };
+
   const handleDeleteItem = async (itemId: number) => {
     try {
       await invoke("shopping_list_remove_item", { listId: selectedListId!, itemId: itemId });
@@ -823,10 +952,12 @@ export default function ShoppingListPage() {
     <ShoppingListDetailView
       list={selectedList}
       ingredients={ingredients}
+      suppliers={suppliers}
       onBack={() => { setView("lists"); setSelectedListId(null); setSelectedList(null); }}
       onReload={() => loadListDetail(selectedListId!)}
       onRenameList={(name) => handleRenameList(selectedList.id!, name)}
       onToggleItem={handleToggleItem}
+      onMarkPurchased={handleMarkPurchased}
       onDeleteItem={handleDeleteItem}
       onClearPurchased={handleClearPurchased}
       t={t}

@@ -147,6 +147,32 @@ function StockModal({
   );
 }
 
+function BrandBreakdown({ purchases, t }: { purchases: StockPurchase[]; t: T }) {
+  const byBrand = new Map<string, { quantity: number; weightedCost: number; unit: string }>();
+  for (const p of purchases) {
+    const key = p.brand ?? t("stock.purchaseModal.noBrand");
+    const entry = byBrand.get(key) ?? { quantity: 0, weightedCost: 0, unit: p.unit };
+    entry.quantity += p.quantity;
+    entry.weightedCost += p.quantity * p.price_per_unit;
+    byBrand.set(key, entry);
+  }
+  if (byBrand.size <= 1) return null;
+
+  return (
+    <div style={{ marginBottom: "var(--space-4)" }}>
+      <h3 className="title-4" style={{ marginBottom: "var(--space-2)" }}>{t("stock.purchaseModal.brandBreakdownTitle")}</h3>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {[...byBrand.entries()].map(([brand, { quantity, weightedCost, unit }]) => (
+          <div key={brand} className="mono" style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, padding: "6px 10px", background: "var(--inset)", borderRadius: 8 }}>
+            <span>{brand}</span>
+            <span style={{ color: "var(--ink-3)" }}>{quantity} {UNIT_LABELS[unit] ?? unit} · {t("stock.purchaseModal.avgPrice")} {(weightedCost / quantity).toFixed(2)} €</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PurchaseModal({
   open, onClose, form, setForm, loading, handleSave, ingredientName, suppliers, purchases, loadingPurchases, t
 }: any) {
@@ -198,6 +224,10 @@ function PurchaseModal({
             </select>
           </div>
         </div>
+        <div className="field">
+          <label className="field-label" htmlFor="purchase-brand">{t("stock.purchaseModal.brand")}</label>
+          <input id="purchase-brand" className="input" value={form.brand} onChange={e => setForm((f: any) => ({ ...f, brand: e.target.value }))} placeholder={t("stock.purchaseModal.brandPlaceholder")} />
+        </div>
         <div className="field-row" style={{ display: "flex", gap: "var(--space-3)" }}>
           <div className="field" style={{ flex: 1 }}>
             <label className="field-label" htmlFor="purchase-discount">{t("stock.purchaseModal.discount")}</label>
@@ -227,6 +257,7 @@ function PurchaseModal({
         </div>
         {purchases.length > 0 && (
           <div style={{ marginTop: "var(--space-6)" }}>
+            <BrandBreakdown purchases={purchases} t={t} />
             <h3 className="title-4" style={{ marginBottom: "var(--space-3)" }}>{t("stock.purchaseModal.historyTitle")}</h3>
             <div className="card" style={{ overflow: "hidden", padding: 0 }}>
               <div className="table-wrap">
@@ -238,6 +269,7 @@ function PurchaseModal({
                       <th style={{ textAlign: "right" }}>{t("stock.purchaseModal.colPricePerUnit")}</th>
                       <th style={{ textAlign: "right" }}>{t("stock.purchaseModal.colTotal")}</th>
                       <th style={{ textAlign: "right" }}>{t("stock.purchaseModal.colPromo")}</th>
+                      <th>{t("stock.purchaseModal.colBrand")}</th>
                       <th>{t("stock.purchaseModal.colSupplier")}</th>
                     </tr>
                   </thead>
@@ -251,6 +283,7 @@ function PurchaseModal({
                         <td style={{ textAlign: "right" }}>
                           {p.is_discount ? <StatusPill status="ok" label={`${p.discount_percent}%`} /> : <span className="text-4">—</span>}
                         </td>
+                        <td>{p.brand ?? "—"}</td>
                         <td>{p.supplier_name ?? "—"}</td>
                       </tr>
                     ))}
@@ -293,6 +326,7 @@ export default function StockPage() {
     discount_percent: number;
     purchase_date: string;
     supplier_id: number | string;
+    brand: string;
     notes: string;
   }>({
     ingredient_id: 0,
@@ -304,6 +338,7 @@ export default function StockPage() {
     discount_percent: 0,
     purchase_date: new Date().toISOString().split("T")[0],
     supplier_id: "",
+    brand: "",
     notes: "",
   });
   const [form, setForm] = useState({ ingredient_id: 0, quantity: 0, min_quantity: 0 });
@@ -377,6 +412,7 @@ export default function StockPage() {
       total_price: 0,
       is_discount: false,
       discount_percent: 0,
+      brand: "",
     }));
     setSelectedIngredientForPurchases(item);
     loadPurchases(item.ingredient_id);
@@ -451,6 +487,7 @@ export default function StockPage() {
           // O formulário guarda só "YYYY-MM-DD", por isso acrescentamos a hora UTC.
           purchase_date: `${purchaseForm.purchase_date}T00:00:00Z`,
           supplier_id: purchaseForm.supplier_id ? Number(purchaseForm.supplier_id) : null,
+          brand: purchaseForm.brand || null,
           notes: purchaseForm.notes || null,
         },
       });

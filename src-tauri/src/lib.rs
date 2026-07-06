@@ -115,6 +115,7 @@ pub fn run() {
             mise_tauri::commands::shopping_list_add_item,
             mise_tauri::commands::shopping_list_update_item_full,
             mise_tauri::commands::shopping_list_toggle_item,
+            mise_tauri::commands::shopping_list_mark_purchased,
             mise_tauri::commands::shopping_list_remove_item,
             mise_tauri::commands::shopping_list_reorder_items,
             mise_tauri::commands::shopping_list_clear_purchased,
