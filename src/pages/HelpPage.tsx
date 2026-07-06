@@ -1,14 +1,6 @@
-import { invoke } from "../lib/devInvoke";
+import { openExternal } from "../lib/devInvoke";
 import PageHeader from "../components/ui/PageHeader";
 import { useI18n } from "../i18n";
-
-async function openExternal(url: string) {
-  try {
-    await invoke("plugin:opener|open_url", { url });
-  } catch (e) {
-    console.error("Error opening link:", e);
-  }
-}
 
 const SECTION_KEYS = ["ingredients", "recipes", "stock", "shopping", "planning", "costsReports"] as const;
 

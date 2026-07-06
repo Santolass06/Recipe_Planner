@@ -145,12 +145,33 @@ denso, amber `#f5a524`, tabular numbers) como base.
   custo total, cada `ShoppingItem` já traz o seu `estimated_cost`).
   `cargo check --workspace` limpo (0 warnings), `cargo test --workspace`
   (74 testes) e `npx tsc --noEmit` sem erros.
-- [ ] Definir uma CSP no `tauri.conf.json` (ainda `null`).
-- [ ] `tauri-plugin-opener` para links externos — plugin já inicializado;
-  falta chamar `opener.openUrl()` onde há links para fora da app (nota:
-  `SettingsPage.tsx` e `HelpPage.tsx` já usam `invoke("plugin:opener|open_url")`
-  diretamente — confirmar se isto conta como "já resolvido" ou se deve
-  migrar para a API `@tauri-apps/plugin-opener` antes de fechar este ponto).
+- [x] **Definir uma CSP no `tauri.conf.json`.** Antes `null`. Definida:
+  `default-src 'self'; img-src 'self' data:; style-src 'self'; script-src
+  'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; connect-src
+  'self' ipc: http://ipc.localhost https://cdn.jsdelivr.net`. O
+  `cdn.jsdelivr.net` em `connect-src` é temporário — o `tesseract.js`
+  descarrega dali o worker script e os dados de língua por omissão;
+  remover quando a migração de OCR para crate Rust nativo (item abaixo)
+  acontecer. Durante a validação (`cargo tauri dev`, confirmação visual
+  do André) descoberto e corrigido um bug real, não relacionado com CSP
+  mas que a CSP obrigou a resolver para poder escrever `img-src`
+  corretamente: `ImageUpload.tsx` construía a pré-visualização de imagem
+  com `http://localhost:8080/${image.path}` — não existe (nem nunca
+  existiu) nenhum servidor a ouvir na porta 8080 nesta app, pelo que a
+  pré-visualização de imagens em Receitas/Ingredientes estava
+  permanentemente partida. Corrigido com um novo comando Tauri
+  `image_read_base64` (lê o ficheiro do disco, devolve base64) e o
+  frontend monta um `data:` URL — evita depender de qualquer protocolo
+  externo e mantém a CSP restrita a `img-src 'self' data:`.
+- [x] **`tauri-plugin-opener` para links externos.** Confirmado: chamar
+  `invoke("plugin:opener|open_url", { url })` diretamente é a forma
+  correta e suportada (é a mesma chamada que a API oficial
+  `@tauri-apps/plugin-opener` faria por baixo; não instalado o pacote
+  JS extra só por preferência cosmética). O que estava mesmo por
+  resolver era a duplicação: `openExternal()` estava definida
+  identicamente em `SettingsPage.tsx` e `HelpPage.tsx`. Movida para
+  `src/lib/devInvoke.ts` (já é o módulo partilhado de `invoke`), ambas
+  as páginas importam de lá agora.
 - [ ] Migrar OCR de `tesseract.js` (client-side) para crate Rust nativo. Não
   substituir por API externa sem decisão explícita (privacidade/local-first).
 - [ ] Refatorar god-components: `ShoppingListPage` (~858 linhas), `RecipesPage`

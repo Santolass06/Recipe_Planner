@@ -24,6 +24,7 @@ export default function ImageUpload({
 }: ImageUploadProps) {
   const { t } = useI18n();
   const [image, setImage] = useState<Image | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" | "warn" | "info" } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -38,6 +39,20 @@ export default function ImageUpload({
       loadImage();
     }
   }, [entityId, entityType]);
+
+  useEffect(() => {
+    if (!image) {
+      setImageUrl(null);
+      return;
+    }
+    let cancelled = false;
+    invoke<string>("image_read_base64", { id: image.id })
+      .then((base64) => {
+        if (!cancelled) setImageUrl(`data:${image.mime_type};base64,${base64}`);
+      })
+      .catch(() => { if (!cancelled) setImageUrl(null); });
+    return () => { cancelled = true; };
+  }, [image]);
 
   const loadImage = async () => {
     try {
@@ -110,8 +125,6 @@ export default function ImageUpload({
       </div>
     );
   }
-
-  const imageUrl = image ? `http://localhost:8080/${image.path}` : null;
 
   return (
     <div className="image-upload">

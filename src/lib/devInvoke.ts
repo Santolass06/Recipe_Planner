@@ -137,3 +137,12 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
   }
   return tauriInvoke<T>(cmd, args);
 }
+
+/** Opens a URL in the user's default browser via the `tauri-plugin-opener` backend. */
+export async function openExternal(url: string): Promise<void> {
+  try {
+    await invoke("plugin:opener|open_url", { url });
+  } catch (e) {
+    console.error("Error opening link:", e);
+  }
+}
