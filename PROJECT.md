@@ -23,6 +23,26 @@ log histórico técnico, ver banner no topo desse ficheiro).
 
 ---
 
+## Ordem de execução (revisão de 2026-07-06)
+
+Sequência decidida após rever o plano contra o estado real do código:
+
+1. **3.3 — Stock isolado por evento** — modelo (a) fechado, plano de
+   implementação detalhado na secção 3.3.
+2. **Decisão de OCR** com recibos reais (ver [[OCR — Digitalização de
+   recibos]]). Tem um acoplamento de segurança que sobe a prioridade:
+   fechar o OCR fecha também o buraco temporário da CSP
+   (`cdn.jsdelivr.net` em `connect-src`, ver Fase 2).
+3. **Fase 4 — Distribuição** (secção nova abaixo) — empacotamento, fix do
+   path `mise/mise/mise.db` com migração de dados, teste em máquina limpa
+   (que também resolve ou descarta o bug da câmara da Fase 0).
+4. **Utilizadores reais a testar** → só depois, **Fase de Polishing**.
+
+God-components (adiado na Fase 2) e i18n de vocabulário só entram se o
+feedback de utilização real apontar para lá.
+
+---
+
 ## Fase 0 — Estabilização
 
 Objetivo: a app funciona de ponta a ponta em Linux nativo, sem bugs
@@ -119,6 +139,12 @@ bloqueantes, antes de qualquer feature nova.
   `xdg-desktop-portal` para concessão de câmara em apps sandboxed. Não
   bloqueante para o resto da app — o resto do Scanner (upload manual de
   imagem + OCR) não depende disto.
+  **Decisão (revisão 2026-07-06): não gastar mais depuração nesta
+  máquina.** O ambiente Nix/apt misturado é o suspeito principal e não é
+  representativo de utilizadores finais. A validação passa para a Fase 4 —
+  Distribuição: testar o build empacotado numa máquina limpa; se a câmara
+  funcionar lá, este item fecha-se como "ambiente de dev", sem fix; se não
+  funcionar, ganha finalmente um diagnóstico num ambiente representativo.
 
 ---
 
@@ -223,7 +249,7 @@ decisão de produto, não é algo a decidir autonomamente:
 
 ## Fase 3 — Features estruturantes
 
-### 3.1 — Marca + stock multi-nível
+### 3.1 — Marca + stock multi-nível — ✅ CONCLUÍDA (2026-07-06)
 
 **Problema a resolver:** hoje, stock e preço vivem ao nível do ingrediente. É
 preciso descer um nível: o mesmo ingrediente (arroz) pode ter várias marcas
@@ -276,6 +302,25 @@ fornecedor).
 
 **Impacto:** Ingredientes, Stock, Compras, Custos, Fornecedores, Relatórios.
 
+**Implementado (branch `feature/fase3-brand-stock`, merge `9d194d6`):**
+- Migração 016: coluna `brand TEXT` em `stock_purchases`. O "lote físico"
+  é a própria linha de `stock_purchases` (ingrediente + marca + fornecedor
+  + preço + quantidade + data) — sem tabela nova de lotes.
+- Convergência dos caminhos que sobem stock em `stock_purchases`
+  (`7f3a4ac`), conforme a decisão 3: compra manual (`stock_purchase_add`),
+  confirmação de recibo (`receipt_confirm`, agora com `supplier_id` e
+  `brand` preenchidos — o INSERT que deixava `supplier_id` NULL foi
+  corrigido), e `shopping_list_mark_purchased` (deixou de ser só flag —
+  cria um lote real com marca/fornecedor/preço).
+- Custo por média ponderada pela quantidade em stock
+  (`weighted_avg_stock_price` → `calculate_cost`), conforme a decisão 1.
+- Frontend multi-marca (`b6769ec`): marca nos formulários e listagens de
+  compras de stock.
+- Nota de higiene do plano: esta secção esteve por marcar como concluída
+  desde o merge — corrigido na revisão de 2026-07-06. A comparação de
+  políticas de custo alternativas e o caminho lista↔recibo alternativo
+  continuam em [[#Fase de Polishing]] (com âmbito revisto, ver lá).
+
 ### 3.2 — Event mode (modo Evento/Ocasião) — ✅ CONCLUÍDA
 
 **Modelo implementado:**
@@ -300,41 +345,110 @@ fornecedor).
 
 ---
 
-### 3.3 — Stock isolado por evento (proposto, não decidido)
+### 3.3 — Stock isolado por evento — decidido: modelo (a) (2026-07-06)
 
 Requisito levantado após teste do 3.2: um evento poder ter também ingredientes
 exclusivos e stock isolado do catálogo principal — e ao confirmar um recibo
 (scanner ou manual) poder escolher se a compra alimenta o stock normal ou o
 stock de um evento específico.
 
-**Por que não é só um afinamento do 3.2:** hoje `stock` e `stock_purchases`
-assumem uma linha por ingrediente (`stock.ingredient_id` é `UNIQUE`). Isolar
-por evento implica escolher entre dois modelos com custos bem diferentes:
+**Contexto da escolha:** hoje `stock` e `stock_purchases` assumem uma linha
+por ingrediente (`stock.ingredient_id` é `UNIQUE`). Dois modelos estavam em
+cima da mesa: **(a)** ingrediente exclusivo ao evento (mesmo padrão do
+`event_id` já usado em `recipes` — nada muda em `stock`/`stock_purchases`,
+que já isolam por `ingredient_id`); **(b)** chave composta
+`(ingredient_id, event_id)` em `stock`/`stock_purchases`, para o mesmo
+ingrediente do catálogo poder ter stock do evento contado à parte.
 
-- **(a) Ingrediente exclusivo ao evento** — mesmo padrão do `event_id` já
-  usado em `recipes`: um ingrediente criado "só para o evento X" é uma linha
-  própria, invisível no catálogo principal de Ingredientes. Reaproveita
-  quase tudo (stock e stock_purchases já isolam por `ingredient_id`, nada
-  muda aí). Não resolve o caso "é a mesma Farinha do catálogo, mas quero a
-  quantidade comprada para o evento contada à parte".
-- **(b) Stock duplo para o mesmo ingrediente partilhado** — resolve esse
-  caso, mas obriga a mudar a chave de `stock`/`stock_purchases` de
-  `ingredient_id` para `(ingredient_id, event_id)`, o que toca em custo
-  ponderado (`weighted_avg_stock_price`), geração de lista de compras,
-  `ReceiptConfirmInput`/scanner de recibos, e `ShoppingListMarkPurchasedInput`.
+**Decisão (2026-07-06): modelo (a), completado com uma operação "copiar
+ingrediente do catálogo para o evento".** O modelo (b) foi descartado:
 
-**Decisões a fechar antes de implementar:**
-1. Modelo (a), (b), ou os dois (ingredientes exclusivos E stock duplo para
-   partilhados)?
-2. Se (b): o scanner de recibos e o "marcar comprado" da lista de compras
-   precisam de um seletor "stock normal vs. evento X" — onde é que esse
-   contexto de evento vem (evento ativo selecionado globalmente? escolha
-   manual por recibo?).
-3. Custo de receita (`calculate_cost`) de uma receita de evento: usa o
-   weighted-average do stock do evento, do catálogo, ou combina os dois?
+- O único caso que o (b) resolvia e o (a) puro não — "é a mesma Farinha do
+  catálogo, mas quero a quantidade do evento contada à parte" — fica
+  coberto pela cópia: copiar a Farinha para o evento cria uma linha própria
+  com stock, compras e custo próprios. Consistente com a semântica já
+  decidida no 3.2: snapshot congelado, não partilha viva.
+- O que se perde vs. (b) é identidade agregada (relatórios que somam
+  Farinha-catálogo + Farinha-evento) — marginal para o caso de uso real,
+  enquanto o (b) custa mudar a chave `UNIQUE` de `stock`, o
+  `weighted_avg_stock_price`, a geração de lista de compras, o scanner e o
+  mark-purchased. Se o uso real mostrar falta da agregação, o (b) continua
+  implementável por cima — nenhuma porta se fecha.
+- As decisões abertas 2 e 3 da proposta original dissolvem-se com o (a):
+  - Contexto de evento no scanner/compra manual = só "que lista de
+    ingredientes alimenta o matching e o seletor" — escolha manual por
+    recibo/compra, sem estado global de "evento ativo".
+  - `calculate_cost`/`weighted_avg_stock_price` ficam intocados: uma
+    receita de evento custa pelo stock dos `ingredient_id` a que as suas
+    linhas apontam, sejam do catálogo ou do evento.
 
-**Estado:** só implementar após decisão explícita de avançar — não começar
-sem essa conversa de design.
+**Plano de implementação (branch `feature/fase3-event-stock`):**
+
+1. **Migração 018** — `add_column_if_missing(&conn, "ingredients",
+   "event_id", "INTEGER")` (NULL = catálogo principal). Sem FK real para
+   `events`, mesma convenção da Migration 017: cascata manual em
+   `delete_event`.
+2. **Domínio** — `event_id: Option<i64>` em `Ingredient` e
+   `IngredientInput`, anotado `#[ts(type = "number | null")]`; regenerar
+   bindings com `cargo test -p mise-core export_bindings`.
+3. **Queries de catálogo** — `ingredients_list` (db.rs, hoje SELECT sem
+   filtro) passa a `WHERE event_id IS NULL`. Só com isto, todas as páginas
+   de catálogo que a chamam (Ingredientes, Receitas, Custos, Stock,
+   Relatórios, Fornecedores, Lista de Compras, Scanner) continuam a ver
+   apenas o catálogo, sem tocar no frontend. Novo
+   `event_ingredients_list(db, event_id)` (`WHERE event_id = ?1`), espelho
+   de `event_recipes_list`.
+4. **Cópia e promoção** — espelhar o par já existente para receitas:
+   - `ingredient_copy_to_event(ingredient_id, event_id)`: nova linha com
+     `name`/`unit`/`price_per_unit`/`category_id` copiados e `event_id` do
+     evento. Guard de nome duplicado no âmbito do evento. Stock e compras
+     da linha original NÃO são copiados — o evento começa a zero (é esse o
+     ponto do isolamento).
+   - `ingredient_promote_to_catalog(id)`: limpa `event_id`, com guard de
+     nome duplicado contra o catálogo (mesmo padrão do guard de
+     `recipe_promote_to_catalog`). Comportamento intencional: ao promover,
+     o stock e o histórico de compras viajam com o ingrediente (mesmo
+     `id`) — o que sobrou do evento passa a stock normal.
+5. **Cascata de `delete_event`** — estender a cascata manual existente,
+   por esta ordem (há FK `ON DELETE RESTRICT` de `stock_purchases` para
+   `ingredients`): `recipe_ingredients` das receitas do evento (já existe)
+   → `recipes` do evento (já existe) → `stock` dos ingredientes do evento
+   → `stock_purchases` dos ingredientes do evento → `ingredients WHERE
+   event_id = ?1` → `events`.
+6. **Entradas de stock com destino** — dos três caminhos que sobem stock
+   (convergidos no 3.1), dois ganham a noção de destino, sem mudança de
+   schema:
+   - Scanner de recibos: o ecrã de confirmação ganha um seletor "Destino:
+     Catálogo / Evento X" que troca a lista de ingredientes usada no
+     matching automático por nome e no seletor manual. As queries de
+     matching por `LOWER(name)` no backend ganham o filtro de `event_id`
+     correspondente ao destino escolhido.
+   - Compra manual (`stock_purchase_add` / StockPage): mesmo seletor de
+     destino no formulário.
+   - Lista de compras (`shopping_list_mark_purchased`): fica fora do
+     âmbito do 3.3 — listas de compras não são event-scoped hoje; listas
+     por evento seriam item novo, só com pedido de uso real.
+7. **Comandos Tauri** — registar `event_ingredients_list`,
+   `ingredient_copy_to_event` e `ingredient_promote_to_catalog` em
+   `crates/tauri/src/lib.rs` E no launcher `src-tauri` (lembrar o bug da
+   Fase 0: comandos implementados mas não registados no launcher).
+8. **Frontend** — `EventDetailPage` ganha secção "Ingredientes" espelhando
+   a de receitas: listar, copiar do catálogo (linha inteira clicável no
+   seletor, mesmo padrão), criar novo exclusivo ao evento, promover a
+   global, apagar. Seletor de destino no `ReceiptScannerPage` e no
+   formulário de compra do `StockPage`. Chaves i18n novas em PT e EN.
+9. **Testes** — espelhar os testes de event recipes: cópia começa a zero;
+   promoção com colisão de nome; cascata de `delete_event` apaga stock e
+   compras do evento sem violar o RESTRICT; `ingredients_list` não devolve
+   ingredientes de evento; matching do scanner respeita o destino.
+10. **Validação** — workflow standard: `cargo check --workspace`,
+    `cargo test --workspace`, `npx tsc --noEmit`, `npm run build`, teste
+    visual via `cargo tauri dev`, confirmação explícita antes do merge
+    `--no-ff` para `main`.
+
+**Fora de âmbito (deliberado):** modelo (b); agregação catálogo+evento em
+relatórios; listas de compras por evento; estado global de "evento ativo".
+Revisitar qualquer um apenas com pedido concreto de uso real.
 
 ---
 
@@ -521,12 +635,51 @@ padrão do OCR):
 - **Passos de receita** (`feature/i18n/steps-onnx-mt`) — texto livre em
   frases completas, um dicionário palavra-a-palavra não produz gramática
   correta. Rejeitado: tradução via LLM de chat (custo/latência por
-  chamada). Opção a explorar: modelo de tradução neural leve local via
+  chamada). Opção explorada: modelo de tradução neural leve local via
   ONNX (ex. família OPUS-MT/Helsinki-NLP, ~300MB), reaproveitando o
   runtime ONNX já introduzido na exploração de OCR nativo. Alternativa:
-  motor de tradução por regras offline (Apertium, par PT↔EN). Não
-  decidido se vale a pena face ao esforço — avaliar depois das duas
-  branches anteriores fechadas.
+  motor de tradução por regras offline (Apertium, par PT↔EN).
+  **Cortado na revisão de 2026-07-06:** peso (~300MB de modelo)
+  desproporcional ao valor; não retomar sem pedido explícito de
+  utilizador real.
+
+Prioridade relativa (revisão 2026-07-06): **unidades sobe** — é um bug
+visível hoje (unidades sempre em PT independentemente do toggle) e é
+trivial (vocabulário fechado de ~20 valores); ingredientes fica a avaliar
+depois do feedback real; passos está cortado (acima).
+
+---
+
+## Fase 4 — Distribuição (nova na revisão de 2026-07-06)
+
+A Fase de Polishing depende de "utilizadores finais testarem", mas o plano
+não tinha nenhum item sobre como a app chega até eles. Esta fase fecha esse
+buraco e é pré-requisito do Polishing.
+
+- [ ] **Empacotamento Linux** — `cargo tauri build` com bundles `.deb` e
+  AppImage; verificar ícone, nome e categoria de menu. O build de release
+  deve ser produzido/validado num ambiente limpo — a máquina de dev tem
+  Nix/apt misturados (ver os fixes de EGL/TLS/pkg-config na Fase 0), o que
+  a torna má referência para o que os utilizadores vão receber.
+- [ ] **Fix do path `mise/mise/mise.db` + migração de dados.** Achado na
+  Fase 0 (ver nota no item da limpeza do `mise.db` órfão): `open_db()` em
+  `crates/core/src/db.rs` faz `dir.join("mise")` sobre um `app_data_dir`
+  que o Tauri já resolve para `.../mise`, pelo que a BD ativa vive em
+  `.../mise/mise/mise.db`. Estava "para a Fase 2", mas a Fase 2 foi
+  encerrada sem ele — re-alojado aqui deliberadamente: corrigir ANTES de
+  existirem instalações reais (depois o custo de migração multiplica por
+  utilizador). Fix: remover o `join` redundante + lógica de arranque que,
+  se `.../mise/mise/mise.db` existir e o path novo não, move o ficheiro
+  (incluindo WAL/journal ao lado, com a app fechada — fazer no arranque
+  antes de abrir a BD).
+- [ ] **Teste em máquina limpa** — instalar o pacote numa máquina sem Nix
+  e validar o essencial de ponta a ponta (criar ingrediente/receita,
+  compra de stock, scanner por upload, evento). Inclui o teste da câmara
+  do Scanner: se funcionar aí, o bug pendente da Fase 0 fecha-se como
+  "ambiente de dev, sem fix"; se não, passa a ter um diagnóstico num
+  ambiente representativo.
+- [ ] **Primeira execução** — decidir se o onboarding de língua (ver
+  [[Roadmap i18n]]) entra aqui ou fica para depois do primeiro feedback.
 
 ---
 
@@ -538,10 +691,13 @@ e casos de uso reais o que hoje ficou decidido "no papel" ou por
 heurística. Não é trabalho novo — é validar/comparar decisões já tomadas.
 
 - **Política de custo alternativa (3.1)** — 3.1 implementa média ponderada.
-  Implementar também mais barato primeiro, mais caro primeiro, e
-  proporcional, e comparar os 4 resultados com o stock e histórico de
-  compras reais para confirmar se a média ponderada continua a ser a
-  melhor escolha ou se um caso de uso concreto pede outra.
+  **Âmbito revisto (2026-07-06): NÃO implementar as outras 3 políticas na
+  app para comparar.** Uma análise pontual (query SQL ad-hoc sobre os
+  `stock_purchases` reais) calcula os 4 números — média ponderada, mais
+  barato primeiro, mais caro primeiro, proporcional — de uma vez, sem
+  código de produto. Só se essa análise mostrar um caso concreto a pedir
+  outra política é que ela vira feature (aí sim, com seletor em Settings,
+  como previsto na decisão 2 do 3.1).
 - **Caminho lista↔recibo alternativo (3.1)** — 3.1 converge tudo em
   `stock_purchases` com convenção de "um caminho por compra" (sem
   reconciliação automática). Testar com uso real se isto basta, ou se
@@ -553,7 +709,10 @@ heurística. Não é trabalho novo — é validar/comparar decisões já tomadas
   ainda aparecem em PT independentemente do toggle de língua.
 - **Escolha de motor de OCR** — ver [[OCR — Digitalização de recibos]].
   Precisa de teste com recibos reais para decidir entre nativo (Rust) e
-  Vision LLM local.
+  Vision LLM local. **Nota (2026-07-06): promovido para antes da Fase 4
+  na ordem de execução** — fechar o OCR fecha também o `cdn.jsdelivr.net`
+  temporário na CSP (ver Fase 2), ou seja, é um item de segurança, não só
+  de qualidade de OCR.
 
 ---
 
