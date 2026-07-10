@@ -428,6 +428,34 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
     // NULL = catalog. Same manual-cascade convention as Migration 017.
     add_column_if_missing(&conn, "ingredients", "event_id", "INTEGER").await?;
 
+    // Migration 019: usage instrumentation (Fase de Instrumentação, 2026-07-10).
+    // usage_events: shell for future automatic event emitters (OCR outcome,
+    // lista-vs-recibo path, etc.) — table exists now, no emitters wired yet
+    // (deferred, no consumers until real users, ver PROJECT.md). problem_reports:
+    // user-initiated bug reports, has a real producer today (report button).
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS usage_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT NOT NULL,
+            payload_json TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        "#,
+        (),
+    ).await?;
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS problem_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            description TEXT NOT NULL,
+            image_path TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        "#,
+        (),
+    ).await?;
+
     Ok(())
 }
 
@@ -4396,6 +4424,117 @@ pub async fn image_read_base64(db: &Database, id: i64, data_dir: &std::path::Pat
     Ok(STANDARD.encode(bytes))
 }
 
+fn row_to_problem_report(row: &Row) -> LibsqlResult<ProblemReport> {
+    let created_at_str: String = row.get(3)?;
+    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+
+    Ok(ProblemReport {
+        id: row.get(0)?,
+        description: row.get(1)?,
+        image_path: row.get(2)?,
+        created_at,
+    })
+}
+
+/// Create a user-submitted problem report, optionally with an attached
+/// image. Local-only: `export_usage_data` below is the only way this data
+/// leaves the machine, never sent automatically.
+pub async fn problem_report_create(db: &Database, input: ProblemReportInput, data_dir: &std::path::Path) -> LibsqlResult<ProblemReport> {
+    let image_path = match input.image_base64 {
+        Some(base64) => Some(
+            save_base64_image(&base64, "problem_report", 0, data_dir).await
+                .map_err(libsql::Error::Misuse)?,
+        ),
+        None => None,
+    };
+
+    let conn = get_conn(db).await?;
+    conn.execute(
+        "INSERT INTO problem_reports (description, image_path) VALUES (?1, ?2)",
+        params![input.description, image_path],
+    ).await?;
+
+    let id = conn.last_insert_rowid();
+    let mut rows = conn.query(
+        "SELECT id, description, image_path, created_at FROM problem_reports WHERE id = ?1",
+        params![id],
+    ).await?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    row_to_problem_report(&row)
+}
+
+/// Export all locally-stored problem reports and usage events as a
+/// human-readable Markdown report (plus copies of report images) into a
+/// new timestamped subfolder under `dest_dir`. Returns the created folder
+/// path. `usage_events` has no writers yet (Fase de Instrumentação shell,
+/// ver PROJECT.md) — the section renders empty until real emitters exist.
+pub async fn export_usage_data(db: &Database, data_dir: &std::path::Path, dest_dir: &std::path::Path) -> LibsqlResult<String> {
+    let conn = get_conn(db).await?;
+
+    let export_name = format!("mise-export-{}", chrono::Utc::now().format("%Y-%m-%d_%H%M%S"));
+    let export_dir = dest_dir.join(&export_name);
+    let images_out_dir = export_dir.join("images");
+    std::fs::create_dir_all(&images_out_dir).map_err(|e| libsql::Error::Misuse(e.to_string()))?;
+
+    let mut md = String::new();
+    md.push_str(&format!("# Relatório de uso — {}\n\n", chrono::Utc::now().format("%Y-%m-%d %H:%M UTC")));
+
+    md.push_str("## Reportes de problemas\n\n");
+    let mut reports = conn.query(
+        "SELECT id, description, image_path, created_at FROM problem_reports ORDER BY created_at DESC",
+        (),
+    ).await?;
+    let mut report_count = 0;
+    while let Some(row) = reports.next().await? {
+        report_count += 1;
+        let id: i64 = row.get(0)?;
+        let description: String = row.get(1)?;
+        let image_path: Option<String> = row.get(2)?;
+        let created_at: String = row.get(3)?;
+
+        md.push_str(&format!("### #{id} — {created_at}\n\n{description}\n\n"));
+        if let Some(path) = image_path {
+            let src = data_dir.join(&path);
+            if let Some(filename) = std::path::Path::new(&path).file_name() {
+                let dest = images_out_dir.join(filename);
+                if std::fs::copy(&src, &dest).is_ok() {
+                    md.push_str(&format!("![imagem](images/{})\n\n", filename.to_string_lossy()));
+                }
+            }
+        }
+    }
+    if report_count == 0 {
+        md.push_str("_Nenhum problema reportado._\n\n");
+    }
+
+    md.push_str("## Eventos de uso\n\n");
+    let mut events = conn.query(
+        "SELECT event_type, payload_json, created_at FROM usage_events ORDER BY created_at DESC",
+        (),
+    ).await?;
+    let mut event_count = 0;
+    while let Some(row) = events.next().await? {
+        event_count += 1;
+        let event_type: String = row.get(0)?;
+        let payload: Option<String> = row.get(1)?;
+        let created_at: String = row.get(2)?;
+        md.push_str(&format!(
+            "- `{created_at}` **{event_type}**{}\n",
+            payload.map(|p| format!(" — {p}")).unwrap_or_default()
+        ));
+    }
+    if event_count == 0 {
+        md.push_str("_Nenhum evento de uso registado ainda._\n\n");
+    }
+
+    let md_path = export_dir.join("relatorio.md");
+    std::fs::write(&md_path, md).map_err(|e| libsql::Error::Misuse(e.to_string()))?;
+
+    Ok(export_dir.display().to_string())
+}
+
 /// Set image as primary
 pub async fn image_set_primary(db: &Database, id: i64) -> LibsqlResult<Image> {
     let conn = get_conn(db).await?;
@@ -5607,5 +5746,40 @@ mod fase3_stock_tests {
         assert!(!data_dir.join(&uploaded.path).exists());
 
         let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    /// Problem report with an attached image round-trips into the Markdown
+    /// export, and the image is copied alongside it (Fase de Instrumentação,
+    /// 2026-07-10) — the export must be self-contained and readable without
+    /// the app running.
+    #[tokio::test]
+    async fn problem_report_with_image_appears_in_export() {
+        let db = test_db().await;
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let data_dir = std::env::temp_dir().join(format!("mise_test_reports_data_{unique}"));
+        let dest_dir = std::env::temp_dir().join(format!("mise_test_reports_export_{unique}"));
+        std::fs::create_dir_all(&dest_dir).unwrap();
+
+        let base64_1x1_png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
+        let report = problem_report_create(&db, ProblemReportInput {
+            description: "O botão de exportar não faz nada".into(),
+            image_base64: Some(base64_1x1_png.into()),
+        }, &data_dir).await.unwrap();
+        assert!(report.image_path.is_some());
+
+        let export_dir = export_usage_data(&db, &data_dir, &dest_dir).await.unwrap();
+        let export_dir = std::path::PathBuf::from(export_dir);
+
+        let md = std::fs::read_to_string(export_dir.join("relatorio.md")).unwrap();
+        assert!(md.contains("O botão de exportar não faz nada"));
+        assert!(md.contains("![imagem]"));
+
+        let copied_images: Vec<_> = std::fs::read_dir(export_dir.join("images")).unwrap().collect();
+        assert_eq!(copied_images.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&data_dir);
+        let _ = std::fs::remove_dir_all(&dest_dir);
     }
 }

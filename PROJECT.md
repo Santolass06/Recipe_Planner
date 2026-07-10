@@ -961,27 +961,59 @@ caminho lista↔recibo, motor de OCR), mas nada na app hoje regista esses
 dados à medida que é usada. Sem isto, o Polishing chega sem dados para
 decidir.
 
-- [ ] **Decisão local-only vs. remoto** — a app é local-first (sem
-  backend, sem servidor próprio hoje) e lida com dados sensíveis (recibos,
-  potencialmente valores gastos). Recomendação: começar **local-only** —
-  os eventos ficam gravados na própria BD do utilizador (mesma `mise.db`,
-  ver [[SQLite concurrency risk]] para o padrão de acesso), sem qualquer
-  envio para fora da máquina. Recolha remota (telemetria centralizada)
-  implica infraestrutura de backend nova e uma política de privacidade/
-  consentimento explícita — decisão maior, adiada até haver instalações
-  reais suficientes para justificar o custo (mesmo raciocínio de
-  "população de uma máquina" já usado no fix de `resolve_data_dir`, ver
+- [x] **Decisão local-only vs. remoto** ✅ DECIDIDO (2026-07-10):
+  **local-only.** A app é local-first (sem backend, sem servidor próprio
+  hoje) e lida com dados sensíveis (recibos, potencialmente valores
+  gastos). Os eventos ficam gravados na própria BD do utilizador (mesma
+  `mise.db`, ver [[SQLite concurrency risk]] para o padrão de acesso), sem
+  qualquer envio para fora da máquina. Recolha remota (telemetria
+  centralizada) implicaria infraestrutura de backend nova e uma política
+  de privacidade/consentimento explícita — decisão maior, adiada até haver
+  instalações reais suficientes para justificar o custo (mesmo raciocínio
+  de "população de uma máquina" já usado no fix de `resolve_data_dir`, ver
   Fase 4 acima).
-- [ ] **Tabela de eventos append-only** — uma tabela nova (`usage_events`
-  ou nome semelhante: `id`, `event_type`, `payload_json`, `created_at`),
-  sem infraestrutura nova — reutiliza a ligação `libsql` já aberta,
-  seguindo o mesmo padrão de threading de `db: &Database` já usado no
-  resto de `crates/core/src/db.rs`. Consulta ad-hoc por SQL quando
-  necessário (mesmo padrão já prescrito para a análise de política de
-  custo no Polishing), sem dashboard nem exportação automática — YAGNI
-  até haver necessidade concreta de agregar entre máquinas.
-- [ ] **O que registar** — apenas o que alimenta decisões já identificadas
-  no Polishing/Fase 0, não uma lista especulativa:
+- [x] **Tabela de eventos append-only** ✅ CONCLUÍDA (2026-07-10) — Migration
+  019 (`crates/core/src/db.rs`) criou `usage_events` (`id`, `event_type`,
+  `payload_json`, `created_at`). **Sem escritores ainda** — nenhuma feature
+  chama isto hoje, é só o shell para quando os emissores automáticos (ver
+  "O que registar" abaixo) forem construídos. Decisão consciente de não os
+  construir já: são consumer-less até haver utilizadores reais, adicioná-
+  los depois é trivial com a tabela já pronta.
+- [x] **Reportar problema + exportação local** ✅ CONCLUÍDA (2026-07-10) —
+  ao contrário dos emissores automáticos acima, este teve um produtor real
+  desde já (o próprio dev, a testar em máquina limpa). Implementado:
+  - `problem_reports` (Migration 019): `id`, `description`, `image_path`
+    (opcional), `created_at`.
+  - `problem_report_create` (`db.rs`) — reaproveita `save_base64_image`/
+    `data_dir` já corrigido na Fase 4 (mesmo padrão que `image_upload`),
+    não inventa armazenamento novo.
+  - `export_usage_data` (`db.rs`) — gera uma subpasta timestamped em
+    `data_dir/exports/` com `relatorio.md` (Markdown, um problema por
+    secção, imagem embutida) + `images/` com as imagens copiadas. Sem
+    picker de destino (evita depender de `tauri-plugin-dialog`, que não
+    estava instalado no lado JS) — exporta sempre para dentro dos dados
+    da própria app, local-only reforçado por construção, não só por
+    convenção.
+  - UI em `SettingsPage.tsx` (categoria "Dados"): botão "Reportar um
+    problema" (modal com descrição + imagem opcional, reaproveita o
+    padrão de `ImageUpload.tsx` para o `FileReader`→base64) e botão
+    "Exportar dados de uso e problemas".
+  - Validado: `cargo test --workspace` (101 testes, incl.
+    `problem_report_with_image_appears_in_export`, round-trip real —
+    cria report com imagem, exporta, confirma texto + imagem copiada no
+    Markdown), `npx tsc --noEmit` limpo, `cargo tauri dev` arrancou sem
+    erros com os novos comandos registados. **Sem confirmação visual em
+    browser** — ao contrário do bug da câmara (Fase 0), isto não é um
+    problema de ambiente Nix/apt: o webview nativo neste Linux é
+    WebKitGTK, não Chromium, por isso as ferramentas de browser
+    (Playwright, extensão Chrome) não conseguem estruturalmente ligar-se
+    à janela nativa — não é "não ligou desta vez", é "não pode ligar
+    aqui". A prova real fica a cargo do teste Rust acima, que exercita as
+    mesmas funções que os comandos Tauri chamam.
+- [ ] **O que registar (emissores automáticos)** — ainda por construir,
+  deliberadamente adiado (zero consumidores até haver utilizadores reais).
+  Quando fizer sentido, alimenta decisões já identificadas no
+  Polishing/Fase 0, não uma lista especulativa:
   - Resultado de cada scan de recibo (motor usado, confiança/sucesso,
     se o utilizador corrigiu algum item depois) — alimenta a escolha
     nativo vs. `tesseract.js`.
@@ -994,9 +1026,10 @@ decidir.
   (Dados já persistidos transacionalmente, como o valor real de
   `stock_purchases`, não precisam de evento novo — já servem a análise de
   custo sem instrumentação extra.)
-- [ ] **Privacidade** — nenhum evento guarda o conteúdo do recibo em si
-  (imagem/texto), só metadados sobre o resultado do OCR. Sem PII fora do
-  que a app já guarda localmente para a sua função normal.
+- [x] **Privacidade** — nenhum evento/reporte guarda o conteúdo do recibo
+  em si além do que a app já guarda localmente para a sua função normal.
+  Exportação é sempre manual (botão explícito), nunca automática; não
+  existe nenhum endpoint de envio, nem sequer como stub "para depois".
 
 ---
 

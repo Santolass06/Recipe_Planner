@@ -3,6 +3,7 @@ import { useToast } from "../components/ui/Toast";
 import { invoke, openExternal } from "../lib/devInvoke";
 import { useI18n } from "../i18n";
 import { applyTheme } from "../theme";
+import type { ProblemReportInput } from "../../crates/core/bindings/ProblemReportInput";
 
 type SettingsMap = Record<string, string>;
 
@@ -175,6 +176,11 @@ export default function SettingsPage() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showDeleteDataConfirm, setShowDeleteDataConfirm] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportDescription, setReportDescription] = useState("");
+  const [reportImage, setReportImage] = useState<{ base64: string; name: string } | null>(null);
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -318,6 +324,53 @@ export default function SettingsPage() {
       showToast(t("settings.demoDataError"), "err");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleReportImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const base64 = (ev.target?.result as string).split(",")[1];
+      if (base64) setReportImage({ base64, name: file.name });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSubmitReport = async () => {
+    if (!reportDescription.trim()) {
+      showToast(t("settings.reportProblemValidation"), "warn");
+      return;
+    }
+    setReportSubmitting(true);
+    try {
+      await invoke("problem_report_create", {
+        input: {
+          description: reportDescription.trim(),
+          image_base64: reportImage?.base64 ?? null,
+        },
+      } as { input: ProblemReportInput });
+      showToast(t("settings.reportProblemSuccess"), "ok");
+      setShowReportModal(false);
+      setReportDescription("");
+      setReportImage(null);
+    } catch (e) {
+      showToast(t("settings.reportProblemError"), "err");
+    } finally {
+      setReportSubmitting(false);
+    }
+  };
+
+  const handleExportUsageData = async () => {
+    setExporting(true);
+    try {
+      const path = await invoke<string>("export_usage_data");
+      showToast(t("settings.usageExportSuccess", { path: path ?? "" }), "ok");
+    } catch (e) {
+      showToast(t("settings.usageExportError"), "err");
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -519,6 +572,28 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
+                <div className="settings-section-sep">
+                  <h3 style={{ fontSize: "14px", fontWeight: 500, margin: "0 0 4px" }}>{t("settings.reportProblem")}</h3>
+                  <p style={{ fontSize: "12px", color: "var(--text-3)", margin: "0 0 12px" }}>
+                    {t("settings.reportProblemDesc")}
+                  </p>
+                  <button className="btn" onClick={() => setShowReportModal(true)}>
+                    <span className="ms" style={{ fontSize: 18 }} aria-hidden="true">flag</span>
+                    {t("settings.reportProblemBtn")}
+                  </button>
+                </div>
+
+                <div className="settings-section-sep">
+                  <h3 style={{ fontSize: "14px", fontWeight: 500, margin: "0 0 4px" }}>{t("settings.usageExport")}</h3>
+                  <p style={{ fontSize: "12px", color: "var(--text-3)", margin: "0 0 12px" }}>
+                    {t("settings.usageExportDesc")}
+                  </p>
+                  <button className="btn" onClick={handleExportUsageData} disabled={exporting}>
+                    <span className="ms" style={{ fontSize: 18 }} aria-hidden="true">download</span>
+                    {t("settings.usageExportBtn")}
+                  </button>
+                </div>
+
                 <div>
                   <h3 style={{ fontSize: "14px", fontWeight: 500, margin: "0 0 4px", color: "var(--danger)" }}>{t("settings.resetToDefault")}</h3>
                   <p style={{ fontSize: "12px", color: "var(--text-3)", margin: "0 0 12px" }}>
@@ -697,6 +772,54 @@ export default function SettingsPage() {
               <button className="btn btn-secondary" onClick={() => setShowDeleteDataConfirm(false)}>{t("common.cancel")}</button>
               <button className="btn btn-danger" onClick={handleDeleteAllData} disabled={saving}>
                 {t("settings.deleteAllDataBtn")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Report Problem Modal */}
+      {showReportModal && (
+        <div className="modal-backdrop" onClick={() => setShowReportModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">{t("settings.reportProblemTitle")}</h2>
+              <button className="modal-close" onClick={() => setShowReportModal(false)} aria-label={t("common.close")}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="field">
+                <label>{t("settings.reportProblemDescLabel")}</label>
+                <textarea
+                  className="input"
+                  rows={4}
+                  placeholder={t("settings.reportProblemDescPlaceholder")}
+                  value={reportDescription}
+                  onChange={e => setReportDescription(e.target.value)}
+                />
+              </div>
+              <div className="field" style={{ marginTop: "var(--space-3)" }}>
+                <label>{t("settings.reportProblemImageLabel")}</label>
+                <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "var(--space-3)" }}>
+                  <label htmlFor="report-image-file" className="btn">{t("settings.chooseFile")}</label>
+                  <input
+                    type="file"
+                    id="report-image-file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={handleReportImageSelect}
+                  />
+                  <span style={{ color: "var(--text-3)", fontSize: "13px", flex: 1 }}>
+                    {reportImage ? reportImage.name : t("settings.noFileSelected")}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowReportModal(false)}>{t("common.cancel")}</button>
+              <button className="btn btn-primary" onClick={handleSubmitReport} disabled={reportSubmitting}>
+                {t("settings.reportProblemSubmitBtn")}
               </button>
             </div>
           </div>
