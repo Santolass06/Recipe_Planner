@@ -83,6 +83,9 @@ pub fn run() {
             mise_tauri::commands::event_recipes_list,
             mise_tauri::commands::recipe_copy_to_event,
             mise_tauri::commands::recipe_promote_to_catalog,
+            mise_tauri::commands::event_ingredients_list,
+            mise_tauri::commands::ingredient_copy_to_event,
+            mise_tauri::commands::ingredient_promote_to_catalog,
             // Price quotes
             mise_tauri::commands::price_quotes_list,
             mise_tauri::commands::price_quote_create,

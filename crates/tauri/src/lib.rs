@@ -303,6 +303,18 @@ impl AppDb {
         mise_core::db::recipe_promote_to_catalog(&self.db, id).await.map_err(|e| e.to_string())
     }
 
+    pub async fn event_ingredients_list(&self, event_id: i64) -> Result<Vec<Ingredient>, String> {
+        mise_core::db::event_ingredients_list(&self.db, event_id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn ingredient_copy_to_event(&self, ingredient_id: i64, event_id: i64) -> Result<Ingredient, String> {
+        mise_core::db::ingredient_copy_to_event(&self.db, ingredient_id, event_id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn ingredient_promote_to_catalog(&self, id: i64) -> Result<Ingredient, String> {
+        mise_core::db::ingredient_promote_to_catalog(&self.db, id).await.map_err(|e| e.to_string())
+    }
+
     // Price quotes
     pub async fn price_quotes_list(&self, ingredient_id: i64) -> Result<Vec<PriceQuote>, String> {
         mise_core::db::price_quotes_list(&self.db, ingredient_id).await.map_err(|e| e.to_string())
@@ -1001,6 +1013,31 @@ pub mod commands {
         id: i64,
     ) -> Result<RecipeWithIngredients, String> {
         db.recipe_promote_to_catalog(id).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn event_ingredients_list(
+        db: tauri::State<'_, crate::AppDb>,
+        event_id: i64,
+    ) -> Result<Vec<Ingredient>, String> {
+        db.event_ingredients_list(event_id).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn ingredient_copy_to_event(
+        db: tauri::State<'_, crate::AppDb>,
+        ingredient_id: i64,
+        event_id: i64,
+    ) -> Result<Ingredient, String> {
+        db.ingredient_copy_to_event(ingredient_id, event_id).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn ingredient_promote_to_catalog(
+        db: tauri::State<'_, crate::AppDb>,
+        id: i64,
+    ) -> Result<Ingredient, String> {
+        db.ingredient_promote_to_catalog(id).await.map_err(|e| e.to_string())
     }
 
     // Price quotes

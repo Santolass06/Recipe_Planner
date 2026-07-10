@@ -392,12 +392,22 @@ ingrediente do catálogo para o evento".** O modelo (b) foi descartado:
    `IngredientInput`, anotado `#[ts(type = "number | null")]`; regenerar
    bindings com `cargo test -p mise-core export_bindings`.
 3. **Queries de catálogo** — `ingredients_list` (db.rs, hoje SELECT sem
-   filtro) passa a `WHERE event_id IS NULL`. Só com isto, todas as páginas
-   de catálogo que a chamam (Ingredientes, Receitas, Custos, Stock,
-   Relatórios, Fornecedores, Lista de Compras, Scanner) continuam a ver
-   apenas o catálogo, sem tocar no frontend. Novo
-   `event_ingredients_list(db, event_id)` (`WHERE event_id = ?1`), espelho
-   de `event_recipes_list`.
+   filtro) passa a `WHERE event_id IS NULL`. A maioria das páginas de
+   catálogo que a chamam (Ingredientes, Custos, Stock, Relatórios,
+   Fornecedores, Lista de Compras, Scanner) continua a ver apenas o
+   catálogo, sem tocar no frontend. Novo `event_ingredients_list(db,
+   event_id)` (`WHERE event_id = ?1`), espelho de `event_recipes_list`.
+   **Exceção que precisa de mudança no frontend:** `EventDetailPage.tsx`
+   reutiliza `RecipeFormContent` (importado de `RecipesPage.tsx`) para
+   editar receitas do evento, e hoje carrega o picker de ingredientes desse
+   formulário com `ingredients_list()` simples (linha ~42). Assim que essa
+   query passar a catálogo-only, o formulário de receita de evento deixa de
+   conseguir selecionar ingredientes do próprio evento. `EventDetailPage`
+   tem de combinar `ingredients_list()` + `event_ingredients_list(eventId)`
+   (client-side, um `Promise.all` + concat) antes de passar a lista ao
+   `RecipeFormContent`. `RecipesPage.tsx` (catálogo puro) não precisa desta
+   mudança. (Verificado 2026-07-10 via advisory do Opus — ponto que
+   bloqueava o passo 3 tal como estava escrito.)
 4. **Cópia e promoção** — espelhar o par já existente para receitas:
    - `ingredient_copy_to_event(ingredient_id, event_id)`: nova linha com
      `name`/`unit`/`price_per_unit`/`category_id` copiados e `event_id` do
@@ -415,16 +425,23 @@ ingrediente do catálogo para o evento".** O modelo (b) foi descartado:
    → `recipes` do evento (já existe) → `stock` dos ingredientes do evento
    → `stock_purchases` dos ingredientes do evento → `ingredients WHERE
    event_id = ?1` → `events`.
-6. **Entradas de stock com destino** — dos três caminhos que sobem stock
-   (convergidos no 3.1), dois ganham a noção de destino, sem mudança de
-   schema:
-   - Scanner de recibos: o ecrã de confirmação ganha um seletor "Destino:
-     Catálogo / Evento X" que troca a lista de ingredientes usada no
-     matching automático por nome e no seletor manual. As queries de
-     matching por `LOWER(name)` no backend ganham o filtro de `event_id`
-     correspondente ao destino escolhido.
-   - Compra manual (`stock_purchase_add` / StockPage): mesmo seletor de
-     destino no formulário.
+6. **Entradas de stock — revisto (2026-07-10):** verificado que
+   `stock_purchase_add` já é inteiramente `ingredient_id`-scoped (upsert em
+   `stock`/`stock_purchases` por esse id) — no modelo (a) o próprio
+   `ingredient_id` escolhido **é** o destino, catálogo ou evento, sem
+   precisar de campo "Destino" nem mudança de schema/backend. O plano
+   original de um seletor "Destino: Catálogo / Evento X" era mais pesado do
+   que o modelo exige; descartado.
+   - **Compra manual para ingrediente de evento:** entrada dedicada em
+     `EventDetailPage`, junto à secção "Ingredientes" — botão "Registar
+     compra" por linha que abre um formulário pequeno (quantidade, preço,
+     unidade, fornecedor opcional, data) e chama `stock_purchase_add` com o
+     `ingredient_id` do evento. Mantém stock de evento fora da `StockPage`
+     de catálogo, consistente com a intenção de isolamento. `StockPage`
+     não muda.
+   - **Scanner de recibos:** cortado por agora — a peça mais especulativa,
+     sem pedido real de utilizador; o scanner continua a alimentar só o
+     catálogo. Revisitar só com pedido concreto de uso real.
    - Lista de compras (`shopping_list_mark_purchased`): fica fora do
      âmbito do 3.3 — listas de compras não são event-scoped hoje; listas
      por evento seriam item novo, só com pedido de uso real.
@@ -449,6 +466,15 @@ ingrediente do catálogo para o evento".** O modelo (b) foi descartado:
 **Fora de âmbito (deliberado):** modelo (b); agregação catálogo+evento em
 relatórios; listas de compras por evento; estado global de "evento ativo".
 Revisitar qualquer um apenas com pedido concreto de uso real.
+
+**Verificações pré-implementação (2026-07-10, advisory do Opus):**
+confirmado por grep que não existe `UNIQUE(name)` em `ingredients` nem em
+`recipes` (nenhum `CREATE UNIQUE INDEX` no schema) — a Migração 018
+mantém-se um simples `add_column_if_missing`, sem reconstrução de tabela.
+Confirmado também que `delete_event` já corre num único `conn` sequencial
+sem `get_conn()` aninhados — seguro estender a cascata do passo 5. O ponto
+que de facto precisava de correção foi o picker de ingredientes partilhado
+do passo 3, já corrigido acima.
 
 ---
 

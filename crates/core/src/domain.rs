@@ -216,6 +216,11 @@ pub struct IngredientInput {
     #[validate(range(min = 0.0))]
     pub price_per_unit: f64,
     pub category: Option<String>,
+    /// Set on create to scope a brand-new ingredient to an event (Fase 3.3).
+    /// `#[serde(default)]` so existing catalog create/update callers that
+    /// never send this field keep working.
+    #[serde(default)]
+    pub event_id: Option<i64>,
 }
 
 /// Ingredient (stored)
