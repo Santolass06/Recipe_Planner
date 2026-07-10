@@ -838,6 +838,23 @@ buraco e é pré-requisito do Polishing.
   deve ser produzido/validado num ambiente limpo — a máquina de dev tem
   Nix/apt misturados (ver os fixes de EGL/TLS/pkg-config na Fase 0), o que
   a torna má referência para o que os utilizadores vão receber.
+  **Metadados de bundle preenchidos (2026-07-10):** `src-tauri/tauri.conf.json`
+  não tinha `bundle.icon` nenhum (nem os ficheiros de ícone tinham os
+  tamanhos que o Linux/`.deb` pede — só existia `32x32.png`, faltava
+  `128x128.png`/`128x128@2x.png`). Regenerado o conjunto completo a partir
+  de `icons/icon.svg` via `cargo tauri icon` (inclui, de bónus, os
+  conjuntos Android/iOS já prontos para a Fase Multi-plataforma). Adicionado
+  `bundle.icon` (todos os tamanhos), `bundle.category` (`"Lifestyle"`),
+  `bundle.shortDescription`/`longDescription`. **Testado nesta máquina**
+  (não substitui o teste em máquina limpa, só apanha erros de config
+  cedo): `.deb` gerou com sucesso (35MB, config aceite sem erro de parse —
+  `category`/paths de ícone válidos). AppImage falhou (`failed to run
+  linuxdeploy`, depois de descarregar as ferramentas `linuxdeploy`/
+  `AppRun`) — FUSE está presente (`/dev/fuse`, `fusermount3` existem), não
+  é o motivo óbvio; mesma família de problema do ambiente Nix/apt misto já
+  documentada nesta fase, não investigado mais fundo aqui por decisão
+  consciente (mesmo critério já aplicado ao bug da câmara). Fica para o
+  teste em máquina limpa confirmar se AppImage falha lá também.
 - [x] **Fix do path `mise/mise/mise.db` + raiz divergente de `images/`** ✅
   CONCLUÍDA (2026-07-10). Causa: `open_db()` fazia `dir.join("mise")` sobre
   um `app_data_dir` que o Tauri já resolve para `.../mise` (double-nesting);
