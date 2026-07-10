@@ -952,8 +952,12 @@ permanente. Ordem recomendada, por custo incremental crescente:
   e ecrãs pequenos (os componentes atuais assumem desktop), permissões de
   câmara mobile (Android/iOS têm modelo diferente do desktop — relacionado
   com o bug de câmara pendente da Fase 0), e confirmar suporte mobile de
-  cada plugin Tauri usado (`dialog`, `fs`, etc.) caso a caso. Só depois do
-  Polishing, com o essencial validado em desktop primeiro.
+  cada plugin Tauri usado (`dialog`, `fs`, etc.) caso a caso. **Android
+  cobre telemóvel e tablet, não só telemóvel** — layout responsivo tem de
+  ser validado nas duas classes de ecrã (o iPad já força este cuidado do
+  lado iOS; do lado Android não pode ficar de fora, é um alvo à parte, não
+  o mesmo layout de telemóvel esticado). Só depois do Polishing, com o
+  essencial validado em desktop primeiro.
 
 ---
 
