@@ -11,8 +11,11 @@ import type { Event } from "../../crates/core/bindings/Event";
 import type { RecipeWithIngredients as Recipe } from "../../crates/core/bindings/RecipeWithIngredients";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import { RecipeFormContent, computeCostLines, eur, EMPTY_FORM } from "./RecipesPage";
+import { UNIT_LABELS_SHORT as UNIT_SHORT } from "../lib/units";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
+
+const EMPTY_INGREDIENT_FORM = { name: "", unit: "gram", price_per_unit: 0 };
 
 export default function EventDetailPage() {
   const { id } = useParams();
@@ -24,7 +27,9 @@ export default function EventDetailPage() {
   const [event, setEvent] = useState<Event | null>(null);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [catalog, setCatalog] = useState<Recipe[]>([]);
-  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [catalogIngredients, setCatalogIngredients] = useState<Ingredient[]>([]);
+  const [eventIngredients, setEventIngredients] = useState<Ingredient[]>([]);
+  const ingredients = [...catalogIngredients, ...eventIngredients];
   const [pickerOpen, setPickerOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState(EMPTY_FORM);
@@ -33,24 +38,128 @@ export default function EventDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState<Recipe | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const [ingredientPickerOpen, setIngredientPickerOpen] = useState(false);
+  const [ingredientCreateOpen, setIngredientCreateOpen] = useState(false);
+  const [ingredientForm, setIngredientForm] = useState(EMPTY_INGREDIENT_FORM);
+  const [confirmDeleteIngredient, setConfirmDeleteIngredient] = useState<Ingredient | null>(null);
+  const [ingredientSaving, setIngredientSaving] = useState(false);
+  const [purchaseModal, setPurchaseModal] = useState<Ingredient | null>(null);
+  const [purchaseForm, setPurchaseForm] = useState({ quantity: 0, price_per_unit: 0, purchase_date: new Date().toISOString().slice(0, 10) });
+  const [purchaseSaving, setPurchaseSaving] = useState(false);
+
   const load = useCallback(async () => {
     try {
-      const [events, eventRecipes, catalogRecipes, ingredientsData] = await Promise.all([
+      const [events, eventRecipes, catalogRecipes, catalogIngs, eventIngs] = await Promise.all([
         invoke<Event[]>("events_list"),
         invoke<Recipe[]>("event_recipes_list", { eventId }),
         invoke<Recipe[]>("recipes_list"),
         invoke<Ingredient[]>("ingredients_list"),
+        invoke<Ingredient[]>("event_ingredients_list", { eventId }),
       ]);
       setEvent(events.find(e => e.id === eventId) ?? null);
       setRecipes(eventRecipes);
       setCatalog(catalogRecipes);
-      setIngredients(ingredientsData);
+      setCatalogIngredients(catalogIngs);
+      setEventIngredients(eventIngs);
     } catch (e) {
       showToast(t("events.loadError"), "err");
     }
   }, [eventId, showToast, t]);
 
   useEffect(() => { load(); }, [load]);
+
+  async function handleCopyIngredient(ingredientId: number) {
+    try {
+      await invoke("ingredient_copy_to_event", { ingredientId, eventId });
+      showToast(t("events.ingredientCopied"), "ok");
+      setIngredientPickerOpen(false);
+      await load();
+    } catch (e) {
+      showToast(t("events.copyError"), "err");
+    }
+  }
+
+  function openCreateIngredient() {
+    setIngredientForm(EMPTY_INGREDIENT_FORM);
+    setIngredientCreateOpen(true);
+  }
+
+  async function handleCreateIngredient() {
+    if (!ingredientForm.name.trim()) return;
+    setIngredientSaving(true);
+    try {
+      await invoke("ingredient_create", {
+        input: {
+          name: ingredientForm.name.trim(),
+          unit: ingredientForm.unit,
+          price_per_unit: ingredientForm.price_per_unit,
+          event_id: eventId,
+        },
+      });
+      showToast(t("events.ingredientCreated"), "ok");
+      setIngredientCreateOpen(false);
+      await load();
+    } catch (e) {
+      showToast(t("events.copyError"), "err");
+    } finally {
+      setIngredientSaving(false);
+    }
+  }
+
+  async function handlePromoteIngredient(ingredient: Ingredient) {
+    try {
+      await invoke("ingredient_promote_to_catalog", { id: ingredient.id });
+      showToast(t("events.ingredientPromoted"), "ok");
+      await load();
+    } catch (e) {
+      showToast(t("events.promoteError"), "err");
+    }
+  }
+
+  async function handleDeleteIngredient(ingredient: Ingredient) {
+    try {
+      await invoke("ingredient_delete", { id: ingredient.id });
+      setConfirmDeleteIngredient(null);
+      showToast(t("events.ingredientDeleted"), "ok");
+      await load();
+    } catch (e) {
+      showToast(t("events.ingredientDeleteError"), "err");
+    }
+  }
+
+  function openPurchase(ingredient: Ingredient) {
+    setPurchaseForm({ quantity: 0, price_per_unit: ingredient.price_per_unit, purchase_date: new Date().toISOString().slice(0, 10) });
+    setPurchaseModal(ingredient);
+  }
+
+  async function handleSavePurchase() {
+    if (!purchaseModal || purchaseForm.quantity <= 0 || purchaseForm.price_per_unit <= 0) return;
+    setPurchaseSaving(true);
+    try {
+      await invoke("stock_purchase_add", {
+        input: {
+          ingredient_id: purchaseModal.id,
+          quantity: purchaseForm.quantity,
+          unit: purchaseModal.unit,
+          price_per_unit: purchaseForm.price_per_unit,
+          total_price: purchaseForm.quantity * purchaseForm.price_per_unit,
+          is_discount: false,
+          discount_percent: 0,
+          purchase_date: `${purchaseForm.purchase_date}T00:00:00Z`,
+          supplier_id: null,
+          brand: null,
+          notes: null,
+        },
+      });
+      showToast(t("events.purchaseAdded"), "ok");
+      setPurchaseModal(null);
+      await load();
+    } catch (e) {
+      showToast(t("events.purchaseError"), "err");
+    } finally {
+      setPurchaseSaving(false);
+    }
+  }
 
   async function handleCopy(recipeId: number) {
     try {
@@ -254,6 +363,196 @@ export default function EventDetailPage() {
           })}
         </div>
       )}
+
+      <div style={{ marginTop: 32, marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <h2 style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>
+          {t("events.ingredientsTitle", { count: eventIngredients.length })}
+        </h2>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-secondary" onClick={openCreateIngredient}>
+            <span className="ms" style={{ fontSize: 16 }}>add</span>
+            {t("events.createIngredient")}
+          </button>
+          <button className="btn btn-primary" onClick={() => setIngredientPickerOpen(true)}>
+            <span className="ms" style={{ fontSize: 16 }}>content_copy</span>
+            {t("events.addIngredient")}
+          </button>
+        </div>
+      </div>
+
+      {eventIngredients.length === 0 ? (
+        <EmptyState
+          icon={<span className="ms" style={{ fontSize: 40 }}>egg</span>}
+          title={t("events.noIngredients")}
+          body={t("events.noIngredientsDesc")}
+        />
+      ) : (
+        <div role="list" aria-label={t("events.ingredientsAriaLabel")} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16 }}>
+          {eventIngredients.map(ingredient => (
+            <article key={ingredient.id} className="item-card" role="listitem" style={{ alignItems: "flex-start", padding: 20 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 11, background: "var(--inset)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                <span className="ms" style={{ fontSize: 23, color: "var(--ember)" }}>egg</span>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>{ingredient.name}</div>
+                <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", marginTop: 8 }}>
+                  {eur(ingredient.price_per_unit)} <span style={{ fontSize: 10, color: "var(--ink-3)", fontWeight: 400 }}>/{UNIT_SHORT[ingredient.unit]}</span>
+                </div>
+              </div>
+              <div className="item-actions" style={{ position: "absolute", top: 14, right: 16 }} role="group" aria-label={t("events.ingredientActionsAria", { name: ingredient.name })}>
+                <button className="btn-icon" onClick={() => openPurchase(ingredient)} title={t("events.addPurchase")} aria-label={t("events.addPurchaseAria", { name: ingredient.name })}>
+                  <span className="ms" style={{ fontSize: 14 }}>add_shopping_cart</span>
+                </button>
+                <button className="btn-icon" onClick={() => handlePromoteIngredient(ingredient)} title={t("events.promoteAction")} aria-label={t("events.promoteIngredientAria", { name: ingredient.name })}>
+                  <span className="ms" style={{ fontSize: 14 }}>public</span>
+                </button>
+                <button className="btn-icon danger" onClick={() => setConfirmDeleteIngredient(ingredient)} title={t("common.delete")} aria-label={t("events.deleteIngredientAria", { name: ingredient.name })}>
+                  <span className="ms" style={{ fontSize: 14 }}>delete</span>
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      <Modal
+        open={ingredientPickerOpen}
+        onClose={() => setIngredientPickerOpen(false)}
+        title={t("events.ingredientPickerTitle")}
+      >
+        {catalogIngredients.length === 0 ? (
+          <p className="text-3">{t("events.ingredientPickerEmpty")}</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 400, overflowY: "auto" }}>
+            {catalogIngredients.map(ingredient => (
+              <div
+                key={ingredient.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => handleCopyIngredient(ingredient.id)}
+                onKeyDown={e => { if (e.key === "Enter" || e.key === " ") handleCopyIngredient(ingredient.id); }}
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 9, cursor: "pointer" }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--ink)" }}>{ingredient.name}</div>
+                  <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>{eur(ingredient.price_per_unit)}/{UNIT_SHORT[ingredient.unit]}</div>
+                </div>
+                <span className="ms" style={{ fontSize: 18, color: "var(--ink-3)" }} aria-hidden="true">content_copy</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={ingredientCreateOpen}
+        onClose={() => setIngredientCreateOpen(false)}
+        title={t("events.createIngredientTitle")}
+        footer={
+          <>
+            <button className="btn btn-secondary" onClick={() => setIngredientCreateOpen(false)}>{t("common.cancel")}</button>
+            <button className="btn btn-primary" onClick={handleCreateIngredient} disabled={ingredientSaving || !ingredientForm.name.trim()}>
+              {ingredientSaving ? t("recipes.modal.saving") : t("common.save")}
+            </button>
+          </>
+        }
+      >
+        <div>
+          <div className="field">
+            <label htmlFor="event-ingredient-name">{t("common.name")}</label>
+            <input
+              id="event-ingredient-name"
+              autoFocus
+              value={ingredientForm.name}
+              onChange={e => setIngredientForm(f => ({ ...f, name: e.target.value }))}
+              onKeyDown={e => e.key === "Enter" && !e.shiftKey && handleCreateIngredient()}
+              placeholder={t("ingredients.modal.namePlaceholder")}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="event-ingredient-unit">{t("ingredients.colUnit")}</label>
+            <select
+              id="event-ingredient-unit"
+              value={ingredientForm.unit}
+              onChange={e => setIngredientForm(f => ({ ...f, unit: e.target.value }))}
+            >
+              {Object.entries(UNIT_SHORT).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="event-ingredient-price">{t("ingredients.modal.pricePerUnit")}</label>
+            <input
+              id="event-ingredient-price"
+              type="number"
+              min="0"
+              step="0.01"
+              value={ingredientForm.price_per_unit}
+              onChange={e => setIngredientForm(f => ({ ...f, price_per_unit: parseFloat(e.target.value) || 0 }))}
+              placeholder="0.00"
+            />
+          </div>
+        </div>
+      </Modal>
+
+      <ConfirmDialog
+        open={confirmDeleteIngredient !== null}
+        title={t("events.confirmDeleteIngredientTitle")}
+        body={confirmDeleteIngredient ? t("events.confirmDeleteIngredientBody", { name: confirmDeleteIngredient.name }) : ""}
+        danger
+        onCancel={() => setConfirmDeleteIngredient(null)}
+        onConfirm={() => confirmDeleteIngredient && handleDeleteIngredient(confirmDeleteIngredient)}
+      />
+
+      <Modal
+        open={purchaseModal !== null}
+        onClose={() => setPurchaseModal(null)}
+        title={purchaseModal ? t("events.purchaseTitle", { name: purchaseModal.name }) : ""}
+        footer={
+          <>
+            <button className="btn btn-secondary" onClick={() => setPurchaseModal(null)}>{t("common.cancel")}</button>
+            <button className="btn btn-primary" onClick={handleSavePurchase} disabled={purchaseSaving || purchaseForm.quantity <= 0 || purchaseForm.price_per_unit <= 0}>
+              {purchaseSaving ? t("recipes.modal.saving") : t("common.save")}
+            </button>
+          </>
+        }
+      >
+        <div>
+          <div className="field">
+            <label htmlFor="event-purchase-quantity">{t("stock.purchaseModal.quantity")} ({purchaseModal ? UNIT_SHORT[purchaseModal.unit] : ""})</label>
+            <input
+              id="event-purchase-quantity"
+              type="number"
+              min="0"
+              step="0.01"
+              value={purchaseForm.quantity}
+              onChange={e => setPurchaseForm(f => ({ ...f, quantity: parseFloat(e.target.value) || 0 }))}
+              autoFocus
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="event-purchase-price">{t("ingredients.modal.pricePerUnit")}</label>
+            <input
+              id="event-purchase-price"
+              type="number"
+              min="0"
+              step="0.01"
+              value={purchaseForm.price_per_unit}
+              onChange={e => setPurchaseForm(f => ({ ...f, price_per_unit: parseFloat(e.target.value) || 0 }))}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="event-purchase-date">{t("stock.purchaseModal.purchaseDate")}</label>
+            <input
+              id="event-purchase-date"
+              type="date"
+              value={purchaseForm.purchase_date}
+              onChange={e => setPurchaseForm(f => ({ ...f, purchase_date: e.target.value }))}
+            />
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={pickerOpen}

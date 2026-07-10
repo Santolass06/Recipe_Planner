@@ -423,6 +423,10 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
     add_column_if_missing(&conn, "recipes", "event_id", "INTEGER").await?;
     add_column_if_missing(&conn, "recipes", "base_recipe_id", "INTEGER").await?;
 
+    // Migration 018: event-scoped ingredients (Fase 3.3 — model (a))
+    // NULL = catalog. Same manual-cascade convention as Migration 017.
+    add_column_if_missing(&conn, "ingredients", "event_id", "INTEGER").await?;
+
     Ok(())
 }
 
@@ -856,7 +860,7 @@ pub async fn ingredients_list(db: &Database) -> LibsqlResult<Vec<Ingredient>> {
     let conn = get_conn(db).await?;
     let mut rows = conn.query(
         "SELECT id, name, unit, price_per_unit, category_id, created_at, updated_at, favorite
-         FROM ingredients ORDER BY name",
+         FROM ingredients WHERE event_id IS NULL ORDER BY name",
         (),
     ).await?;
 
@@ -865,6 +869,87 @@ pub async fn ingredients_list(db: &Database) -> LibsqlResult<Vec<Ingredient>> {
         ingredients.push(row_to_ingredient(&row)?);
     }
     Ok(ingredients)
+}
+
+/// List ingredients exclusive to an event (Fase 3.3 — model (a))
+pub async fn event_ingredients_list(db: &Database, event_id: i64) -> LibsqlResult<Vec<Ingredient>> {
+    let conn = get_conn(db).await?;
+    let mut rows = conn.query(
+        "SELECT id, name, unit, price_per_unit, category_id, created_at, updated_at, favorite
+         FROM ingredients WHERE event_id = ?1 ORDER BY name",
+        params![event_id],
+    ).await?;
+
+    let mut ingredients = Vec::new();
+    while let Some(row) = rows.next().await? {
+        ingredients.push(row_to_ingredient(&row)?);
+    }
+    Ok(ingredients)
+}
+
+/// Copy a catalog ingredient into an event as its own stock-isolated line.
+/// Stock and purchase history are NOT copied — the event starts at zero,
+/// the whole point of isolation (Fase 3.3 decision).
+pub async fn ingredient_copy_to_event(db: &Database, ingredient_id: i64, event_id: i64) -> LibsqlResult<Ingredient> {
+    let conn = get_conn(db).await?;
+    conn.execute(
+        "INSERT INTO ingredients (name, unit, price_per_unit, category_id, favorite, event_id)
+         SELECT name, unit, price_per_unit, category_id, 0, ?2 FROM ingredients WHERE id = ?1",
+        params![ingredient_id, event_id],
+    ).await?;
+    let new_id = conn.last_insert_rowid();
+
+    let mut rows = conn.query(
+        "SELECT id, name, unit, price_per_unit, category_id, created_at, updated_at, favorite
+         FROM ingredients WHERE id = ?1",
+        params![new_id],
+    ).await?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    row_to_ingredient(&row)
+}
+
+/// Move an ingredient out of its event and into the shared catalog for good —
+/// the reverse of ingredient_copy_to_event. Stock and purchase history travel
+/// with it (same id), so whatever stock is left becomes catalog stock.
+///
+/// If a catalog ingredient already has the same name, the promoted ingredient
+/// is renamed to "Name (Event Name)" so the two don't look identical in lists —
+/// mirrors recipe_promote_to_catalog.
+pub async fn ingredient_promote_to_catalog(db: &Database, id: i64) -> LibsqlResult<Ingredient> {
+    let conn = get_conn(db).await?;
+
+    let mut rows = conn.query("SELECT name, event_id FROM ingredients WHERE id = ?1", params![id]).await?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    let (name, event_id): (String, Option<i64>) = (row.get(0)?, row.get(1)?);
+    drop(rows);
+
+    let mut final_name = name.clone();
+    if let Some(event_id) = event_id {
+        let mut dup_rows = conn.query(
+            "SELECT 1 FROM ingredients WHERE event_id IS NULL AND name = ?1 AND id != ?2",
+            params![name.clone(), id],
+        ).await?;
+        if dup_rows.next().await?.is_some() {
+            let mut event_rows = conn.query("SELECT name FROM events WHERE id = ?1", params![event_id]).await?;
+            if let Some(event_row) = event_rows.next().await? {
+                let event_name: String = event_row.get(0)?;
+                final_name = format!("{} ({})", name, event_name);
+            }
+        }
+    }
+
+    conn.execute(
+        "UPDATE ingredients SET name = ?1, event_id = NULL, updated_at = datetime('now') WHERE id = ?2",
+        params![final_name, id],
+    ).await?;
+
+    let mut rows = conn.query(
+        "SELECT id, name, unit, price_per_unit, category_id, created_at, updated_at, favorite
+         FROM ingredients WHERE id = ?1",
+        params![id],
+    ).await?;
+    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+    row_to_ingredient(&row)
 }
 
 /// Create ingredient
@@ -883,9 +968,9 @@ pub async fn create_ingredient(db: &Database, input: IngredientInput) -> LibsqlR
     let category_id: Option<i64> = input.category.and_then(|c| c.parse().ok());
 
     conn.execute(
-        "INSERT INTO ingredients (name, unit, price_per_unit, category_id, favorite)
-         VALUES (?1, ?2, ?3, ?4, 0)",
-        params![input.name, unit_str, input.price_per_unit, category_id],
+        "INSERT INTO ingredients (name, unit, price_per_unit, category_id, favorite, event_id)
+         VALUES (?1, ?2, ?3, ?4, 0, ?5)",
+        params![input.name, unit_str, input.price_per_unit, category_id, input.event_id],
     ).await?;
 
     let id = conn.last_insert_rowid();
@@ -1213,6 +1298,7 @@ pub async fn stock_list(db: &Database) -> LibsqlResult<Vec<StockItem>> {
         "SELECT s.id, s.ingredient_id, i.name, i.unit, s.quantity, s.min_quantity, s.updated_at
          FROM stock s
          JOIN ingredients i ON s.ingredient_id = i.id
+         WHERE i.event_id IS NULL
          ORDER BY i.name",
         (),
     ).await?;
@@ -2466,6 +2552,17 @@ pub async fn delete_event(db: &Database, id: i64) -> LibsqlResult<()> {
         params![id],
     ).await?;
     conn.execute("DELETE FROM recipes WHERE event_id = ?1", params![id]).await?;
+    // Fase 3.3: event-scoped ingredients — clear stock/purchases before the
+    // ingredient rows themselves (stock_purchases.ingredient_id is RESTRICT).
+    conn.execute(
+        "DELETE FROM stock WHERE ingredient_id IN (SELECT id FROM ingredients WHERE event_id = ?1)",
+        params![id],
+    ).await?;
+    conn.execute(
+        "DELETE FROM stock_purchases WHERE ingredient_id IN (SELECT id FROM ingredients WHERE event_id = ?1)",
+        params![id],
+    ).await?;
+    conn.execute("DELETE FROM ingredients WHERE event_id = ?1", params![id]).await?;
     conn.execute("DELETE FROM events WHERE id = ?1", params![id]).await?;
     Ok(())
 }
@@ -3026,6 +3123,7 @@ pub async fn import_data(db: &Database, data: ImportData) -> LibsqlResult<Import
             unit: ing.unit,
             price_per_unit: ing.price_per_unit,
             category: ing.category,
+            event_id: None,
         };
         match create_ingredient(db, input).await {
             Ok(_) => result.ingredients_created += 1,
@@ -3366,7 +3464,8 @@ pub async fn get_dashboard_stats(db: &Database) -> LibsqlResult<DashboardStats> 
 
     // Low stock count (quantity <= min_quantity and quantity > 0)
     let mut rows = conn.query(
-        "SELECT COUNT(*) FROM stock WHERE quantity > 0 AND quantity <= min_quantity",
+        "SELECT COUNT(*) FROM stock s JOIN ingredients i ON s.ingredient_id = i.id
+         WHERE i.event_id IS NULL AND s.quantity > 0 AND s.quantity <= s.min_quantity",
         (),
     ).await?;
     let low_stock_count: i64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
@@ -3400,7 +3499,7 @@ pub async fn get_dashboard_stats(db: &Database) -> LibsqlResult<DashboardStats> 
     // empty (SUM over no rows = NULL -> COALESCE(NULL, 0.0) = 0.0 REAL).
     // With integer 0, libsql row.get::<f64>() panics ("invalid value type").
     let mut rows = conn.query(
-        "SELECT COALESCE(SUM(s.quantity * i.price_per_unit), 0.0) FROM stock s JOIN ingredients i ON s.ingredient_id = i.id",
+        "SELECT COALESCE(SUM(s.quantity * i.price_per_unit), 0.0) FROM stock s JOIN ingredients i ON s.ingredient_id = i.id WHERE i.event_id IS NULL",
         (),
     ).await?;
     let total_stock_value: f64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
@@ -3470,6 +3569,7 @@ pub async fn get_recent_activity(db: &Database, limit: u32) -> LibsqlResult<Vec<
         SELECT s.id, i.name, s.updated_at, 'stock_updated' as type, 'ingredient' as entity_type
         FROM stock s
         JOIN ingredients i ON s.ingredient_id = i.id
+        WHERE i.event_id IS NULL
         ORDER BY s.updated_at DESC
         LIMIT ?1
         "#,
@@ -3732,12 +3832,12 @@ pub async fn get_low_stock_ingredients(db: &Database, threshold: f64) -> LibsqlR
 
     let mut rows = conn.query(
         r#"
-        SELECT s.id, s.ingredient_id, s.ingredient_name, s.ingredient_unit, 
+        SELECT s.id, s.ingredient_id, s.ingredient_name, s.ingredient_unit,
                s.quantity, s.min_quantity, i.price_per_unit, s.updated_at
         FROM stock s
         JOIN ingredients i ON s.ingredient_id = i.id
-        WHERE s.quantity > 0 AND s.quantity <= s.min_quantity
-           OR s.quantity <= ?1
+        WHERE i.event_id IS NULL
+          AND (s.quantity > 0 AND s.quantity <= s.min_quantity OR s.quantity <= ?1)
         ORDER BY (s.quantity / NULLIF(s.min_quantity, 0)) ASC
         "#,
         params![threshold],
@@ -3882,7 +3982,8 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
         SELECT s.name, COALESCE(SUM(sp.total_price), 0.0) AS total
         FROM stock_purchases sp
         JOIN suppliers s ON sp.supplier_id = s.id
-        WHERE date(sp.purchase_date) >= date(?1)
+        JOIN ingredients i ON sp.ingredient_id = i.id
+        WHERE i.event_id IS NULL AND date(sp.purchase_date) >= date(?1)
         GROUP BY s.name
         ORDER BY total DESC
         "#,
@@ -3959,7 +4060,7 @@ pub async fn get_stock_trends(db: &Database, days: u32) -> LibsqlResult<Vec<Stoc
         SELECT s.ingredient_id, i.name, i.unit, s.quantity, i.price_per_unit
         FROM stock s
         JOIN ingredients i ON s.ingredient_id = i.id
-        WHERE s.quantity > 0
+        WHERE i.event_id IS NULL AND s.quantity > 0
         ORDER BY i.name
         "#,
         (),
@@ -5066,7 +5167,7 @@ mod fase3_stock_tests {
     async fn stock_purchase_round_trips_brand_and_supplier() {
         let db = test_db().await;
         let ingredient = create_ingredient(&db, IngredientInput {
-            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.0, category: None,
+            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.0, category: None, event_id: None,
         }).await.unwrap();
         let supplier = create_supplier(&db, SupplierInput {
             name: "Continente".into(), contact: None, notes: None,
@@ -5100,7 +5201,7 @@ mod fase3_stock_tests {
     async fn recipe_cost_uses_weighted_average_across_brands() {
         let db = test_db().await;
         let ingredient = create_ingredient(&db, IngredientInput {
-            name: "Azeite".into(), unit: Unit::Liter, price_per_unit: 10.0, category: None,
+            name: "Azeite".into(), unit: Unit::Liter, price_per_unit: 10.0, category: None, event_id: None,
         }).await.unwrap();
 
         // 1L at 4€ + 3L at 8€ -> weighted avg = (4 + 24) / 4 = 7€/L
@@ -5128,7 +5229,7 @@ mod fase3_stock_tests {
     async fn marking_shopping_item_purchased_creates_a_lot() {
         let db = test_db().await;
         let ingredient = create_ingredient(&db, IngredientInput {
-            name: "Leite".into(), unit: Unit::Liter, price_per_unit: 1.0, category: None,
+            name: "Leite".into(), unit: Unit::Liter, price_per_unit: 1.0, category: None, event_id: None,
         }).await.unwrap();
         let list = create_shopping_list(&db, "Lista".into(), vec![]).await.unwrap();
         let item = shopping_list_add_item(&db, list.id.unwrap(), ShoppingItemInput {
@@ -5158,7 +5259,7 @@ mod fase3_stock_tests {
     async fn event_recipe_copy_is_isolated_from_catalog() {
         let db = test_db().await;
         let ingredient = create_ingredient(&db, IngredientInput {
-            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.0, category: None,
+            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.0, category: None, event_id: None,
         }).await.unwrap();
         let base = create_recipe(&db, RecipeInput {
             name: "Pão".into(), category: "Pão".into(), portions: 4,
@@ -5208,7 +5309,7 @@ mod fase3_stock_tests {
     async fn event_exclusive_recipe_can_be_promoted_to_catalog() {
         let db = test_db().await;
         let ingredient = create_ingredient(&db, IngredientInput {
-            name: "Ovos".into(), unit: Unit::Piece, price_per_unit: 0.2, category: None,
+            name: "Ovos".into(), unit: Unit::Piece, price_per_unit: 0.2, category: None, event_id: None,
         }).await.unwrap();
         let event = create_event(&db, EventInput {
             name: "Aniversário".into(), event_date: None, notes: None,
@@ -5242,7 +5343,7 @@ mod fase3_stock_tests {
     async fn promoting_recipe_with_duplicate_name_appends_event_name() {
         let db = test_db().await;
         let ingredient = create_ingredient(&db, IngredientInput {
-            name: "Farinha".into(), unit: Unit::Gram, price_per_unit: 0.002, category: None,
+            name: "Farinha".into(), unit: Unit::Gram, price_per_unit: 0.002, category: None, event_id: None,
         }).await.unwrap();
         let event = create_event(&db, EventInput {
             name: "Casamento".into(), event_date: None, notes: None,
@@ -5266,6 +5367,109 @@ mod fase3_stock_tests {
 
         let promoted = recipe_promote_to_catalog(&db, exclusive.recipe.id).await.unwrap();
         assert_eq!(promoted.recipe.name, "Bolo (Casamento)");
+    }
+
+    /// Ingredient copy starts with zero stock, isolated from the catalog
+    /// original — buying stock for the event copy must not create or alter
+    /// a stock row for the catalog ingredient (Fase 3.3, model (a)).
+    #[tokio::test]
+    async fn event_ingredient_copy_is_stock_isolated_from_catalog() {
+        let db = test_db().await;
+        let catalog = create_ingredient(&db, IngredientInput {
+            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.0, category: None, event_id: None,
+        }).await.unwrap();
+        let event = create_event(&db, EventInput {
+            name: "Casamento".into(), event_date: Some("2026-08-01".into()), notes: None,
+        }).await.unwrap();
+
+        let copy = ingredient_copy_to_event(&db, catalog.id, event.id).await.unwrap();
+        assert_eq!(copy.name, "Farinha");
+        assert_ne!(copy.id, catalog.id);
+
+        // Catalog listing must not include the event copy.
+        let catalog_list = ingredients_list(&db).await.unwrap();
+        assert!(catalog_list.iter().all(|i| i.id != copy.id));
+        let event_list = event_ingredients_list(&db, event.id).await.unwrap();
+        assert_eq!(event_list.len(), 1);
+
+        // Buying stock for the event copy must not touch the catalog ingredient.
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: copy.id,
+            quantity: 10.0,
+            unit: Unit::Kilogram,
+            price_per_unit: 1.0,
+            total_price: 10.0,
+            is_discount: false,
+            discount_percent: 0.0,
+            purchase_date: chrono::Utc::now(),
+            supplier_id: None,
+            brand: None,
+            notes: None,
+        }).await.unwrap();
+        let event_stock = get_stock(&db, copy.id).await.unwrap();
+        assert_eq!(event_stock.quantity, 10.0);
+        assert!(get_stock(&db, catalog.id).await.is_err());
+
+        // Catalog-facing stock views must not leak the event copy's stock row.
+        let catalog_stock = stock_list(&db).await.unwrap();
+        assert!(catalog_stock.iter().all(|s| s.ingredient_id != copy.id));
+
+        // Deleting the event must cascade-remove the copy's stock, purchases and row.
+        delete_event(&db, event.id).await.unwrap();
+        assert!(event_ingredients_list(&db, event.id).await.unwrap().is_empty());
+        assert!(get_stock(&db, copy.id).await.is_err());
+        assert!(stock_purchases_list(&db, copy.id).await.unwrap().is_empty());
+    }
+
+    /// An ingredient authored directly inside an event (not copied from the
+    /// catalog) must stay invisible to the catalog until explicitly
+    /// promoted, at which point its stock/purchase history travels with it.
+    #[tokio::test]
+    async fn event_exclusive_ingredient_can_be_promoted_to_catalog() {
+        let db = test_db().await;
+        let event = create_event(&db, EventInput {
+            name: "Aniversário".into(), event_date: None, notes: None,
+        }).await.unwrap();
+
+        let exclusive = create_ingredient(&db, IngredientInput {
+            name: "Bolo especial".into(), unit: Unit::Piece, price_per_unit: 5.0, category: None,
+            event_id: Some(event.id),
+        }).await.unwrap();
+
+        // Invisible to the catalog while scoped to the event.
+        let catalog = ingredients_list(&db).await.unwrap();
+        assert!(catalog.iter().all(|i| i.id != exclusive.id));
+        let event_ingredients = event_ingredients_list(&db, event.id).await.unwrap();
+        assert_eq!(event_ingredients.len(), 1);
+
+        ingredient_promote_to_catalog(&db, exclusive.id).await.unwrap();
+
+        let catalog_after = ingredients_list(&db).await.unwrap();
+        assert!(catalog_after.iter().any(|i| i.id == exclusive.id));
+        let event_ingredients_after = event_ingredients_list(&db, event.id).await.unwrap();
+        assert!(event_ingredients_after.is_empty());
+    }
+
+    /// Promoting an ingredient whose name collides with an existing catalog
+    /// ingredient appends "(Event Name)" so the two aren't indistinguishable.
+    #[tokio::test]
+    async fn promoting_ingredient_with_duplicate_name_appends_event_name() {
+        let db = test_db().await;
+        let event = create_event(&db, EventInput {
+            name: "Casamento".into(), event_date: None, notes: None,
+        }).await.unwrap();
+
+        create_ingredient(&db, IngredientInput {
+            name: "Farinha".into(), unit: Unit::Gram, price_per_unit: 0.002, category: None, event_id: None,
+        }).await.unwrap();
+
+        let exclusive = create_ingredient(&db, IngredientInput {
+            name: "Farinha".into(), unit: Unit::Gram, price_per_unit: 0.003, category: None,
+            event_id: Some(event.id),
+        }).await.unwrap();
+
+        let promoted = ingredient_promote_to_catalog(&db, exclusive.id).await.unwrap();
+        assert_eq!(promoted.name, "Farinha (Casamento)");
     }
 
     /// seed_demo_data must include a demo event (copied + exclusive recipe),
@@ -5378,7 +5582,7 @@ mod fase3_stock_tests {
     async fn recipe_import_from_url_matches_existing_ingredient_by_name() {
         let db = test_db().await;
         create_ingredient(&db, IngredientInput {
-            name: "Rice".into(), unit: Unit::Gram, price_per_unit: 0.002, category: None,
+            name: "Rice".into(), unit: Unit::Gram, price_per_unit: 0.002, category: None, event_id: None,
         }).await.unwrap();
 
         // Exercise the same ingredient-matching path recipe_import_from_url uses,

@@ -13,7 +13,7 @@ import type { ShoppingList } from "../../crates/core/bindings/ShoppingList";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import type { Supplier } from "../../crates/core/bindings/Supplier";
 import type { ShoppingListMarkPurchasedInput } from "../../crates/core/bindings/ShoppingListMarkPurchasedInput";
-import { UNIT_LABELS_SHORT as UNIT_LABELS } from "../lib/units";
+import { UNIT_LABELS_SHORT as UNIT_LABELS, convertUnit } from "../lib/units";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -227,17 +227,22 @@ function AddItemModal({ isOpen, onClose, listId, ingredients, onAdd, t }: {
     } else if (selectedIngredient) {
       setLoading(true);
       try {
+        // price_per_unit is €/selectedIngredient.unit, but the list item's
+        // quantity may be entered in a different (but compatible) unit —
+        // convert before pricing, mirrors the fix in RecipesPage.computeCostLines.
+        const itemUnit = unit || selectedIngredient.unit;
+        const converted = convertUnit(quantity, itemUnit, selectedIngredient.unit);
         await invoke("shopping_list_add_item", {
           listId: listId,
           input: {
             ingredient_id: selectedIngredient.id,
             ingredient_name: selectedIngredient.name,
-            ingredient_unit: unit || selectedIngredient.unit,
+            ingredient_unit: itemUnit,
             needed_quantity: quantity,
             stock_quantity: 0,
             to_buy_quantity: quantity,
             category: category || "Outros",
-            estimated_cost: quantity * selectedIngredient.price_per_unit,
+            estimated_cost: (converted ?? quantity) * selectedIngredient.price_per_unit,
             purchased: false,
             notes: notes || undefined,
           }
