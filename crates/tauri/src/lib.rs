@@ -52,11 +52,15 @@ fn apply_native_theme() {}
 /// Database connection wrapper for Tauri state
 pub struct AppDb {
     pub db: Database,
+    /// Resolved app data directory — same root the DB file lives under.
+    /// Images/receipts must be stored here too, not via `dirs::data_dir()`
+    /// directly, or they end up in a different, non-namespaced root.
+    pub data_dir: std::path::PathBuf,
 }
 
 impl AppDb {
-    pub fn new(db: Database) -> Self {
-        Self { db }
+    pub fn new(db: Database, data_dir: std::path::PathBuf) -> Self {
+        Self { db, data_dir }
     }
 
     // Ingredients
@@ -447,11 +451,11 @@ impl AppDb {
 
     // ===== IMAGES =====
     pub async fn image_upload(&self, input: ImageUploadInput) -> Result<Image, String> {
-        mise_core::db::image_upload(&self.db, input).await.map_err(|e| e.to_string())
+        mise_core::db::image_upload(&self.db, input, &self.data_dir).await.map_err(|e| e.to_string())
     }
 
     pub async fn image_delete(&self, id: i64) -> Result<(), String> {
-        mise_core::db::image_delete(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::image_delete(&self.db, id, &self.data_dir).await.map_err(|e| e.to_string())
     }
 
     pub async fn image_set_primary(&self, id: i64) -> Result<Image, String> {
@@ -463,7 +467,7 @@ impl AppDb {
     }
 
     pub async fn image_read_base64(&self, id: i64) -> Result<String, String> {
-        mise_core::db::image_read_base64(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::image_read_base64(&self.db, id, &self.data_dir).await.map_err(|e| e.to_string())
     }
 
     pub async fn image_search_proxy(&self, query: String, per_page: Option<u32>) -> Result<Vec<ProxyImageResult>, String> {
@@ -485,7 +489,7 @@ impl AppDb {
 
     // ===== RECEIPT OCR =====
     pub async fn receipt_scan(&self, input: ReceiptScanInput) -> Result<ReceiptParseResult, String> {
-        mise_core::db::receipt_scan(&self.db, input).await.map_err(|e| e.to_string())
+        mise_core::db::receipt_scan(&self.db, input, &self.data_dir).await.map_err(|e| e.to_string())
     }
 
     pub async fn receipt_parse(&self, raw_text: String) -> Result<Vec<ParsedReceiptItem>, String> {
@@ -1402,10 +1406,10 @@ pub async fn initialize_app_state(app: &tauri::AppHandle) -> Result<(), String> 
         .resolve("mise", BaseDirectory::AppData)
         .map_err(|e| e.to_string())?;
 
-    let db = mise_core::db::open_db(Some(app_data_dir))
+    let db = mise_core::db::open_db(Some(app_data_dir.clone()))
         .await
         .map_err(|e| e.to_string())?;
-    app.manage(AppDb::new(db));
+    app.manage(AppDb::new(db, app_data_dir));
     Ok(())
 }
 

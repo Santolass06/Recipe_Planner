@@ -10,11 +10,7 @@ use serde_json;
 /// Open database connection with WAL mode and connection pooling
 /// If `app_data_dir` is provided, use it (for Android mobile); otherwise fall back to system data dir
 pub async fn open_db(app_data_dir: Option<PathBuf>) -> LibsqlResult<Database> {
-    let data_dir = if let Some(dir) = app_data_dir {
-        dir.join("mise")
-    } else {
-        get_data_dir().map_err(|e| libsql::Error::Misuse(e.to_string()))?
-    };
+    let data_dir = resolve_data_dir(app_data_dir).map_err(|e| libsql::Error::Misuse(e.to_string()))?;
     std::fs::create_dir_all(&data_dir).map_err(|e| libsql::Error::Misuse(e.to_string()))?;
 
     let db_path = data_dir.join("mise.db");
@@ -53,9 +49,14 @@ pub async fn get_conn(db: &Database) -> LibsqlResult<Connection> {
     Ok(conn)
 }
 
-/// Get data directory for the app (desktop fallback)
-fn get_data_dir() -> std::io::Result<PathBuf> {
-    if let Some(data_dir) = dirs::data_dir() {
+/// Resolve the app's data directory: `app_data_dir` if given (Tauri already
+/// resolves this to the app-identifier-namespaced path), otherwise a
+/// desktop fallback under the OS data dir. Single source of truth so the DB
+/// and the image storage (below) always agree on the same root.
+pub fn resolve_data_dir(app_data_dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
+    if let Some(dir) = app_data_dir {
+        Ok(dir)
+    } else if let Some(data_dir) = dirs::data_dir() {
         Ok(data_dir.join("mise"))
     } else {
         // Final fallback
@@ -4291,10 +4292,8 @@ fn row_to_image(row: &Row) -> LibsqlResult<Image> {
 }
 
 /// Save base64 image to file system and return path
-async fn save_base64_image(base64: &str, entity_type: &str, entity_id: i64) -> Result<String, String> {
+async fn save_base64_image(base64: &str, entity_type: &str, entity_id: i64, data_dir: &std::path::Path) -> Result<String, String> {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
-    
-    use dirs;
 
     // Decode base64
     let bytes = STANDARD.decode(base64).map_err(|e| e.to_string())?;
@@ -4324,27 +4323,21 @@ async fn save_base64_image(base64: &str, entity_type: &str, entity_id: i64) -> R
     // Create filename
     let filename = format!("{}_{}_{}.{}", entity_type, entity_id, chrono::Utc::now().timestamp_millis(), ext);
     
-    // Get app data directory
-    let data_dir = if let Some(dir) = dirs::data_dir() {
-        dir.join("mise").join("images")
-    } else {
-        std::env::current_dir().map_err(|e| e.to_string())?.join(".mise_data").join("images")
-    };
-    
-    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-    let file_path = data_dir.join(&filename);
-    
+    let images_dir = data_dir.join("images");
+    std::fs::create_dir_all(&images_dir).map_err(|e| e.to_string())?;
+    let file_path = images_dir.join(&filename);
+
     // Write file
     std::fs::write(&file_path, &bytes).map_err(|e| e.to_string())?;
-    
+
     // Return relative path
     Ok(format!("images/{}", filename))
 }
 
 /// Upload image for an entity
-pub async fn image_upload(db: &Database, input: ImageUploadInput) -> LibsqlResult<Image> {
+pub async fn image_upload(db: &Database, input: ImageUploadInput, data_dir: &std::path::Path) -> LibsqlResult<Image> {
     // Save file
-    let path = save_base64_image(&input.base64, input.entity_type.as_str(), input.entity_id).await
+    let path = save_base64_image(&input.base64, input.entity_type.as_str(), input.entity_id, data_dir).await
         .map_err(|e| libsql::Error::Misuse(e))?;
     
     let conn = get_conn(db).await?;
@@ -4373,25 +4366,23 @@ pub async fn image_upload(db: &Database, input: ImageUploadInput) -> LibsqlResul
 }
 
 /// Delete image
-pub async fn image_delete(db: &Database, id: i64) -> LibsqlResult<()> {
+pub async fn image_delete(db: &Database, id: i64, data_dir: &std::path::Path) -> LibsqlResult<()> {
     let conn = get_conn(db).await?;
-    
+
     // Get path first to delete file
     let mut rows = conn.query("SELECT path FROM images WHERE id = ?1", params![id]).await?;
     if let Some(row) = rows.next().await? {
         let path: String = row.get(0)?;
         // Try to delete file (ignore errors)
-        if let Some(data_dir) = dirs::data_dir() {
-            let _ = std::fs::remove_file(data_dir.join("mise").join(&path));
-        }
+        let _ = std::fs::remove_file(data_dir.join(&path));
     }
-    
+
     conn.execute("DELETE FROM images WHERE id = ?1", params![id]).await?;
     Ok(())
 }
 
 /// Read an image file's bytes as base64, for display via data: URL
-pub async fn image_read_base64(db: &Database, id: i64) -> LibsqlResult<String> {
+pub async fn image_read_base64(db: &Database, id: i64, data_dir: &std::path::Path) -> LibsqlResult<String> {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
 
     let conn = get_conn(db).await?;
@@ -4399,8 +4390,7 @@ pub async fn image_read_base64(db: &Database, id: i64) -> LibsqlResult<String> {
     let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
     let path: String = row.get(0)?;
 
-    let data_dir = dirs::data_dir().unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    let bytes = std::fs::read(data_dir.join("mise").join(&path))
+    let bytes = std::fs::read(data_dir.join(&path))
         .map_err(|e| libsql::Error::Misuse(e.to_string()))?;
 
     Ok(STANDARD.encode(bytes))
@@ -4749,13 +4739,11 @@ pub async fn stock_purchase_delete(db: &Database, id: i64) -> LibsqlResult<()> {
 // =====================================================================
 
 /// Save base64 image for receipt and return path
-async fn save_receipt_image(base64: &str) -> Result<String, String> {
+async fn save_receipt_image(base64: &str, data_dir: &std::path::Path) -> Result<String, String> {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
-    
-    use dirs;
 
     let bytes = STANDARD.decode(base64).map_err(|e| e.to_string())?;
-    
+
     let ext = if bytes.starts_with(b"\xFF\xD8\xFF") { "jpg" }
     else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") { "png" }
     else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") { "gif" }
@@ -4763,27 +4751,22 @@ async fn save_receipt_image(base64: &str) -> Result<String, String> {
     else { "jpg" };
 
     let filename = format!("receipt_{}.{}", chrono::Utc::now().timestamp_millis(), ext);
-    
-    let data_dir = if let Some(dir) = dirs::data_dir() {
-        dir.join("mise").join("images")
-    } else {
-        std::env::current_dir().map_err(|e| e.to_string())?.join(".mise_data").join("images")
-    };
-    
-    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-    let file_path = data_dir.join(&filename);
-    
+
+    let images_dir = data_dir.join("images");
+    std::fs::create_dir_all(&images_dir).map_err(|e| e.to_string())?;
+    let file_path = images_dir.join(&filename);
+
     std::fs::write(&file_path, &bytes).map_err(|e| e.to_string())?;
-    
+
     Ok(format!("images/{}", filename))
 }
 
 /// Scan receipt image with Tesseract OCR
-pub async fn receipt_scan(db: &Database, input: ReceiptScanInput) -> LibsqlResult<ReceiptParseResult> {
+pub async fn receipt_scan(db: &Database, input: ReceiptScanInput, data_dir: &std::path::Path) -> LibsqlResult<ReceiptParseResult> {
     // Save image
-    let image_path = save_receipt_image(&input.base64_image).await
+    let image_path = save_receipt_image(&input.base64_image, data_dir).await
         .map_err(|e| libsql::Error::Misuse(e))?;
-    
+
     // Create import record
     let conn = get_conn(db).await?;
     conn.execute(
@@ -4791,13 +4774,8 @@ pub async fn receipt_scan(db: &Database, input: ReceiptScanInput) -> LibsqlResul
         params![image_path.clone()],
     ).await?;
     let import_id = conn.last_insert_rowid();
-    
+
     // Run Tesseract OCR
-    let data_dir = if let Some(dir) = dirs::data_dir() {
-        dir.join("mise")
-    } else {
-        std::env::current_dir().map_err(|e| libsql::Error::Misuse(e.to_string()))?.join(".mise_data")
-    };
     let full_image_path = data_dir.join(&image_path);
     
     // Use tesseract command line
@@ -5595,5 +5573,39 @@ mod fase3_stock_tests {
             params![parsed.name_guess.clone()],
         ).await.unwrap();
         assert!(rows.next().await.unwrap().is_some());
+    }
+
+    /// Regression test for the data-root divergence bug (Fase 4, 2026-07-10):
+    /// image_upload/read/delete used to resolve `dirs::data_dir()` directly,
+    /// a root different from (and not namespaced like) the Tauri-resolved
+    /// `app_data_dir` the DB lives under. All three now take `data_dir`
+    /// explicitly and must agree on the same root as each other.
+    #[tokio::test]
+    async fn image_round_trips_through_the_given_data_dir() {
+        let db = test_db().await;
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let data_dir = std::env::temp_dir().join(format!("mise_test_images_{unique}"));
+
+        // 1x1 red pixel PNG
+        let base64_1x1_png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
+        let uploaded = image_upload(&db, ImageUploadInput {
+            entity_type: ImageEntityType::Ingredient,
+            entity_id: 1,
+            base64: base64_1x1_png.into(),
+            mime_type: "image/png".into(),
+        }, &data_dir).await.unwrap();
+
+        // File must land under the given data_dir, not dirs::data_dir().
+        assert!(data_dir.join(&uploaded.path).exists());
+
+        let read_back = image_read_base64(&db, uploaded.id, &data_dir).await.unwrap();
+        assert_eq!(read_back, base64_1x1_png);
+
+        image_delete(&db, uploaded.id, &data_dir).await.unwrap();
+        assert!(!data_dir.join(&uploaded.path).exists());
+
+        let _ = std::fs::remove_dir_all(&data_dir);
     }
 }
