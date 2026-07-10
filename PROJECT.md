@@ -821,15 +821,21 @@ buraco e é pré-requisito do Polishing.
   aqui. Migração cobre apenas `*.db`/`*.db-wal`/`*.db-shm` e a pasta
   `images/` — sem lógica de "mover modelos de OCR", porque essa decisão
   fica deliberadamente adiada (ver item seguinte).
-- [ ] **Self-hospedar assets do `tesseract.js`** — fecha o `cdn.jsdelivr.net`
-  temporário na CSP (ver Fase 2) sem depender da decisão de motor de OCR
-  nativo. Bundlar o worker script, core `.wasm` e `.traineddata` de
-  `por`+`eng` como assets estáticos da app e apontar `createWorker`
-  (`ReceiptScannerPage.tsx`) para os paths locais (`workerPath`/
-  `corePath`/`langPath`) em vez dos defaults de CDN. Custo: ~10-20MB
-  adicionais no pacote (o motor nativo apenas adia esse custo para um
-  download em runtime, não é razão para preferir o nativo). Depois disto,
-  a CSP fica sem exceções externas.
+- [x] **Self-hospedar assets do `tesseract.js`** ✅ CONCLUÍDA (2026-07-10) —
+  fecha o `cdn.jsdelivr.net` temporário na CSP (ver Fase 2) sem depender da
+  decisão de motor de OCR nativo. Worker script, os 3 variantes `-lstm`
+  do core WASM (plain/simd/relaxedsimd — os únicos que o modo LSTM-only
+  usado pelo scanner pode pedir) e `.traineddata.gz` de `por`+`eng` foram
+  copiados para `public/tessdata/`, e `createWorker`
+  (`ReceiptScannerPage.tsx`) passa a apontar `workerPath`/`corePath`/
+  `langPath` para lá em vez dos defaults de CDN. `connect-src
+  https://cdn.jsdelivr.net` removido do `tauri.conf.json`. Custo real
+  medido: ~37MB adicionais no pacote (estimativa inicial de 10-20MB estava
+  errada — o motor nativo apenas adiaria esse custo para um download em
+  runtime, não é razão para preferir o nativo). Validado com `tsc`/`vite
+  build` limpos e teste visual em browser (upload → OCR → extração →
+  revisão com itens reais em português), rede confirmada sem nenhum pedido
+  a `cdn.jsdelivr.net`.
 - [ ] **Teste em máquina limpa** — instalar o pacote numa máquina sem Nix
   e validar o essencial de ponta a ponta (criar ingrediente/receita,
   compra de stock, scanner por upload, evento). Inclui o teste da câmara

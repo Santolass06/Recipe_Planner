@@ -93,6 +93,12 @@ export default function ReceiptScannerPage() {
   const initWorker = async () => {
     try {
       const worker = await createWorker("por", 1, {
+        // Assets self-hospedados (ver PROJECT.md Fase 4) — sem isto o
+        // tesseract.js descarrega de cdn.jsdelivr.net, exigindo essa
+        // exceção na CSP.
+        workerPath: "/tessdata/worker.min.js",
+        corePath: "/tessdata/core",
+        langPath: "/tessdata/lang",
         logger: (m: any) => {
           if (m.status === "recognizing text") {
             setOcrProgress(`OCR: ${Math.round(m.progress * 100)}%`);
