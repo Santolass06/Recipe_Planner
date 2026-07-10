@@ -23,20 +23,31 @@ log histórico técnico, ver banner no topo desse ficheiro).
 
 ---
 
-## Ordem de execução (revisão de 2026-07-06)
+## Ordem de execução (revisão de 2026-07-10)
 
 Sequência decidida após rever o plano contra o estado real do código:
 
-1. **3.3 — Stock isolado por evento** — modelo (a) fechado, plano de
-   implementação detalhado na secção 3.3.
-2. **Decisão de OCR** com recibos reais (ver [[OCR — Digitalização de
-   recibos]]). Tem um acoplamento de segurança que sobe a prioridade:
-   fechar o OCR fecha também o buraco temporário da CSP
-   (`cdn.jsdelivr.net` em `connect-src`, ver Fase 2).
-3. **Fase 4 — Distribuição** (secção nova abaixo) — empacotamento, fix do
+1. ~~**3.3 — Stock isolado por evento**~~ ✅ concluída, fundida em `main`
+   (inclui fix do bug de conversão de unidades no custo por porção).
+2. **3.5 — Segregação de artigos do recibo por código de IVA** (secção
+   nova, ver 3.5 abaixo) — construída sobre o motor OCR atual
+   (`tesseract.js`), não depende da decisão de motor nativo. Validada com
+   recibos reais (ver [[OCR — Digitalização de recibos]]).
+3. **Decisão de motor OCR nativo** (Rust `ocrs`+`rten`, ver [[OCR —
+   Digitalização de recibos]]) — mantém o acoplamento de segurança que
+   sobe a prioridade: fechar isto fecha também o buraco temporário da CSP
+   (`cdn.jsdelivr.net` em `connect-src`, ver Fase 2). **Vision LLM local
+   (Ollama) sai desta decisão — adiado para a Fase de experimentação,
+   depois do Polishing** (decisão de 2026-07-10): peso de infraestrutura
+   (runtime externo) desproporcional antes de haver utilizadores reais a
+   validar se a app básica já serve.
+4. **Fase 4 — Distribuição** (secção abaixo) — empacotamento, fix do
    path `mise/mise/mise.db` com migração de dados, teste em máquina limpa
    (que também resolve ou descarta o bug da câmara da Fase 0).
-4. **Utilizadores reais a testar** → só depois, **Fase de Polishing**.
+5. **Utilizadores reais a testar** → só depois, **Fase de Polishing**.
+6. **Fase de experimentação** (nova, pós-Polishing) — Vision LLM local
+   para OCR de recibos, e outras ideias que dependam de IA local pesada,
+   só depois de haver sinal real de utilização a justificar o custo.
 
 God-components (adiado na Fase 2) e i18n de vocabulário só entram se o
 feedback de utilização real apontar para lá.
@@ -597,6 +608,83 @@ dependência nova necessária.
 
 ---
 
+### 3.5 — Segregação de artigos do recibo por código de IVA (2026-07-10) ✅ CONCLUÍDA
+
+Problema: um recibo mistura alimentos (bananas) com não-alimentos (cremes),
+e o utilizador do scanner só quer os alimentos entrarem como ingredientes.
+Discutidas duas abordagens — dar match só a ingredientes já existentes na
+lista, ou ter uma base de dados grande de nomes de alimentos — e pedida
+advisory adicional (Opus) para uma terceira via.
+
+**Achado, validado com 2 recibos reais (Pingo Doce, 2026-07-10):** cada
+linha de artigo no talão vem prefixada com uma letra de código de taxa de
+IVA (`E`, `C`, `I`, ...), e o rodapé do recibo tem uma tabela "Resumo IVA"
+que mapeia cada letra a uma taxa (`C 6%` = reduzida, `E 23%` = normal,
+`I 0%` = isento/depósito). Os subtotais por letra na tabela batem
+exatamente com a soma das linhas dessa letra — confirma que não é ruído de
+OCR, é dado fiscal real impresso. Caso concreto observado: "E DR. BAYARD
+200G" (ração animal) veio `E 23%` (não-alimentar) e "C FRAMBOESA 250 GR NF"
+(fruta) veio `C 6%` (alimentar) — exatamente o caso bananas-vs-cremes.
+
+**Teste de legibilidade OCR** (spike, `tesseract.js`, sem pré-processamento,
+sobre fotos reais): letras `C` e `E` (as relevantes para alimentar/
+não-alimentar) leram-se corretamente em 4/4 linhas testadas; a letra `I`
+(0%, só usada em depósito de embalagem — nunca um ingrediente) confundiu-se
+com `T` ou desapareceu — não compromete a funcionalidade, porque um código
+desconhecido cai no comportamento por omissão (não pré-selecionado).
+
+**Decisão de âmbito:** esta funcionalidade não depende da escolha de motor
+OCR (nativo vs. Vision LLM) — funciona sobre texto OCR de qualquer motor,
+incluindo o `tesseract.js` atual. Construir agora, sobre o motor atual; a
+camada de parsing é reaproveitável quando a decisão de motor avançar.
+
+Plano de implementação:
+
+- [x] **Camada de parsing do "Resumo IVA"**: extrair por linha de artigo
+  `<LETRA> nome … preço`; extrair a tabela "Resumo IVA" do rodapé
+  (`letra → taxa%`); construir o mapa letra→taxa.
+- [x] **Classificação por omissão**: taxa reduzida/intermédia (6%/13%) →
+  provável alimentar, pré-selecionado; taxa normal (23%) → provável
+  não-alimentar, não pré-selecionado; taxa 0% ou letra desconhecida → não
+  pré-selecionado, assinalado como "não reconhecido".
+- [x] **Guardrail de correção**: o código de IVA só define a pré-seleção
+  por omissão, nunca um filtro rígido — 23% não significa sempre
+  "não-alimentar" (chocolate, refrigerantes engarrafados também são 23%).
+  Excluir um alimento por engano é pior que deixar passar um não-alimentar
+  que o utilizador desmarca à mão.
+- [x] **UI de triagem** em `ReceiptScannerPage.tsx` (ler o ficheiro
+  completo antes de planear o diff em detalhe — já faz parsing de itens
+  com vocabulário pack/bottle/box/can/jar/sachet, fora do enum `Unit`).
+  Extensão da UI existente, não reescrita: checkbox por linha, valor por
+  omissão vindo da classificação, linhas não reconhecidas continuam
+  adicionáveis manualmente. Só os itens marcados são adicionados como
+  ingredientes/stock.
+- [x] **Sinal secundário mantido**: name-match contra a lista de
+  ingredientes existentes continua a alimentar a pré-seleção em paralelo
+  ao código de IVA, e serve de fallback quando não há tabela "Resumo IVA"
+  (outras cadeias além de Pingo Doce — não verificado ainda).
+
+Validado com `tesseract.js` real sobre os 2 recibos Pingo Doce e com teste
+visual em browser (upload → OCR → review → import). Auto-check
+(`parseVatSummary`, 10/10) e `tsc`/`vite build` limpos.
+
+**Bug encontrado e corrigido durante a validação** (bloqueador, mesma
+classe de erro que já tinha bloqueado merge numa sessão anterior): o preço
+lido do OCR por linha é o total pago naquela linha (ex. "FRAMBOESA 250 GR
+… 3,69" = 3,69€ pelo pacote todo), não um preço por unidade — mas
+`confirmImport`/`reviewTotal` faziam `quantity × price`, o que com
+quantidade extraída do nome do artigo (ex. "250" de "250 GR") dava totais
+absurdos (3,69€ virava 922,50€). Corrigido: `total_price` passa a ser
+`line.price` diretamente, e `price_per_unit` passa a ser derivado
+(`price / quantity`) em vez de reutilizar o total como se fosse unitário.
+A quantidade extraída (ex. 250g) mantém-se correta para efeitos de stock —
+o problema era só a matemática do preço.
+
+Em aberto: generalização a outras cadeias portuguesas (Continente, Lidl,
+Auchan, etc.) — só verificado com Pingo Doce até agora.
+
+---
+
 ## Roadmap i18n
 
 Implementado agora (branch `feature/i18n-full-translation`): PT/EN completos
@@ -645,10 +733,19 @@ documentado aqui; para retomar, reimplementar a partir desta descrição.
   correr, download de modelo maior, inferência mais lenta e mais pesada em
   RAM que a opção nativa.
 
-**Decisão:** por fechar. Nenhuma das duas foi validada visualmente ainda.
-Critério sugerido para decidir: se a precisão de parsing da opção nativa
-for aceitável nos recibos reais de teste, preferir essa (sem dependência
-externa); caso contrário, avaliar o custo de exigir Ollama instalado.
+**Decisão (revista 2026-07-10):** Vision LLM local sai desta decisão —
+adiado para a **Fase de experimentação, depois do Polishing** (peso de
+runtime externo desproporcional antes de haver utilizadores reais). Fica
+só a decidir: migrar para nativa (Rust `ocrs`+`rten`, fecha o buraco de CSP
+`cdn.jsdelivr.net`) ou manter `tesseract.js`. Critério: se a precisão de
+parsing da opção nativa for aceitável nos recibos reais de teste, preferir
+essa (sem dependência externa, sem CDN); caso contrário, manter
+`tesseract.js` até a Fase de experimentação reavaliar o Vision LLM.
+
+**Nota:** a segregação de artigos alimentares/não-alimentares por código de
+IVA (ver 3.5 no plano principal) não depende desta decisão — funciona sobre
+o texto OCR de qualquer motor e já está a ser construída sobre
+`tesseract.js`.
 
 ## Tradução de vocabulário (unidades, ingredientes, passos)
 
@@ -744,12 +841,24 @@ heurística. Não é trabalho novo — é validar/comparar decisões já tomadas
 - **Tradução de vocabulário** (unidades, ingredientes, passos de receita) —
   ver [[Tradução de vocabulário (unidades, ingredientes, passos)]]. Unidades
   ainda aparecem em PT independentemente do toggle de língua.
-- **Escolha de motor de OCR** — ver [[OCR — Digitalização de recibos]].
-  Precisa de teste com recibos reais para decidir entre nativo (Rust) e
-  Vision LLM local. **Nota (2026-07-06): promovido para antes da Fase 4
-  na ordem de execução** — fechar o OCR fecha também o `cdn.jsdelivr.net`
-  temporário na CSP (ver Fase 2), ou seja, é um item de segurança, não só
-  de qualidade de OCR.
+- **Escolha de motor de OCR nativo vs. `tesseract.js`** — ver [[OCR —
+  Digitalização de recibos]]. Precisa de teste com recibos reais. **Nota
+  (2026-07-06): promovido para antes da Fase 4 na ordem de execução** —
+  fechar isto fecha também o `cdn.jsdelivr.net` temporário na CSP (ver
+  Fase 2), ou seja, é um item de segurança, não só de qualidade de OCR.
+  Vision LLM local saiu desta escolha (ver Fase de experimentação abaixo).
+
+---
+
+## Fase de experimentação (nova, 2026-07-10)
+
+Depois do Polishing, com sinal real de utilização a validar que vale a
+pena investir em infraestrutura de IA local mais pesada:
+
+- **Vision LLM local para OCR de recibos** (Ollama + `moondream`) — ver
+  [[OCR — Digitalização de recibos]]. Adiado deliberadamente do item
+  "Escolha de motor de OCR": exige runtime externo instalado e a correr,
+  peso desproporcional antes de haver utilizadores reais.
 
 ---
 
