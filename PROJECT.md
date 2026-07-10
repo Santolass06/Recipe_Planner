@@ -795,32 +795,78 @@ buraco e é pré-requisito do Polishing.
   deve ser produzido/validado num ambiente limpo — a máquina de dev tem
   Nix/apt misturados (ver os fixes de EGL/TLS/pkg-config na Fase 0), o que
   a torna má referência para o que os utilizadores vão receber.
-- [ ] **Fix do path `mise/mise/mise.db` + migração de dados.** Achado na
-  Fase 0 (ver nota no item da limpeza do `mise.db` órfão): `open_db()` em
-  `crates/core/src/db.rs` faz `dir.join("mise")` sobre um `app_data_dir`
-  que o Tauri já resolve para `.../mise`, pelo que a BD ativa vive em
-  `.../mise/mise/mise.db`. Estava "para a Fase 2", mas a Fase 2 foi
-  encerrada sem ele — re-alojado aqui deliberadamente: corrigir ANTES de
-  existirem instalações reais (depois o custo de migração multiplica por
-  utilizador). Fix: remover o `join` redundante + lógica de arranque que,
-  se `.../mise/mise/mise.db` existir e o path novo não, move o ficheiro
-  (incluindo WAL/journal ao lado, com a app fechada — fazer no arranque
-  antes de abrir a BD).
-  **Achado adicional (2026-07-10, análise de acoplamento com OCR):** as
-  imagens de recibo (`save_receipt_image`, `crates/core/src/db.rs` linhas
-  ~4329/4768) resolvem o diretório via `dirs::data_dir()` diretamente
-  (`.../mise/images`), ignorando o `app_data_dir` do Tauri — uma raiz
-  *diferente* da BD (`app_data_dir/mise/mise/`), não namespaced pelo
-  identifier da app (`com.recipe-planner.app`). Não é só nesting a mais, é
-  duas raízes divergentes. Este fix tem de incluir mover `images/` para
-  `<app_data_dir>/mise/images` também, não só os ficheiros `.db`. Antes de
-  implementar: auditar se os paths de leitura/serve/delete de imagens
-  (linhas ~4385/4403) usam a mesma base que a escrita (4329/4768) — se
-  divergirem entre si, as imagens já podem estar ilegíveis hoje, não só
-  mal-localizadas; por confirmar durante a implementação, não assumido
-  aqui. Migração cobre apenas `*.db`/`*.db-wal`/`*.db-shm` e a pasta
-  `images/` — sem lógica de "mover modelos de OCR", porque essa decisão
-  fica deliberadamente adiada (ver item seguinte).
+- [x] **Fix do path `mise/mise/mise.db` + raiz divergente de `images/`** ✅
+  CONCLUÍDA (2026-07-10). Causa: `open_db()` fazia `dir.join("mise")` sobre
+  um `app_data_dir` que o Tauri já resolve para `.../mise` (double-nesting);
+  em paralelo, `save_base64_image`/`image_delete`/`image_read_base64`/
+  `save_receipt_image`/`receipt_scan` resolviam o diretório via
+  `dirs::data_dir()` diretamente (`~/.local/share/mise/images`), uma raiz
+  *fora* do namespace do identifier da app (`com.recipe-planner.app`) —
+  duas raízes divergentes, não só nesting a mais.
+  **Auditoria feita antes do fix (a pergunta em aberto da nota anterior):**
+  leitura/escrita/delete de imagens já usavam a mesma base entre si
+  (`dirs::data_dir().join("mise")` + o path relativo guardado em BD, que já
+  inclui o prefixo `images/`) — não havia leitura/escrita ilegível hoje, só
+  o root errado. Isso simplificou o fix para uma relocação limpa, sem
+  reconciliação de estado inconsistente.
+  **Decisão consciente de não escrever migração automática no arranque:**
+  o único "parque instalado" desta app é esta máquina de dev — zero
+  instalações reais existem (a app não está distribuída, Fase 4 ainda por
+  fechar o empacotamento). Código de migração automática serviria uma
+  população de uma máquina; feita à mão uma vez (mesmo padrão já usado na
+  limpeza do `mise.db` órfão da Fase 0), documentada aqui. Qualquer
+  instalação nova a partir de agora já nasce com o path correto — não há
+  "dados antigos" a migrar para ela.
+  **Fix de código:** `resolve_data_dir()` novo em `crates/core/src/db.rs`
+  — única fonte de verdade para o root (`app_data_dir` se dado, senão
+  fallback via `dirs::data_dir()`), usada por `open_db()` (sem o `join`
+  redundante). As 5 funções de imagem/recibo passam a receber `data_dir:
+  &Path` como parâmetro em vez de chamar `dirs::data_dir()` cada uma — o
+  mesmo root resolvido uma vez em `initialize_app_state`
+  (`crates/tauri/src/lib.rs`), guardado em `AppDb.data_dir` e passado a
+  todos os comandos. Sem lock/sincronização nova (ver
+  [[SQLite concurrency risk]] — não relevante aqui, é só path resolution).
+  **Migração manual (dev machine, 2026-07-10):** `mise.db` movido de
+  `~/.local/share/com.recipe-planner.app/mise/mise/` para
+  `~/.local/share/com.recipe-planner.app/mise/`; `images/` (4 recibos, dead
+  code do `receipt_scan`, ver nota abaixo) movida de
+  `~/.local/share/mise/images` para
+  `~/.local/share/com.recipe-planner.app/mise/images`. Diretório
+  `~/.local/share/mise` removido (vazio depois da migração) — nome que
+  colide com o diretório de dados da ferramenta popular `mise-en-place`
+  (`mise.jdx.dev`), risco de colisão real que este fix também fecha.
+  **Achado paralelo, não corrigido aqui (fora do âmbito):**
+  `receipt_scan`/`save_receipt_image` (linhas ~4368/4741) chamam o binário
+  `tesseract` via linha de comandos — um caminho de OCR nativo já existente
+  no backend, mas *nunca invocado pelo frontend* (`ReceiptScannerPage.tsx`
+  faz OCR 100% client-side com `tesseract.js`, ver item de self-host acima;
+  `receipt_scan` não aparece em nenhuma chamada `invoke()`). As 4 imagens
+  encontradas em `images/` nesta máquina eram todas `receipt_*` — prova de
+  que este caminho já foi exercitado nalguma sessão anterior, hoje morto.
+  Não removido nem ligado ao frontend agora — decisão de produto sobre OCR
+  nativo continua adiada para a Fase de Polishing (ver nota acima); só
+  documentado para não ser redescoberto como "bug" mais tarde.
+  **Validação:** `cargo check --workspace`/`cargo test --workspace` limpos
+  (98 testes — +1 novo, `image_round_trips_through_the_given_data_dir`,
+  round-trip real de upload→leitura→delete contra um `data_dir` temporário,
+  confirma que o ficheiro fica sob o root dado e não sob
+  `dirs::data_dir()`), `npx tsc --noEmit` limpo. Validação em browser via
+  Playwright descartada como prova: a app carregada diretamente em
+  `localhost:1420` (sem o processo Tauri real) usa `devInvoke.ts`, que
+  devolve dados semente falsos sempre que `__TAURI_INTERNALS__` não existe
+  — o ecrã "funciona" mas não exercita o backend nenhum. `ImageUpload.tsx`
+  importa `invoke` diretamente (não usa o wrapper), por isso falha logo
+  visivelmente nesse cenário em vez de mascarar com dados falsos —
+  inconsistência pré-existente, não corrigida aqui, mas foi o que expôs o
+  problema da validação por browser. `cargo tauri dev` completo (janela
+  nativa) arrancou sem erros no log (compilação limpa, `Gtk`/webview
+  inicializados) com os dados já migrados no disco — confirma que a app não
+  falha a abrir com o novo path. Não houve confirmação visual dentro da
+  janela nativa em si (extensão Chrome não ligou nesta sessão, e o
+  Playwright só alcança o `localhost:1420` puro, não o webview real) — a
+  prova de que o round-trip de imagens funciona fica a cargo do teste Rust
+  acima, que exercita as mesmas funções (`image_upload`/`image_read_base64`/
+  `image_delete`) que os comandos Tauri chamam.
 - [x] **Self-hospedar assets do `tesseract.js`** ✅ CONCLUÍDA (2026-07-10) —
   fecha o `cdn.jsdelivr.net` temporário na CSP (ver Fase 2) sem depender da
   decisão de motor de OCR nativo. Worker script, os 3 variantes `-lstm`
