@@ -213,6 +213,28 @@ bloqueantes, antes de qualquer feature nova.
   que "câmara funciona" é um checkpoint obrigatório e independente em
   cada alvo (desktop Linux, Android, iOS), não que resolver este bug é
   pré-requisito para começar o trabalho de mobile.
+  **Correção ao diagnóstico acima (mesma sessão, 2026-07-10):** o teste
+  de captura direta (`v4l2src`) não exercita o mesmo caminho do erro
+  documentado — o erro é de *enumeração* (`0 devices`), não de captura, e
+  o WebKitGTK enumera via `GstDeviceMonitor`, não abrindo `/dev/video0`
+  às cegas. Teste correto: `gst-device-monitor-1.0 Video/Source` no mesmo
+  shell/PATH em que `cargo tauri dev` corre (confirmado sem `.envrc`/
+  `direnv` a injetar ambiente Nix automaticamente nesta sessão de
+  terminal — só existe `shell.nix` por invocar manualmente, não carregado
+  aqui) — **enumera a câmara com sucesso**, via dois backends
+  (`pipewiresrc`/`libcamerasrc`), sem indício de registo de plugins
+  poluído por mistura Nix/apt. Isto **elimina** a hipótese de
+  GStreamer/registo de plugins como causa e **aponta finalmente para a
+  camada de permissão/settings do próprio WebKitGTK** (o sinal
+  `permission-request` do `WebKitWebView` não é tratado nativamente pelo
+  Tauri/wry por omissão — falha fechada, sem prompt, sem erro visível
+  fora da janela). Confirmar isto exige o inspector do WebKitGTK numa
+  sessão gráfica interativa (fora do alcance de um agente sem clique de
+  UI) — ponto de paragem consciente para esta sessão, consistente com a
+  decisão de 2026-07-06 de não investir mais tempo de depuração sem uma
+  via de teste nova; esta foi essa via nova, esgotada com resultado
+  conclusivo (não é "device", é WebKitGTK), não uma reabertura aberta do
+  debugging anterior.
 
 ---
 
