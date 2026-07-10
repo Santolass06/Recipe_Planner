@@ -33,19 +33,37 @@ Sequência decidida após rever o plano contra o estado real do código:
    nova, ver 3.5 abaixo) — construída sobre o motor OCR atual
    (`tesseract.js`), não depende da decisão de motor nativo. Validada com
    recibos reais (ver [[OCR — Digitalização de recibos]]).
-3. **Decisão de motor OCR nativo** (Rust `ocrs`+`rten`, ver [[OCR —
-   Digitalização de recibos]]) — mantém o acoplamento de segurança que
-   sobe a prioridade: fechar isto fecha também o buraco temporário da CSP
-   (`cdn.jsdelivr.net` em `connect-src`, ver Fase 2). **Vision LLM local
-   (Ollama) sai desta decisão — adiado para a Fase de experimentação,
-   depois do Polishing** (decisão de 2026-07-10): peso de infraestrutura
-   (runtime externo) desproporcional antes de haver utilizadores reais a
-   validar se a app básica já serve.
+3. ~~**Decisão de motor OCR nativo** mantém o acoplamento de segurança que
+   sobe a prioridade~~ **revertido (2026-07-10):** self-hospedar os assets
+   do `tesseract.js` (✅ concluído, ver Fase 4) já fecha o buraco de CSP
+   `cdn.jsdelivr.net` sem depender de trocar de motor. A escolha
+   nativo-vs-`tesseract.js` volta a ser só qualidade de OCR, sem urgência
+   de segurança — mas ver item 3.5-bis abaixo, que sobe de prioridade por
+   outra razão.
+3-bis. **PRIORIDADE ALTA (nova, 2026-07-10): validar precisão do OCR atual
+   em múltiplas cadeias portuguesas.** Hoje só está validado com 2 recibos
+   reais de **uma cadeia** (Pingo Doce, ver 3.5 e [[OCR — Digitalização de
+   recibos]]) — Continente, Lidl, Auchan, etc. nunca foram testados.
+   "Aceitável em quase todos os casos" não está provado nem para
+   `tesseract.js` nem para o nativo. Isto não depende de utilizadores
+   reais nem do Polishing — só de reunir mais recibos de teste — por isso
+   sobe para **antes** da Fase de Polishing, não fica à espera dela.
 4. **Fase 4 — Distribuição** (secção abaixo) — empacotamento, fix do
-   path `mise/mise/mise.db` com migração de dados, teste em máquina limpa
-   (que também resolve ou descarta o bug da câmara da Fase 0).
-5. **Utilizadores reais a testar** → só depois, **Fase de Polishing**.
-6. **Fase de experimentação** (nova, pós-Polishing) — Vision LLM local
+   path `mise/mise/mise.db` com migração de dados, teste em máquina limpa.
+   **Bug da câmara (Fase 0) sobe de prioridade (2026-07-10):** deixa de
+   ser "resolve-se ou descarta-se sozinho na Fase 4" — portar a app para
+   Android/iOS (Fase Multi-plataforma) exige câmara a funcionar (mobile
+   não tem o mesmo fallback natural de "upload manual" que o desktop tem
+   hoje), por isso este bug passa a gate antes de avançar para mobile, não
+   um item que se fecha por omissão se o teste em máquina limpa não o
+   apanhar.
+5. **Fase de Instrumentação de uso** (nova, ver secção abaixo) — regista
+   dados de uso reais desde o início, para alimentar as decisões da Fase
+   de Polishing.
+6. **Fase Multi-plataforma** — bloqueada pelo bug da câmara (ver item 4)
+   antes de avançar para Android/iOS.
+7. **Utilizadores reais a testar** → só depois, **Fase de Polishing**.
+8. **Fase de experimentação** (nova, pós-Polishing) — Vision LLM local
    para OCR de recibos, e outras ideias que dependam de IA local pesada,
    só depois de haver sinal real de utilização a justificar o custo.
 
@@ -156,6 +174,15 @@ bloqueantes, antes de qualquer feature nova.
   Distribuição: testar o build empacotado numa máquina limpa; se a câmara
   funcionar lá, este item fecha-se como "ambiente de dev", sem fix; se não
   funcionar, ganha finalmente um diagnóstico num ambiente representativo.
+  **PRIORIDADE ALTA (revisão 2026-07-10):** deixa de ser um item que se
+  fecha por omissão se o teste de máquina limpa não o apanhar — a app vai
+  ser portada para Android/iOS (Fase Multi-plataforma), onde a câmara é a
+  interação principal do Scanner, não uma opção com fallback natural para
+  upload manual como no desktop. Nota: o mecanismo em mobile é outro
+  (câmara nativa via plugin Tauri, não `getUserMedia`/WebKitGTK) — o
+  diagnóstico daqui pode não se aplicar diretamente lá, mas "câmara
+  funciona" passa a ser um requisito a confirmar explicitamente em cada
+  alvo antes de o dar como pronto, não um nice-to-have adiável.
 
 ---
 
@@ -736,11 +763,27 @@ documentado aqui; para retomar, reimplementar a partir desta descrição.
 **Decisão (revista 2026-07-10):** Vision LLM local sai desta decisão —
 adiado para a **Fase de experimentação, depois do Polishing** (peso de
 runtime externo desproporcional antes de haver utilizadores reais). Fica
-só a decidir: migrar para nativa (Rust `ocrs`+`rten`, fecha o buraco de CSP
-`cdn.jsdelivr.net`) ou manter `tesseract.js`. Critério: se a precisão de
+só a decidir: migrar para nativa (Rust `ocrs`+`rten`) ou manter
+`tesseract.js` (self-hospedado, já fecha o CSP `cdn.jsdelivr.net` — ver
+Fase 4, não é mais argumento a favor do nativo). Critério: se a precisão de
 parsing da opção nativa for aceitável nos recibos reais de teste, preferir
 essa (sem dependência externa, sem CDN); caso contrário, manter
 `tesseract.js` até a Fase de experimentação reavaliar o Vision LLM.
+
+**PRIORIDADE ALTA (nova, 2026-07-10) — validação multi-cadeia antes do
+Polishing:** hoje só há prova real de precisão para **uma cadeia** (Pingo
+Doce, 2 recibos, ver 3.5). "Aceitável em quase todos os casos" ainda não
+está demonstrado — nem para `tesseract.js` nem para o nativo — porque
+nunca foi testado com Continente, Lidl, Auchan, Mercadona, etc., nem com
+formatos de talão diferentes (papel térmico desgastado, fontes diferentes,
+tabelas "Resumo IVA" ausentes ou em formato diferente). Isto não depende
+de utilizadores reais nem da Fase de Instrumentação — só de reunir mais
+recibos de teste de outras cadeias e correr o mesmo spike de legibilidade
+já feito para Pingo Doce (ver 3.5). Por isso sobe de prioridade para
+**antes** da Fase de Polishing, não fica a aguardar sinal de uso real.
+Se a precisão cair fora de outras cadeias, isso também é input direto para
+a decisão nativo-vs-`tesseract.js` acima — não são duas tarefas
+independentes.
 
 **Nota:** a segregação de artigos alimentares/não-alimentares por código de
 IVA (ver 3.5 no plano principal) não depende desta decisão — funciona sobre
