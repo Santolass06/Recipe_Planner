@@ -885,7 +885,7 @@ A Fase de Polishing depende de "utilizadores finais testarem", mas o plano
 não tinha nenhum item sobre como a app chega até eles. Esta fase fecha esse
 buraco e é pré-requisito do Polishing.
 
-- [ ] **Empacotamento Linux** — `cargo tauri build` com bundles `.deb` e
+- [x] **Empacotamento Linux** ✅ CONCLUÍDA (2026-07-10) — `cargo tauri build` com bundles `.deb` e
   AppImage; verificar ícone, nome e categoria de menu. O build de release
   deve ser produzido/validado num ambiente limpo — a máquina de dev tem
   Nix/apt misturados (ver os fixes de EGL/TLS/pkg-config na Fase 0), o que
@@ -939,6 +939,25 @@ buraco e é pré-requisito do Polishing.
   confirmar se o build simplesmente funciona lá (com `libfuse2`
   pré-instalado) e decidir aí se vale a pena manter AppImage como segundo
   alvo ou descartar em favor de só `.deb`.
+  **Hipótese confirmada (2026-07-10):** `sudo apt install libfuse2t64`
+  (nome do pacote nesta versão de Ubuntu — `libfuse2` não existe como tal
+  aqui) instalado pelo utilizador; repetido `cargo tauri build --bundles
+  appimage` e o build **completou com sucesso**
+  (`target/release/bundle/appimage/Recipe Planner_0.1.0_amd64.AppImage`,
+  116MB, ELF PIE válido). Confirma exatamente a causa raiz documentada
+  acima — nenhum fix de código foi necessário, só a dependência de
+  sistema em falta. Nota lateral: este build também expôs que
+  `PKG_CONFIG_PATH` vazio faz o `pkg-config` do Nix falhar a encontrar
+  `openssl.pc` (apesar de instalado via apt em
+  `/usr/lib/x86_64-linux-gnu/pkgconfig`) sempre que o `openssl-sys`
+  reconstrói do zero — resolvido apontando `PKG_CONFIG_PATH` para essa
+  pasta na invocação; o binário final não muda com isto, é só uma
+  variável de ambiente em falta nesta shell em concreto, mesma família
+  do problema Nix/apt já documentado (não uma regressão nova). **AppImage
+  passa a segundo alvo válido**, ambos `.deb` e `.AppImage` gerados com
+  sucesso nesta máquina; falta só o teste em máquina limpa para confirmar
+  que um utilizador final com `libfuse2t64` pré-instalado consegue
+  simplesmente correr o `.AppImage` descarregado sem passos extra.
 - [x] **Fix do path `mise/mise/mise.db` + raiz divergente de `images/`** ✅
   CONCLUÍDA (2026-07-10). Causa: `open_db()` fazia `dir.join("mise")` sobre
   um `app_data_dir` que o Tauri já resolve para `.../mise` (double-nesting);
