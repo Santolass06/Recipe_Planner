@@ -931,18 +931,6 @@ heurística. Não é trabalho novo — é validar/comparar decisões já tomadas
 
 ---
 
-## Fase de experimentação (nova, 2026-07-10)
-
-Depois do Polishing, com sinal real de utilização a validar que vale a
-pena investir em infraestrutura de IA local mais pesada:
-
-- **Vision LLM local para OCR de recibos** (Ollama + `moondream`) — ver
-  [[OCR — Digitalização de recibos]]. Adiado deliberadamente do item
-  "Escolha de motor de OCR": exige runtime externo instalado e a correr,
-  peso desproporcional antes de haver utilizadores reais.
-
----
-
 ## Fase Multi-plataforma (nova, 2026-07-10)
 
 Objetivo do projeto: correr em Android, iOS/iPad, Mac, Linux e Windows.
@@ -966,6 +954,19 @@ permanente. Ordem recomendada, por custo incremental crescente:
   com o bug de câmara pendente da Fase 0), e confirmar suporte mobile de
   cada plugin Tauri usado (`dialog`, `fs`, etc.) caso a caso. Só depois do
   Polishing, com o essencial validado em desktop primeiro.
+
+---
+
+## Fase de experimentação (nova, 2026-07-10)
+
+Depois do Polishing e da Fase Multi-plataforma, com sinal real de
+utilização a validar que vale a pena investir em infraestrutura de IA
+local mais pesada:
+
+- **Vision LLM local para OCR de recibos** (Ollama + `moondream`) — ver
+  [[OCR — Digitalização de recibos]]. Adiado deliberadamente do item
+  "Escolha de motor de OCR": exige runtime externo instalado e a correr,
+  peso desproporcional antes de haver utilizadores reais.
 
 ---
 
