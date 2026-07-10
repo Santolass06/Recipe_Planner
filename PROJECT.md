@@ -806,6 +806,30 @@ buraco e é pré-requisito do Polishing.
   se `.../mise/mise/mise.db` existir e o path novo não, move o ficheiro
   (incluindo WAL/journal ao lado, com a app fechada — fazer no arranque
   antes de abrir a BD).
+  **Achado adicional (2026-07-10, análise de acoplamento com OCR):** as
+  imagens de recibo (`save_receipt_image`, `crates/core/src/db.rs` linhas
+  ~4329/4768) resolvem o diretório via `dirs::data_dir()` diretamente
+  (`.../mise/images`), ignorando o `app_data_dir` do Tauri — uma raiz
+  *diferente* da BD (`app_data_dir/mise/mise/`), não namespaced pelo
+  identifier da app (`com.recipe-planner.app`). Não é só nesting a mais, é
+  duas raízes divergentes. Este fix tem de incluir mover `images/` para
+  `<app_data_dir>/mise/images` também, não só os ficheiros `.db`. Antes de
+  implementar: auditar se os paths de leitura/serve/delete de imagens
+  (linhas ~4385/4403) usam a mesma base que a escrita (4329/4768) — se
+  divergirem entre si, as imagens já podem estar ilegíveis hoje, não só
+  mal-localizadas; por confirmar durante a implementação, não assumido
+  aqui. Migração cobre apenas `*.db`/`*.db-wal`/`*.db-shm` e a pasta
+  `images/` — sem lógica de "mover modelos de OCR", porque essa decisão
+  fica deliberadamente adiada (ver item seguinte).
+- [ ] **Self-hospedar assets do `tesseract.js`** — fecha o `cdn.jsdelivr.net`
+  temporário na CSP (ver Fase 2) sem depender da decisão de motor de OCR
+  nativo. Bundlar o worker script, core `.wasm` e `.traineddata` de
+  `por`+`eng` como assets estáticos da app e apontar `createWorker`
+  (`ReceiptScannerPage.tsx`) para os paths locais (`workerPath`/
+  `corePath`/`langPath`) em vez dos defaults de CDN. Custo: ~10-20MB
+  adicionais no pacote (o motor nativo apenas adia esse custo para um
+  download em runtime, não é razão para preferir o nativo). Depois disto,
+  a CSP fica sem exceções externas.
 - [ ] **Teste em máquina limpa** — instalar o pacote numa máquina sem Nix
   e validar o essencial de ponta a ponta (criar ingrediente/receita,
   compra de stock, scanner por upload, evento). Inclui o teste da câmara
@@ -843,9 +867,14 @@ heurística. Não é trabalho novo — é validar/comparar decisões já tomadas
   ainda aparecem em PT independentemente do toggle de língua.
 - **Escolha de motor de OCR nativo vs. `tesseract.js`** — ver [[OCR —
   Digitalização de recibos]]. Precisa de teste com recibos reais. **Nota
-  (2026-07-06): promovido para antes da Fase 4 na ordem de execução** —
-  fechar isto fecha também o `cdn.jsdelivr.net` temporário na CSP (ver
-  Fase 2), ou seja, é um item de segurança, não só de qualidade de OCR.
+  (2026-07-10, revista): a promoção de 2026-07-06 para "antes da Fase 4" é
+  revertida** — essa promoção assumia que só o motor nativo fechava o
+  `cdn.jsdelivr.net` da CSP; análise de acoplamento (2026-07-10) confirmou
+  que `createWorker` (`ReceiptScannerPage.tsx`) usa os defaults de CDN do
+  `tesseract.js` sem necessidade — basta self-hospedar os assets
+  worker/core/lang (ver item de Fase 4) para fechar a CSP sem trocar de
+  motor. A escolha nativa-vs-`tesseract.js` volta a ser um item de
+  qualidade de OCR, não de segurança, e fica na Fase de Polishing.
   Vision LLM local saiu desta escolha (ver Fase de experimentação abaixo).
 
 ---
