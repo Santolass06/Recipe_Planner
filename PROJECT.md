@@ -608,7 +608,7 @@ dependência nova necessária.
 
 ---
 
-### 3.5 — Segregação de artigos do recibo por código de IVA (2026-07-10)
+### 3.5 — Segregação de artigos do recibo por código de IVA (2026-07-10) ✅ CONCLUÍDA
 
 Problema: um recibo mistura alimentos (bananas) com não-alimentos (cremes),
 e o utilizador do scanner só quer os alimentos entrarem como ingredientes.
@@ -640,29 +640,45 @@ camada de parsing é reaproveitável quando a decisão de motor avançar.
 
 Plano de implementação:
 
-- [ ] **Camada de parsing do "Resumo IVA"**: extrair por linha de artigo
+- [x] **Camada de parsing do "Resumo IVA"**: extrair por linha de artigo
   `<LETRA> nome … preço`; extrair a tabela "Resumo IVA" do rodapé
   (`letra → taxa%`); construir o mapa letra→taxa.
-- [ ] **Classificação por omissão**: taxa reduzida/intermédia (6%/13%) →
+- [x] **Classificação por omissão**: taxa reduzida/intermédia (6%/13%) →
   provável alimentar, pré-selecionado; taxa normal (23%) → provável
   não-alimentar, não pré-selecionado; taxa 0% ou letra desconhecida → não
   pré-selecionado, assinalado como "não reconhecido".
-- [ ] **Guardrail de correção**: o código de IVA só define a pré-seleção
+- [x] **Guardrail de correção**: o código de IVA só define a pré-seleção
   por omissão, nunca um filtro rígido — 23% não significa sempre
   "não-alimentar" (chocolate, refrigerantes engarrafados também são 23%).
   Excluir um alimento por engano é pior que deixar passar um não-alimentar
   que o utilizador desmarca à mão.
-- [ ] **UI de triagem** em `ReceiptScannerPage.tsx` (ler o ficheiro
+- [x] **UI de triagem** em `ReceiptScannerPage.tsx` (ler o ficheiro
   completo antes de planear o diff em detalhe — já faz parsing de itens
   com vocabulário pack/bottle/box/can/jar/sachet, fora do enum `Unit`).
   Extensão da UI existente, não reescrita: checkbox por linha, valor por
   omissão vindo da classificação, linhas não reconhecidas continuam
   adicionáveis manualmente. Só os itens marcados são adicionados como
   ingredientes/stock.
-- [ ] **Sinal secundário mantido**: name-match contra a lista de
+- [x] **Sinal secundário mantido**: name-match contra a lista de
   ingredientes existentes continua a alimentar a pré-seleção em paralelo
   ao código de IVA, e serve de fallback quando não há tabela "Resumo IVA"
   (outras cadeias além de Pingo Doce — não verificado ainda).
+
+Validado com `tesseract.js` real sobre os 2 recibos Pingo Doce e com teste
+visual em browser (upload → OCR → review → import). Auto-check
+(`parseVatSummary`, 10/10) e `tsc`/`vite build` limpos.
+
+**Bug encontrado e corrigido durante a validação** (bloqueador, mesma
+classe de erro que já tinha bloqueado merge numa sessão anterior): o preço
+lido do OCR por linha é o total pago naquela linha (ex. "FRAMBOESA 250 GR
+… 3,69" = 3,69€ pelo pacote todo), não um preço por unidade — mas
+`confirmImport`/`reviewTotal` faziam `quantity × price`, o que com
+quantidade extraída do nome do artigo (ex. "250" de "250 GR") dava totais
+absurdos (3,69€ virava 922,50€). Corrigido: `total_price` passa a ser
+`line.price` diretamente, e `price_per_unit` passa a ser derivado
+(`price / quantity`) em vez de reutilizar o total como se fosse unitário.
+A quantidade extraída (ex. 250g) mantém-se correta para efeitos de stock —
+o problema era só a matemática do preço.
 
 Em aberto: generalização a outras cadeias portuguesas (Continente, Lidl,
 Auchan, etc.) — só verificado com Pingo Doce até agora.

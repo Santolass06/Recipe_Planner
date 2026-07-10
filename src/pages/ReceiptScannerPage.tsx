@@ -49,8 +49,8 @@ const UNIT_ALIASES: Record<string, string[]> = {
 
 // Separa as linhas de artigos da tabela "Resumo IVA" do rodapé (ver
 // PROJECT.md secção 3.5) e constrói o mapa letra → taxa%. Módulo, não
-// componente: não depende de estado do React, exportada para o
-// self-check em receipt_vat_parsing.check.mjs.
+// componente: não depende de estado do React, exportada para permitir
+// self-check isolado da lógica de parsing.
 export function parseVatSummary(rawLines: string[]): { itemLines: string[]; vatMap: Record<string, number> } {
   const summaryIdx = rawLines.findIndex(l => /resumo\s*iva/i.test(l));
   if (summaryIdx === -1) return { itemLines: rawLines, vatMap: {} };
@@ -257,6 +257,11 @@ export default function ReceiptScannerPage() {
     setParsedLines(l => l.map((item, i) => i === idx ? { ...item, [field]: value } : item));
   };
 
+  // O preço lido do OCR é o total pago naquela linha do talão, não um preço
+  // unitário — "FRAMBOESA 250 GR ... 3,69" é 3,69€ pelos 250g, não 3,69€/g.
+  // O preço por unidade é sempre derivado a dividir pela quantidade.
+  const unitPrice = (line: ParsedLine): number => line.quantity > 0 ? line.price / line.quantity : line.price;
+
   const findOrCreateIngredient = async (line: ParsedLine): Promise<number> => {
     let ing = ingredients.find(i => i.name.toLowerCase() === line.name.toLowerCase());
     if (ing) return ing.id;
@@ -265,7 +270,7 @@ export default function ReceiptScannerPage() {
         input: {
           name: line.name,
           unit: line.unit,
-          price_per_unit: line.price,
+          price_per_unit: unitPrice(line),
           category: "outros",
         },
       });
@@ -282,14 +287,13 @@ export default function ReceiptScannerPage() {
     try {
       for (const line of toImport) {
         const ingId = await findOrCreateIngredient(line);
-        const total = line.quantity * line.price;
         await invoke("stock_purchase_add", {
           input: {
             ingredient_id: ingId,
             quantity: line.quantity,
             unit: line.unit,
-            price_per_unit: line.price,
-            total_price: total,
+            price_per_unit: unitPrice(line),
+            total_price: line.price,
             is_discount: line.is_discount,
             discount_percent: line.discount_percent,
             purchase_date: new Date().toISOString(),
@@ -301,7 +305,7 @@ export default function ReceiptScannerPage() {
       showToast(t("receiptScanner.purchasesRegistered", { count: toImport.length }), "ok");
       setImportSummary({
         count: toImport.length,
-        total: toImport.reduce((s, l) => s + l.quantity * l.price, 0),
+        total: toImport.reduce((s, l) => s + l.price, 0),
       });
       setParsedLines([]);
       setShowResults(false);
@@ -345,7 +349,7 @@ export default function ReceiptScannerPage() {
       : { color: "var(--red)", icon: "help", label: t("receiptScanner.match.verify") };
 
   const includedLines = parsedLines.filter(l => l.include);
-  const reviewTotal = includedLines.reduce((s, l) => s + l.quantity * l.price, 0);
+  const reviewTotal = includedLines.reduce((s, l) => s + l.price, 0);
   const reviewNewCount = parsedLines.filter(l => l.confidence <= 0.7).length;
 
   return (
