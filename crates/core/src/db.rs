@@ -1298,6 +1298,7 @@ pub async fn stock_list(db: &Database) -> LibsqlResult<Vec<StockItem>> {
         "SELECT s.id, s.ingredient_id, i.name, i.unit, s.quantity, s.min_quantity, s.updated_at
          FROM stock s
          JOIN ingredients i ON s.ingredient_id = i.id
+         WHERE i.event_id IS NULL
          ORDER BY i.name",
         (),
     ).await?;
@@ -3463,7 +3464,8 @@ pub async fn get_dashboard_stats(db: &Database) -> LibsqlResult<DashboardStats> 
 
     // Low stock count (quantity <= min_quantity and quantity > 0)
     let mut rows = conn.query(
-        "SELECT COUNT(*) FROM stock WHERE quantity > 0 AND quantity <= min_quantity",
+        "SELECT COUNT(*) FROM stock s JOIN ingredients i ON s.ingredient_id = i.id
+         WHERE i.event_id IS NULL AND s.quantity > 0 AND s.quantity <= s.min_quantity",
         (),
     ).await?;
     let low_stock_count: i64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
@@ -3497,7 +3499,7 @@ pub async fn get_dashboard_stats(db: &Database) -> LibsqlResult<DashboardStats> 
     // empty (SUM over no rows = NULL -> COALESCE(NULL, 0.0) = 0.0 REAL).
     // With integer 0, libsql row.get::<f64>() panics ("invalid value type").
     let mut rows = conn.query(
-        "SELECT COALESCE(SUM(s.quantity * i.price_per_unit), 0.0) FROM stock s JOIN ingredients i ON s.ingredient_id = i.id",
+        "SELECT COALESCE(SUM(s.quantity * i.price_per_unit), 0.0) FROM stock s JOIN ingredients i ON s.ingredient_id = i.id WHERE i.event_id IS NULL",
         (),
     ).await?;
     let total_stock_value: f64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
@@ -3567,6 +3569,7 @@ pub async fn get_recent_activity(db: &Database, limit: u32) -> LibsqlResult<Vec<
         SELECT s.id, i.name, s.updated_at, 'stock_updated' as type, 'ingredient' as entity_type
         FROM stock s
         JOIN ingredients i ON s.ingredient_id = i.id
+        WHERE i.event_id IS NULL
         ORDER BY s.updated_at DESC
         LIMIT ?1
         "#,
@@ -3829,12 +3832,12 @@ pub async fn get_low_stock_ingredients(db: &Database, threshold: f64) -> LibsqlR
 
     let mut rows = conn.query(
         r#"
-        SELECT s.id, s.ingredient_id, s.ingredient_name, s.ingredient_unit, 
+        SELECT s.id, s.ingredient_id, s.ingredient_name, s.ingredient_unit,
                s.quantity, s.min_quantity, i.price_per_unit, s.updated_at
         FROM stock s
         JOIN ingredients i ON s.ingredient_id = i.id
-        WHERE s.quantity > 0 AND s.quantity <= s.min_quantity
-           OR s.quantity <= ?1
+        WHERE i.event_id IS NULL
+          AND (s.quantity > 0 AND s.quantity <= s.min_quantity OR s.quantity <= ?1)
         ORDER BY (s.quantity / NULLIF(s.min_quantity, 0)) ASC
         "#,
         params![threshold],
@@ -3979,7 +3982,8 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
         SELECT s.name, COALESCE(SUM(sp.total_price), 0.0) AS total
         FROM stock_purchases sp
         JOIN suppliers s ON sp.supplier_id = s.id
-        WHERE date(sp.purchase_date) >= date(?1)
+        JOIN ingredients i ON sp.ingredient_id = i.id
+        WHERE i.event_id IS NULL AND date(sp.purchase_date) >= date(?1)
         GROUP BY s.name
         ORDER BY total DESC
         "#,
@@ -4056,7 +4060,7 @@ pub async fn get_stock_trends(db: &Database, days: u32) -> LibsqlResult<Vec<Stoc
         SELECT s.ingredient_id, i.name, i.unit, s.quantity, i.price_per_unit
         FROM stock s
         JOIN ingredients i ON s.ingredient_id = i.id
-        WHERE s.quantity > 0
+        WHERE i.event_id IS NULL AND s.quantity > 0
         ORDER BY i.name
         "#,
         (),
@@ -5405,6 +5409,10 @@ mod fase3_stock_tests {
         let event_stock = get_stock(&db, copy.id).await.unwrap();
         assert_eq!(event_stock.quantity, 10.0);
         assert!(get_stock(&db, catalog.id).await.is_err());
+
+        // Catalog-facing stock views must not leak the event copy's stock row.
+        let catalog_stock = stock_list(&db).await.unwrap();
+        assert!(catalog_stock.iter().all(|s| s.ingredient_id != copy.id));
 
         // Deleting the event must cascade-remove the copy's stock, purchases and row.
         delete_event(&db, event.id).await.unwrap();

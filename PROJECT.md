@@ -445,6 +445,17 @@ ingrediente do catálogo para o evento".** O modelo (b) foi descartado:
    - Lista de compras (`shopping_list_mark_purchased`): fica fora do
      âmbito do 3.3 — listas de compras não são event-scoped hoje; listas
      por evento seriam item novo, só com pedido de uso real.
+   - **Consumidores de stock agregado (encontrado em advisory antes do
+     merge, 2026-07-10):** `stock_list`, `get_low_stock_ingredients`,
+     `get_dashboard_stats` (contagem de baixo stock e valor total de
+     stock), a atividade recente do dashboard, `get_stock_trends` e o
+     relatório `by_supplier` liam `stock`/`stock_purchases` sem filtrar
+     `event_id`, pelo que stock de evento apareceria misturado nas vistas
+     de catálogo (ex: `StockPage` mostraria uma linha sem nome, já que o
+     nome vem de `ingredients_list`, agora catálogo-only). Todas estas
+     queries ganharam `WHERE i.event_id IS NULL`, mesma convenção do
+     `ingredients_list`. `calculate_cost`/`weighted_avg_stock_price`
+     ficam intocados por já serem `ingredient_id`-scoped, como decidido.
 7. **Comandos Tauri** — registar `event_ingredients_list`,
    `ingredient_copy_to_event` e `ingredient_promote_to_catalog` em
    `crates/tauri/src/lib.rs` E no launcher `src-tauri` (lembrar o bug da
