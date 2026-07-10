@@ -943,6 +943,32 @@ pena investir em infraestrutura de IA local mais pesada:
 
 ---
 
+## Fase Multi-plataforma (nova, 2026-07-10)
+
+Objetivo do projeto: correr em Android, iOS/iPad, Mac, Linux e Windows.
+Tauri v2 (já em uso, ver `src-tauri/Cargo.toml`) suporta todos estes alvos a
+partir do mesmo codebase — não vale a pena branch por SO (diverge o código,
+merges dolorosos); cada alvo é um `cargo tauri build`/`android init`/
+`ios init` novo sobre o mesmo `main`, com diferenças tratadas por
+config/conditional compilation pontual quando surgirem, não por branch
+permanente. Ordem recomendada, por custo incremental crescente:
+
+- [ ] **Linux** — já em curso (Fase 4 acima: empacotamento `.deb`/AppImage +
+  teste em máquina limpa). Fica como alvo de referência.
+- [ ] **Windows/macOS (desktop)** — mesma API desktop do Tauri que o Linux já
+  usa; custo incremental baixo, essencialmente build + teste por SO (`.msi`/
+  `.exe` no Windows, `.dmg`/notarização no Mac). Sem UI nova a desenhar.
+- [ ] **Android/iOS/iPad (mobile)** — `cargo tauri android/ios init`, SDKs
+  próprios (Android SDK/NDK, Xcode) instalados numa máquina capaz de os
+  correr. Aqui há trabalho real novo, não só build: UI/UX pensada para touch
+  e ecrãs pequenos (os componentes atuais assumem desktop), permissões de
+  câmara mobile (Android/iOS têm modelo diferente do desktop — relacionado
+  com o bug de câmara pendente da Fase 0), e confirmar suporte mobile de
+  cada plugin Tauri usado (`dialog`, `fs`, etc.) caso a caso. Só depois do
+  Polishing, com o essencial validado em desktop primeiro.
+
+---
+
 ## Workflow
 
 A partir da sessão de i18n (2026-07-04): cada tarefa/feature nova segue este
