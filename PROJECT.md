@@ -849,12 +849,44 @@ buraco e é pré-requisito do Polishing.
   (não substitui o teste em máquina limpa, só apanha erros de config
   cedo): `.deb` gerou com sucesso (35MB, config aceite sem erro de parse —
   `category`/paths de ícone válidos). AppImage falhou (`failed to run
-  linuxdeploy`, depois de descarregar as ferramentas `linuxdeploy`/
-  `AppRun`) — FUSE está presente (`/dev/fuse`, `fusermount3` existem), não
-  é o motivo óbvio; mesma família de problema do ambiente Nix/apt misto já
-  documentada nesta fase, não investigado mais fundo aqui por decisão
-  consciente (mesmo critério já aplicado ao bug da câmara). Fica para o
-  teste em máquina limpa confirmar se AppImage falha lá também.
+  linuxdeploy`).
+  **Causa raiz investigada (advisory Opus, 2026-07-10):** `/dev/fuse` e
+  `fusermount3` existem, mas o `linuxdeploy` descarregado (e o
+  `linuxdeploy-plugin-appimage` que ele invoca para gerar o `.AppImage`
+  final) são binários AppImage que fazem `dlopen("libfuse.so.2")` — a API
+  do **FUSE 2 (legacy)**. Esta máquina só tem `libfuse3`/`fuse3` instalado
+  via apt (Ubuntu moderno deixou de instalar `libfuse2` por omissão);
+  confirmado com `linuxdeploy --version` a falhar com
+  `dlopen(): error loading libfuse.so.2` fora do contexto do build.
+  **Não é peculiaridade desta máquina** — qualquer Ubuntu 22.04+/24.04
+  limpo sem `libfuse2`/`libfuse2t64` instalado explicitamente vai bater no
+  mesmo problema; o teste em máquina limpa deve confirmar isto com esse
+  pacote presente.
+  **Três tentativas de fix não resolveram aqui:** `APPIMAGE_EXTRACT_AND_RUN=1`
+  sozinho, `LD_LIBRARY_PATH` a apontar para um `libfuse.so.2` real (via
+  Nix, confirmado que resolve `linuxdeploy --version` isoladamente), e os
+  dois combinados — todas falharam da mesma forma dentro de `cargo tauri
+  build`. `linuxdeploy` corre e cria o `AppDir` (executável, `.desktop`,
+  ícone), mas o passo final que empacota o `.AppImage` continua a falhar
+  mesmo com as variáveis de ambiente definidas no shell que invoca `cargo
+  tauri build` — sugere que o bundler do Tauri não propaga essas variáveis
+  para o subprocesso do `linuxdeploy`, tornando o fix por variável de
+  ambiente pouco fiável aqui. **Não investigado mais fundo** — decisão
+  consciente de parar (mesmo critério já aplicado ao bug da câmara): a
+  fix correta para uma máquina real (não este shell com Nix/apt misto) é
+  simplesmente ter `libfuse2` instalado a nível de sistema (`apt install
+  libfuse2` ou `libfuse2t64`, conforme a versão do Ubuntu) — nesse caso o
+  linker resolve a biblioteca via `ldconfig`, sem depender de nenhuma
+  variável de ambiente herdada por um subprocesso.
+  **Conclusão de prioridade:** `.deb` continua o alvo primário — gerou
+  limpo, e declara as suas dependências para o `apt` resolver
+  declarativamente. AppImage é secundário e mais frágil por natureza:
+  mesmo que o build seja corrigido, o `.AppImage` produzido **também
+  precisa de `libfuse2` na máquina do utilizador final** para arrancar —
+  o mesmo problema, noutro momento. Fica para o teste em máquina limpa
+  confirmar se o build simplesmente funciona lá (com `libfuse2`
+  pré-instalado) e decidir aí se vale a pena manter AppImage como segundo
+  alvo ou descartar em favor de só `.deb`.
 - [x] **Fix do path `mise/mise/mise.db` + raiz divergente de `images/`** ✅
   CONCLUÍDA (2026-07-10). Causa: `open_db()` fazia `dir.join("mise")` sobre
   um `app_data_dir` que o Tauri já resolve para `.../mise` (double-nesting);
