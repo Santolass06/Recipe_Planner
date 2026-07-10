@@ -893,6 +893,53 @@ buraco e é pré-requisito do Polishing.
 
 ---
 
+## Fase de Instrumentação de uso (nova, 2026-07-10)
+
+Tem de acontecer **antes** do Polishing, não depois — o Polishing já
+assume "decidir com dados reais" em vários itens (política de custo,
+caminho lista↔recibo, motor de OCR), mas nada na app hoje regista esses
+dados à medida que é usada. Sem isto, o Polishing chega sem dados para
+decidir.
+
+- [ ] **Decisão local-only vs. remoto** — a app é local-first (sem
+  backend, sem servidor próprio hoje) e lida com dados sensíveis (recibos,
+  potencialmente valores gastos). Recomendação: começar **local-only** —
+  os eventos ficam gravados na própria BD do utilizador (mesma `mise.db`,
+  ver [[SQLite concurrency risk]] para o padrão de acesso), sem qualquer
+  envio para fora da máquina. Recolha remota (telemetria centralizada)
+  implica infraestrutura de backend nova e uma política de privacidade/
+  consentimento explícita — decisão maior, adiada até haver instalações
+  reais suficientes para justificar o custo (mesmo raciocínio de
+  "população de uma máquina" já usado no fix de `resolve_data_dir`, ver
+  Fase 4 acima).
+- [ ] **Tabela de eventos append-only** — uma tabela nova (`usage_events`
+  ou nome semelhante: `id`, `event_type`, `payload_json`, `created_at`),
+  sem infraestrutura nova — reutiliza a ligação `libsql` já aberta,
+  seguindo o mesmo padrão de threading de `db: &Database` já usado no
+  resto de `crates/core/src/db.rs`. Consulta ad-hoc por SQL quando
+  necessário (mesmo padrão já prescrito para a análise de política de
+  custo no Polishing), sem dashboard nem exportação automática — YAGNI
+  até haver necessidade concreta de agregar entre máquinas.
+- [ ] **O que registar** — apenas o que alimenta decisões já identificadas
+  no Polishing/Fase 0, não uma lista especulativa:
+  - Resultado de cada scan de recibo (motor usado, confiança/sucesso,
+    se o utilizador corrigiu algum item depois) — alimenta a escolha
+    nativo vs. `tesseract.js`.
+  - Qual caminho escolhido por compra, lista ou recibo — alimenta a
+    decisão de manter/unificar `stock_purchases` vs. dois caminhos.
+  - Falhas/erros da câmara do Scanner — alimenta o diagnóstico do bug
+    pendente da Fase 0 em ambiente representativo.
+  - Uso do toggle de língua — alimenta a decisão de vocabulário/unidades
+    ainda em PT.
+  (Dados já persistidos transacionalmente, como o valor real de
+  `stock_purchases`, não precisam de evento novo — já servem a análise de
+  custo sem instrumentação extra.)
+- [ ] **Privacidade** — nenhum evento guarda o conteúdo do recibo em si
+  (imagem/texto), só metadados sobre o resultado do OCR. Sem PII fora do
+  que a app já guarda localmente para a sua função normal.
+
+---
+
 ## Fase de Polishing
 
 Depois da Fase 3 (features estruturantes) e com a app estável para
