@@ -51,17 +51,20 @@ Sequência decidida após rever o plano contra o estado real do código:
 4. **Fase 4 — Distribuição** (secção abaixo) — empacotamento, fix do
    path `mise/mise/mise.db` com migração de dados, teste em máquina limpa.
    **Bug da câmara (Fase 0) sobe de prioridade (2026-07-10):** deixa de
-   ser "resolve-se ou descarta-se sozinho na Fase 4" — portar a app para
-   Android/iOS (Fase Multi-plataforma) exige câmara a funcionar (mobile
-   não tem o mesmo fallback natural de "upload manual" que o desktop tem
-   hoje), por isso este bug passa a gate antes de avançar para mobile, não
-   um item que se fecha por omissão se o teste em máquina limpa não o
-   apanhar.
+   ser "resolve-se ou descarta-se sozinho na Fase 4" — a câmara é a
+   interação principal do Scanner e "câmara funciona" passa a checkpoint
+   obrigatório em cada alvo, desktop incluído. **Correção (2026-07-10,
+   diagnóstico adicional):** mobile usa um plugin de câmara nativo, não
+   `getUserMedia`/WebKitGTK — código diferente do bug de desktop — por
+   isso este bug **não bloqueia o arranque** da Fase Multi-plataforma, só
+   fica marcado como PRIORIDADE ALTA por não poder fechar-se em silêncio
+   como antes.
 5. **Fase de Instrumentação de uso** (nova, ver secção abaixo) — regista
    dados de uso reais desde o início, para alimentar as decisões da Fase
    de Polishing.
-6. **Fase Multi-plataforma** — bloqueada pelo bug da câmara (ver item 4)
-   antes de avançar para Android/iOS.
+6. **Fase Multi-plataforma** — Android/iOS constroem e validam a própria
+   implementação de câmara nativa, independente do bug de desktop (ver
+   item 4).
 7. **Utilizadores reais a testar** → só depois, **Fase de Polishing**.
 8. **Fase de experimentação** (nova, pós-Polishing) — Vision LLM local
    para OCR de recibos, e outras ideias que dependam de IA local pesada,
@@ -183,6 +186,33 @@ bloqueantes, antes de qualquer feature nova.
   diagnóstico daqui pode não se aplicar diretamente lá, mas "câmara
   funciona" passa a ser um requisito a confirmar explicitamente em cada
   alvo antes de o dar como pronto, não um nice-to-have adiável.
+  **Diagnóstico adicional (advisory Opus, 2026-07-10), sem clique real na
+  UI (WebKitGTK não é Chromium, ferramentas de browser não conseguem
+  ligar-se à janela nativa, ver nota da Fase de Instrumentação):**
+  confirmado ao nível do SO, fora do webview, que o hardware e a stack
+  GStreamer funcionam nesta máquina — `gst-launch-1.0 v4l2src
+  device=/dev/video0 ! videoconvert ! fakesink` captura buffers sem erro
+  nenhum, e `getfacl /dev/video0` mostra uma entrada ACL explícita
+  `user:andresantos:rw-` (o utilizador não está no grupo `video`, mas tem
+  acesso concedido por ACL na mesma). Isto elimina a teoria de "permissão
+  de dispositivo" e reforça a hipótese já registada em 2026-07-06: o erro
+  `Video capture was requested but no device was found amongst 0 devices`
+  vem de dentro do processo/sandbox do WebKitGTK, que falha a
+  *enumerar* o dispositivo mesmo ele estando acessível e funcional fora
+  desse processo — aponta para sandbox do WebKitGTK ou falta de
+  `xdg-desktop-portal`, não para o dispositivo em si. Também adicionado
+  `console.error("[camera]", e)` ao catch de `handleCameraCapture`
+  (`ReceiptScannerPage.tsx`) — o erro ia só para um toast genérico, sem
+  ficar visível em lado nenhum para depuração futura; ainda não dá para
+  ler o erro real de dentro da janela nativa sem o inspector do WebKitGTK
+  (`clique direito → Inspecionar`, requer sessão gráfica interativa, fora
+  do alcance desta sessão). **Correção ao roadmap:** dado que mobile usa
+  um plugin de câmara nativo e não `getUserMedia`/WebKitGTK, este bug de
+  desktop **não bloqueia o arranque da Fase Multi-plataforma** — as duas
+  implementações de câmara são código diferente. O que continua verdade é
+  que "câmara funciona" é um checkpoint obrigatório e independente em
+  cada alvo (desktop Linux, Android, iOS), não que resolver este bug é
+  pré-requisito para começar o trabalho de mobile.
 
 ---
 

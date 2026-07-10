@@ -236,6 +236,10 @@ export default function ReceiptScannerPage() {
       setParsedLines([]);
       setShowResults(false);
     } catch (e) {
+      // ponytail: erro real só visível via console (sem inspector GUI
+      // disponível para WebKitGTK neste ambiente) — diagnóstico do bug da
+      // câmara, ver PROJECT.md.
+      console.error("[camera]", e);
       showToast(t("receiptScanner.cameraError"), "err");
     }
   };
