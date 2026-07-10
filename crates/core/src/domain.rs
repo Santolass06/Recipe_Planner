@@ -1110,6 +1110,27 @@ pub struct ImageUploadInput {
     pub mime_type: String,
 }
 
+/// User-submitted problem report (Fase de Instrumentação, 2026-07-10)
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct ProblemReport {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub description: String,
+    pub image_path: Option<String>,
+    #[ts(type = "string")]
+    pub created_at: DateTime<Utc>,
+}
+
+/// Input to create a problem report; image is optional
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct ProblemReportInput {
+    #[validate(length(min = 1))]
+    pub description: String,
+    pub image_base64: Option<String>,
+}
+
 /// Proxy search result from Unsplash/Pexels
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]

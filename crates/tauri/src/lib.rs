@@ -474,6 +474,18 @@ impl AppDb {
         mise_core::db::image_search_proxy(query, per_page).await.map_err(|e| e.to_string())
     }
 
+    // ===== INSTRUMENTAÇÃO (Fase de Instrumentação, local-only) =====
+    pub async fn problem_report_create(&self, input: ProblemReportInput) -> Result<ProblemReport, String> {
+        mise_core::db::problem_report_create(&self.db, input, &self.data_dir).await.map_err(|e| e.to_string())
+    }
+
+    /// Exports always land under the app's own data dir (`exports/`), no
+    /// destination picker needed — keeps this local-only and one click.
+    pub async fn export_usage_data(&self) -> Result<String, String> {
+        let dest_dir = self.data_dir.join("exports");
+        mise_core::db::export_usage_data(&self.db, &self.data_dir, &dest_dir).await.map_err(|e| e.to_string())
+    }
+
     // ===== STOCK PURCHASES =====
     pub async fn stock_purchase_add(&self, input: StockPurchaseInput) -> Result<StockPurchase, String> {
         mise_core::db::stock_purchase_add(&self.db, input).await.map_err(|e| e.to_string())
@@ -1334,6 +1346,22 @@ pub mod commands {
         per_page: Option<u32>,
     ) -> Result<Vec<ProxyImageResult>, String> {
         db.image_search_proxy(query, per_page).await.map_err(|e| e.to_string())
+    }
+
+    // ===== INSTRUMENTAÇÃO =====
+    #[tauri::command]
+    pub async fn problem_report_create(
+        db: tauri::State<'_, crate::AppDb>,
+        input: ProblemReportInput,
+    ) -> Result<ProblemReport, String> {
+        db.problem_report_create(input).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn export_usage_data(
+        db: tauri::State<'_, crate::AppDb>,
+    ) -> Result<String, String> {
+        db.export_usage_data().await.map_err(|e| e.to_string())
     }
 
     // ===== STOCK PURCHASES =====

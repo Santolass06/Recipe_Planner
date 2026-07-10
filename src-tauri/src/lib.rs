@@ -145,6 +145,9 @@ pub fn run() {
             mise_tauri::commands::image_get,
             mise_tauri::commands::image_read_base64,
             mise_tauri::commands::image_search_proxy,
+            // Instrumentação (local-only) — Fase de Instrumentação
+            mise_tauri::commands::problem_report_create,
+            mise_tauri::commands::export_usage_data,
             // Receipts (OCR) — Lote 2 (backend only; frontend ReceiptScannerPage fora de scope)
             mise_tauri::commands::receipt_scan,
             mise_tauri::commands::receipt_parse,
