@@ -17,6 +17,13 @@ interface ParsedLine {
   is_discount: boolean;
   discount_percent: number;
   confidence: number;
+  // Código de taxa de IVA impresso à frente do artigo (ex. "C", "E") e a
+  // taxa correspondente, lida da tabela "Resumo IVA" do rodapé do talão —
+  // ver secção 3.5 do PROJECT.md. null quando não detectado (talão sem
+  // essa tabela, ou linha sem código legível).
+  vat_code: string | null;
+  vat_rate: number | null;
+  include: boolean;
 }
 
 const UNIT_LABELS: Record<string, string> = {
@@ -39,6 +46,22 @@ const UNIT_ALIASES: Record<string, string[]> = {
   bag: ["bag", "bags", "saco", "sacos"],
   sachet: ["sachet", "sachets", "saqueta", "saquetas"],
 };
+
+// Separa as linhas de artigos da tabela "Resumo IVA" do rodapé (ver
+// PROJECT.md secção 3.5) e constrói o mapa letra → taxa%. Módulo, não
+// componente: não depende de estado do React, exportada para o
+// self-check em receipt_vat_parsing.check.mjs.
+export function parseVatSummary(rawLines: string[]): { itemLines: string[]; vatMap: Record<string, number> } {
+  const summaryIdx = rawLines.findIndex(l => /resumo\s*iva/i.test(l));
+  if (summaryIdx === -1) return { itemLines: rawLines, vatMap: {} };
+  const vatMap: Record<string, number> = {};
+  const vatLineRegex = /^([A-Za-z])\s+(\d+)\s*%/;
+  for (const l of rawLines.slice(summaryIdx + 1)) {
+    const m = l.match(vatLineRegex);
+    if (m) vatMap[m[1].toUpperCase()] = parseInt(m[2], 10);
+  }
+  return { itemLines: rawLines.slice(0, summaryIdx), vatMap };
+}
 
 export default function ReceiptScannerPage() {
   const [image, setImage] = useState<string | null>(null);
@@ -101,13 +124,24 @@ export default function ReceiptScannerPage() {
   };
 
   const parseReceiptText = (text: string): ParsedLine[] => {
-    const lines = text.split("\n").map(l => l.trim()).filter(l => l.length > 2);
+    const rawLines = text.split("\n").map(l => l.trim()).filter(l => l.length > 2);
+    const { itemLines: lines, vatMap } = parseVatSummary(rawLines);
+    const hasVatTable = Object.keys(vatMap).length > 0;
     const results: ParsedLine[] = [];
 
     const priceRegex = /(\d+[.,]\d{2})\s*[€$]?/g;
     const qtyUnitRegex = /(\d+[.,]?\d*)\s*(g|kg|ml|l|pcs|pc|un|unid|unidade|pack|pacote|bottle|garrafa|box|caixa|can|lata|jar|frasco|bag|saco|sachet|saqueta)/gi;
 
-    for (const line of lines) {
+    for (const rawLine of lines) {
+      // Código de taxa de IVA impresso à frente do artigo (ex. "E DR. BAYARD 200G").
+      let vatCode: string | null = null;
+      let line = rawLine.replace(/^[^A-Za-zÀ-ÿ0-9]+/, "");
+      const vatMatch = line.match(/^([A-Za-z])\s+(?=\S)/);
+      if (vatMatch) {
+        vatCode = vatMatch[1].toUpperCase();
+        line = line.slice(vatMatch[0].length);
+      }
+
       const prices = [...line.matchAll(priceRegex)].map(m => parseFloat(m[1].replace(",", ".")));
       const qtyMatches = [...line.matchAll(qtyUnitRegex)];
       const lastPrice = prices.length > 0 ? prices[prices.length - 1] : 0;
@@ -140,6 +174,13 @@ export default function ReceiptScannerPage() {
         name.toLowerCase().includes(i.name.toLowerCase().split(" ")[0])
       );
 
+      const vatRate = vatCode ? vatMap[vatCode] ?? null : null;
+      // Sinal primário: taxa de IVA reduzida/intermédia (≤13%) sugere
+      // alimentar, taxa normal (23%) sugere não-alimentar — nunca um filtro
+      // rígido, só a pré-seleção por omissão (guardrail: PROJECT.md 3.5).
+      // Sinal secundário: já ser um ingrediente conhecido vence sempre.
+      const include = existingIng ? true : hasVatTable ? vatRate != null && vatRate <= 13 : true;
+
       results.push({
         name: existingIng?.name ?? name,
         quantity: qty,
@@ -148,6 +189,9 @@ export default function ReceiptScannerPage() {
         is_discount: isDiscount,
         discount_percent: discountPercent,
         confidence: existingIng ? 0.9 : 0.5,
+        vat_code: vatCode,
+        vat_rate: vatRate,
+        include,
       });
     }
 
@@ -232,10 +276,11 @@ export default function ReceiptScannerPage() {
   };
 
   const confirmImport = async () => {
-    if (parsedLines.length === 0) { showToast(t("receiptScanner.nothingToImport"), "warn"); return; }
+    const toImport = parsedLines.filter(l => l.include);
+    if (toImport.length === 0) { showToast(t("receiptScanner.nothingToImport"), "warn"); return; }
     setProcessing(true);
     try {
-      for (const line of parsedLines) {
+      for (const line of toImport) {
         const ingId = await findOrCreateIngredient(line);
         const total = line.quantity * line.price;
         await invoke("stock_purchase_add", {
@@ -253,10 +298,10 @@ export default function ReceiptScannerPage() {
           },
         });
       }
-      showToast(t("receiptScanner.purchasesRegistered", { count: parsedLines.length }), "ok");
+      showToast(t("receiptScanner.purchasesRegistered", { count: toImport.length }), "ok");
       setImportSummary({
-        count: parsedLines.length,
-        total: parsedLines.reduce((s, l) => s + l.quantity * l.price, 0),
+        count: toImport.length,
+        total: toImport.reduce((s, l) => s + l.quantity * l.price, 0),
       });
       setParsedLines([]);
       setShowResults(false);
@@ -299,7 +344,8 @@ export default function ReceiptScannerPage() {
       ? { color: "var(--amber)", icon: "add_circle", label: t("receiptScanner.match.newItem") }
       : { color: "var(--red)", icon: "help", label: t("receiptScanner.match.verify") };
 
-  const reviewTotal = parsedLines.reduce((s, l) => s + l.quantity * l.price, 0);
+  const includedLines = parsedLines.filter(l => l.include);
+  const reviewTotal = includedLines.reduce((s, l) => s + l.quantity * l.price, 0);
   const reviewNewCount = parsedLines.filter(l => l.confidence <= 0.7).length;
 
   return (
@@ -423,7 +469,16 @@ export default function ReceiptScannerPage() {
             <span className="mono" style={{ fontSize: 11, color: "var(--amber)", fontWeight: 600 }}>{t("receiptScanner.reviewStep.toVerify", { count: reviewNewCount })}</span>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1.7fr 90px 90px 100px 1fr 90px 36px", gap: 10, padding: "9px 18px", borderBottom: "1px solid var(--line)", background: "var(--inset)" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "32px 1.7fr 90px 90px 100px 1fr 90px 36px", gap: 10, padding: "9px 18px", borderBottom: "1px solid var(--line)", background: "var(--inset)" }}>
+            <span style={{ display: "flex", alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={parsedLines.length > 0 && includedLines.length === parsedLines.length}
+                ref={el => { if (el) el.indeterminate = includedLines.length > 0 && includedLines.length < parsedLines.length; }}
+                onChange={e => setParsedLines(ls => ls.map(l => ({ ...l, include: e.target.checked })))}
+                aria-label={t("receiptScanner.reviewStep.selectAll")}
+              />
+            </span>
             <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>{t("receiptScanner.reviewStep.colName")}</span>
             <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>{t("receiptScanner.reviewStep.colQty")}</span>
             <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--ink-3)" }}>{t("receiptScanner.reviewStep.colUnit")}</span>
@@ -436,13 +491,30 @@ export default function ReceiptScannerPage() {
           {parsedLines.map((line, idx) => {
             const m = matchMeta(line.confidence);
             return (
-              <div key={idx} style={{ display: "grid", gridTemplateColumns: "1.7fr 90px 90px 100px 1fr 90px 36px", gap: 10, padding: "9px 18px", borderBottom: "1px solid var(--line-2)", alignItems: "center" }}>
+              <div key={idx} style={{ display: "grid", gridTemplateColumns: "32px 1.7fr 90px 90px 100px 1fr 90px 36px", gap: 10, padding: "9px 18px", borderBottom: "1px solid var(--line-2)", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={line.include}
+                    onChange={e => updateLine(idx, "include", e.target.checked)}
+                    aria-label={t("receiptScanner.reviewStep.includeLine")}
+                  />
+                </div>
+                <div>
                 <input
                   value={line.name}
                   onChange={e => updateLine(idx, "name", e.target.value)}
                   placeholder={t("receiptScanner.reviewStep.namePlaceholder")}
                   style={{ border: "1px solid var(--line)", background: "var(--inset)", borderRadius: 7, height: 34, padding: "0 10px", fontFamily: "var(--sans)", fontSize: 13, color: "var(--ink)", width: "100%" }}
                 />
+                {line.vat_code && (
+                  <div className="mono" style={{ fontSize: 9.5, marginTop: 3, color: line.vat_rate != null ? (line.vat_rate <= 13 ? "var(--green)" : "var(--ink-3)") : "var(--amber)" }}>
+                    {line.vat_rate != null
+                      ? t("receiptScanner.reviewStep.vatRate", { code: line.vat_code, rate: line.vat_rate })
+                      : t("receiptScanner.reviewStep.vatUnknown", { code: line.vat_code })}
+                  </div>
+                )}
+                </div>
                 <input
                   type="number" min="0.01" step="0.01" value={line.quantity}
                   onChange={e => updateLine(idx, "quantity", parseFloat(e.target.value) || 0)}
@@ -501,7 +573,7 @@ export default function ReceiptScannerPage() {
               </select>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-              <span className="mono" style={{ fontSize: 12, color: "var(--ink-2)" }}>{t("receiptScanner.reviewStep.summary", { count: parsedLines.length, total: reviewTotal.toFixed(2) })}</span>
+              <span className="mono" style={{ fontSize: 12, color: "var(--ink-2)" }}>{t("receiptScanner.reviewStep.summary", { count: includedLines.length, total: reviewTotal.toFixed(2) })}</span>
               <button className="btn-primary" onClick={confirmImport} disabled={processing} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <span className="ms" style={{ fontSize: 17 }} aria-hidden="true">check</span>
                 {processing ? t("receiptScanner.reviewStep.importing") : t("receiptScanner.reviewStep.importBtn")}
