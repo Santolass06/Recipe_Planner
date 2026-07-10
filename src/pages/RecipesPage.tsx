@@ -11,7 +11,7 @@ import { useI18n } from "../i18n";
 import type { RecipeWithIngredients as Recipe } from "../../crates/core/bindings/RecipeWithIngredients";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import type { RecipeImportPreview } from "../../crates/core/bindings/RecipeImportPreview";
-import { UNIT_LABELS_FULL as UNIT_LABELS, UNIT_LABELS_SHORT as UNIT_SHORT } from "../lib/units";
+import { UNIT_LABELS_FULL as UNIT_LABELS, UNIT_LABELS_SHORT as UNIT_SHORT, convertUnit } from "../lib/units";
 
 export type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -67,11 +67,14 @@ export function computeCostLines(recipe: Recipe, servings: number, ingredients: 
     const stock = ingredients.find(i => i.id === ing.ingredient_id);
     const scaledQty = ing.quantity * factor;
     const price = stock?.price_per_unit ?? 0;
-    const cost = price * scaledQty;
-    const approx = !stock || stock.unit !== ing.unit;
+    // price is €/stock.unit, so the quantity must be converted into stock.unit
+    // before multiplying — mirrors Unit::convert_to in crates/core/src/domain.rs.
+    const converted = stock ? convertUnit(scaledQty, ing.unit, stock.unit) : null;
+    const cost = price * (converted ?? scaledQty);
+    const approx = !stock || converted === null;
     const title = !stock
       ? t("recipes.ingredientNotFound")
-      : stock.unit !== ing.unit
+      : converted === null
         ? t("recipes.priceConversionNote", { stockUnit: UNIT_SHORT[stock.unit] ?? stock.unit, ingUnit: UNIT_SHORT[ing.unit] ?? ing.unit })
         : undefined;
     return {
