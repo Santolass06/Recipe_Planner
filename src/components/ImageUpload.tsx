@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../lib/devInvoke";
 import { useI18n } from "../i18n";
 import type { Image } from "../../crates/core/bindings/Image";
 import type { ImageUploadInput } from "../../crates/core/bindings/ImageUploadInput";

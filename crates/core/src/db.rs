@@ -460,6 +460,13 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
 }
 
 async fn add_column_if_missing(conn: &Connection, table: &str, column: &str, decl: &str) -> LibsqlResult<()> {
+    // ponytail: identifiers can't be bound as SQL params; only ever called with
+    // hardcoded literals from run_migrations, so this guard is defense-in-depth
+    // against a future caller passing untrusted input, not a live exploit path.
+    debug_assert!(
+        [table, column].iter().all(|s| s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')),
+        "add_column_if_missing: table/column must be [a-zA-Z0-9_]"
+    );
     let mut rows = conn.query(&format!("PRAGMA table_info({table})"), ()).await?;
     while let Some(row) = rows.next().await? {
         let name: String = row.get(1)?;
@@ -1136,7 +1143,8 @@ pub async fn recipes_list(db: &Database) -> LibsqlResult<Vec<RecipeWithIngredien
 /// List recipes with pagination
 pub async fn recipes_paginated(db: &Database, page: u32, per_page: u32) -> LibsqlResult<Paginated<Recipe>> {
     let conn = get_conn(db).await?;
-    let offset = (page - 1) * per_page;
+    // page is 1-based; page=0 would underflow (public IPC command, caller-supplied).
+    let offset = page.saturating_sub(1) * per_page;
 
     let mut rows = conn.query("SELECT COUNT(*) FROM recipes WHERE event_id IS NULL", ()).await?;
     let total: i64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
@@ -2417,12 +2425,17 @@ pub async fn seed_demo_data(db: &Database) -> LibsqlResult<()> {
 /// List categories
 pub async fn categories_list(db: &Database, kind: Option<&str>) -> LibsqlResult<Vec<Category>> {
     let conn = get_conn(db).await?;
-    let query = if let Some(kind) = kind {
-        format!("SELECT id, name, kind, color, icon, sort_order FROM categories WHERE kind = '{}' ORDER BY sort_order", kind)
+    let mut rows = if let Some(kind) = kind {
+        conn.query(
+            "SELECT id, name, kind, color, icon, sort_order FROM categories WHERE kind = ?1 ORDER BY sort_order",
+            params![kind],
+        ).await?
     } else {
-        "SELECT id, name, kind, color, icon, sort_order FROM categories ORDER BY sort_order".to_string()
+        conn.query(
+            "SELECT id, name, kind, color, icon, sort_order FROM categories ORDER BY sort_order",
+            (),
+        ).await?
     };
-    let mut rows = conn.query(&query, ()).await?;
     let mut categories = Vec::new();
     while let Some(row) = rows.next().await? {
         categories.push(row_to_category(&row)?);
@@ -3116,7 +3129,12 @@ pub async fn export_data(db: &Database) -> LibsqlResult<ImportData> {
     }).collect();
 
     let import_recipes: Vec<ImportRecipe> = recipes.into_iter().map(|r| {
-        let recipe_ingredients: Vec<ImportRecipeIngredient> = Vec::new(); // Would need to fetch
+        // recipes_list already joins ingredients per recipe — no extra fetch needed.
+        let recipe_ingredients: Vec<ImportRecipeIngredient> = r.ingredients.into_iter().map(|ri| ImportRecipeIngredient {
+            ingredient_name: ri.ingredient_name,
+            quantity: ri.quantity,
+            unit: ri.unit,
+        }).collect();
         ImportRecipe {
             name: r.recipe.name,
             category: r.recipe.category,
@@ -3163,8 +3181,57 @@ pub async fn import_data(db: &Database, data: ImportData) -> LibsqlResult<Import
         }
     }
 
-    // Recipe import would need ingredient resolution - simplified
-    result.recipes_skipped = data.recipes.len();
+    // Resolve each recipe's ingredients by name against the catalog (now
+    // including whatever was just created above). Recipes referencing a name
+    // not found in the catalog are skipped with an explicit error rather than
+    // silently dropped or guessed at.
+    let catalog = ingredients_list(db).await?;
+    let ids_by_name: std::collections::HashMap<&str, i64> =
+        catalog.iter().map(|i| (i.name.as_str(), i.id)).collect();
+
+    for recipe in data.recipes {
+        let mut resolved = Vec::with_capacity(recipe.ingredients.len());
+        let mut missing: Vec<String> = Vec::new();
+        for ri in &recipe.ingredients {
+            match ids_by_name.get(ri.ingredient_name.as_str()) {
+                Some(&ingredient_id) => resolved.push(RecipeIngredientInput {
+                    ingredient_id,
+                    quantity: ri.quantity,
+                    unit: ri.unit,
+                }),
+                None => missing.push(ri.ingredient_name.clone()),
+            }
+        }
+        if !missing.is_empty() {
+            result.recipes_skipped += 1;
+            result.errors.push(format!(
+                "Receita '{}': ingrediente(s) não encontrados: {}",
+                recipe.name,
+                missing.join(", ")
+            ));
+            continue;
+        }
+
+        let input = RecipeInput {
+            name: recipe.name,
+            category: recipe.category,
+            portions: recipe.portions,
+            instructions: recipe.instructions,
+            ingredients: resolved,
+            prep_time_minutes: recipe.prep_time_minutes,
+            cook_time_minutes: recipe.cook_time_minutes,
+            tags: recipe.tags,
+            image_base64: None,
+            event_id: None,
+        };
+        match create_recipe(db, input).await {
+            Ok(_) => result.recipes_created += 1,
+            Err(e) => {
+                result.recipes_skipped += 1;
+                result.errors.push(e.to_string());
+            }
+        }
+    }
 
     Ok(result)
 }
@@ -4048,26 +4115,11 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
 
 /// Get waste report for a date range
 /// Note: We don't have explicit waste tracking, so we estimate from stock reductions not linked to recipes
-pub async fn get_waste_report(db: &Database, days: u32) -> LibsqlResult<WasteReport> {
-    let conn = get_conn(db).await?;
-    let start_date = Utc::now() - chrono::Duration::days(days as i64);
-    let _start_str = start_date.to_rfc3339();
-
-    // For waste estimation, we look at stock quantity decreases that aren't explained by recipes
-    // This is a simplified implementation - in a real app you'd have a waste_log table
-    let _rows = conn.query(
-        r#"
-        SELECT i.id, i.name, i.unit, i.price_per_unit,
-               COALESCE(s.quantity, 0) as current_qty
-        FROM ingredients i
-        LEFT JOIN stock s ON i.id = s.ingredient_id
-        WHERE i.price_per_unit > 0
-        "#,
-        (),
-    ).await?;
-
-    // Since we don't have historical stock snapshots, return empty for now
-    // In a real implementation, you'd track stock changes over time
+// ponytail: waste estimation needs a stock-decrease-not-explained-by-recipes
+// history we don't track (no waste_log table); this used to run a query and
+// then discard the result before always returning zero — dead work removed,
+// still honestly empty until waste tracking exists.
+pub async fn get_waste_report(_db: &Database, _days: u32) -> LibsqlResult<WasteReport> {
     Ok(WasteReport {
         total_wasted_value: 0.0,
         by_ingredient: Vec::new(),
@@ -4077,65 +4129,14 @@ pub async fn get_waste_report(db: &Database, days: u32) -> LibsqlResult<WasteRep
 
 /// Get stock trends for a date range
 /// Returns snapshots of stock levels over time
-pub async fn get_stock_trends(db: &Database, days: u32) -> LibsqlResult<Vec<StockSnapshot>> {
-    let conn = get_conn(db).await?;
-    let start_date = Utc::now() - chrono::Duration::days(days as i64);
-    let _start_str = start_date.to_rfc3339();
-
-    // Since we don't have historical stock snapshots, we generate daily snapshots
-    // based on current stock and simulate the trend
-    let mut rows = conn.query(
-        r#"
-        SELECT s.ingredient_id, i.name, i.unit, s.quantity, i.price_per_unit
-        FROM stock s
-        JOIN ingredients i ON s.ingredient_id = i.id
-        WHERE i.event_id IS NULL AND s.quantity > 0
-        ORDER BY i.name
-        "#,
-        (),
-    ).await?;
-
-    let mut current_stock: Vec<(i64, String, Unit, f64, f64)> = Vec::new();
-    while let Some(row) = rows.next().await? {
-        let ingredient_id: i64 = row.get(0)?;
-        let ingredient_name: String = row.get(1)?;
-        let unit_str: String = row.get(2)?;
-        let unit = match unit_str.as_str() {
-            "gram" => Unit::Gram, "kilogram" => Unit::Kilogram, "milligram" => Unit::Milligram,
-            "ounce" => Unit::Ounce, "pound" => Unit::Pound,
-            "milliliter" => Unit::Milliliter, "liter" => Unit::Liter, "fluid_ounce" => Unit::FluidOunce,
-            "cup" => Unit::Cup, "pint" => Unit::Pint, "quart" => Unit::Quart, "gallon" => Unit::Gallon,
-            "teaspoon" => Unit::Teaspoon, "tablespoon" => Unit::Tablespoon,
-            "piece" => Unit::Piece, "dozen" => Unit::Dozen,
-            "pinch" => Unit::Pinch, "bunch" => Unit::Bunch, "clove" => Unit::Clove, "slice" => Unit::Slice,
-            _ => Unit::Gram,
-        };
-        let quantity: f64 = row.get(3)?;
-        let price_per_unit: f64 = row.get(4)?;
-        current_stock.push((ingredient_id, ingredient_name, unit, quantity, price_per_unit));
-    }
-
-    // Generate snapshots for each day
-    let mut snapshots = Vec::new();
-    for day_offset in 0..days {
-        let snapshot_date = start_date + chrono::Duration::days(day_offset as i64);
-        for (ingredient_id, ingredient_name, _unit, quantity, price_per_unit) in &current_stock {
-            // Add some variation for demo purposes
-            let variation = 1.0 + (day_offset as f64 * 0.02) - 0.05; // slight trend
-            let qty = (*quantity * variation).max(0.0);
-            let value = qty * *price_per_unit;
-            
-            snapshots.push(StockSnapshot {
-                date: snapshot_date,
-                ingredient_id: *ingredient_id,
-                ingredient_name: ingredient_name.clone(),
-                quantity: qty,
-                value,
-            });
-        }
-    }
-
-    Ok(snapshots)
+// ponytail: no historical stock-snapshot table exists, so a real trend over
+// `days` can't be computed — this used to fabricate one with a fake variation
+// formula, which lied to the user (a plausible-looking but invented line
+// chart). A single "today" point isn't a trend either and the chart has no
+// clean way to render it, so return empty like get_waste_report — add a
+// snapshots table (written on every stock change) if a real trend is needed.
+pub async fn get_stock_trends(_db: &Database, _days: u32) -> LibsqlResult<Vec<StockSnapshot>> {
+    Ok(Vec::new())
 }
 
 /// Get meal statistics for a date range
@@ -5781,5 +5782,44 @@ mod fase3_stock_tests {
 
         let _ = std::fs::remove_dir_all(&data_dir);
         let _ = std::fs::remove_dir_all(&dest_dir);
+    }
+
+    /// Regression test for the audit-flagged export/import bugs: export_data
+    /// used to drop every recipe's ingredients (H2), and import_data used to
+    /// silently skip every recipe (H3). A recipe's ingredients must survive
+    /// an export -> import round trip into a fresh database.
+    #[tokio::test]
+    async fn recipe_ingredients_round_trip_through_export_and_import() {
+        let db = test_db().await;
+        let flour = create_ingredient(&db, IngredientInput {
+            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.0, category: None, event_id: None,
+        }).await.unwrap();
+        create_recipe(&db, RecipeInput {
+            name: "Pão".into(),
+            category: "Padaria".into(),
+            portions: 4,
+            instructions: "Amassar e cozer.".into(),
+            ingredients: vec![RecipeIngredientInput { ingredient_id: flour.id, quantity: 0.5, unit: Unit::Kilogram }],
+            prep_time_minutes: None,
+            cook_time_minutes: None,
+            tags: vec![],
+            image_base64: None,
+            event_id: None,
+        }).await.unwrap();
+
+        let exported = export_data(&db).await.unwrap();
+        assert_eq!(exported.recipes.len(), 1);
+        assert_eq!(exported.recipes[0].ingredients.len(), 1);
+        assert_eq!(exported.recipes[0].ingredients[0].ingredient_name, "Farinha");
+
+        let fresh_db = test_db().await;
+        let result = import_data(&fresh_db, exported).await.unwrap();
+        assert_eq!(result.recipes_created, 1);
+        assert_eq!(result.recipes_skipped, 0);
+
+        let recipes = recipes_list(&fresh_db).await.unwrap();
+        assert_eq!(recipes.len(), 1);
+        assert_eq!(recipes[0].ingredients.len(), 1);
+        assert_eq!(recipes[0].ingredients[0].ingredient_name, "Farinha");
     }
 }

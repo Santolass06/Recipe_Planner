@@ -8,7 +8,9 @@ import "./styles/theme.css";
 const initTheme = async () => {
   try {
     await applyTheme(localStorage.getItem("mise-theme"));
-  } catch (e) {}
+  } catch (e) {
+    console.warn("theme init failed", e);
+  }
 };
 
 initTheme().finally(() => {

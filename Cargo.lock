@@ -3148,7 +3148,7 @@ dependencies = [
 
 [[package]]
 name = "mise"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "mise-core",
  "mise-tauri",
@@ -3166,7 +3166,7 @@ dependencies = [
 
 [[package]]
 name = "mise-core"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -3187,7 +3187,7 @@ dependencies = [
 
 [[package]]
 name = "mise-tauri"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "gtk",

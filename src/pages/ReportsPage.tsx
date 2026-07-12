@@ -627,37 +627,11 @@ export default function ReportsPage() {
   const { t } = useI18n();
 
   // Data states
-  const [costReport, setCostReport] = useState<CostReport | null>({
-    total_spent: 842.5, daily_avg: 28.08,
-    by_category: [
-      { category: "Peixe e Marisco", total: 312.4, percentage: 37 },
-      { category: "Laticínios", total: 180.2, percentage: 21 },
-      { category: "Carne", total: 150.1, percentage: 18 },
-      { category: "Hortícolas", total: 110.0, percentage: 13 },
-      { category: "Mercearia", total: 89.8, percentage: 11 },
-    ],
-    by_recipe: [
-      { recipe_id: 1, recipe_name: "Risotto de Camarão", total_cost: 210.5, portions: 4, cost_per_portion: 5.2, count: 12 },
-      { recipe_id: 2, recipe_name: "Bacalhau à Brás", total_cost: 180.0, portions: 4, cost_per_portion: 4.8, count: 9 },
-      { recipe_id: 3, recipe_name: "Francesinha", total_cost: 140.0, portions: 2, cost_per_portion: 7.1, count: 6 },
-    ],
-    by_supplier: [
-      { supplier: "Talho Central", total: 175.1, percentage: 40 },
-      { supplier: "Peixaria do Porto", total: 130.0, percentage: 30 },
-      { supplier: "Mercado Municipal", total: 90.0, percentage: 20 },
-    ],
-  } /* TEMP sample for screenshot */);
+  const [costReport, setCostReport] = useState<CostReport | null>(null);
   const [wasteReport, setWasteReport] = useState<WasteReport | null>(null);
   const [stockTrends, setStockTrends] = useState<StockSnapshot[]>([]);
   const [mealStats, setMealStats] = useState<MealStats | null>(null);
-  const [priceTrends, setPriceTrends] = useState<PricePoint[]>([
-    { date: "2026-01-15", price: 3.9, supplier: "Peixaria do Porto" },
-    { date: "2026-02-15", price: 4.1, supplier: "Peixaria do Porto" },
-    { date: "2026-03-15", price: 4.3, supplier: "Peixaria do Porto" },
-    { date: "2026-04-15", price: 4.5, supplier: "Peixaria do Porto" },
-    { date: "2026-05-15", price: 4.9, supplier: "Peixaria do Porto" },
-    { date: "2026-06-15", price: 5.2, supplier: "Peixaria do Porto" },
-  ] /* TEMP sample for screenshot */);
+  const [priceTrends, setPriceTrends] = useState<PricePoint[]>([]);
   const [ingredients, setIngredients] = useState<{ id: number; name: string }[]>([]);
   const [priceTrendIngredientId, setPriceTrendIngredientId] = useState<number | null>(null);
 
@@ -675,7 +649,7 @@ export default function ReportsPage() {
       switch (activeTab) {
         case "costs": {
           const data = await invoke<CostReport>("report_cost", { days });
-          if (data && data.total_spent) setCostReport(data); // TEMP guard for screenshot
+          setCostReport(data);
           break;
         }
         case "waste": {
@@ -696,7 +670,7 @@ export default function ReportsPage() {
         case "prices": {
           if (priceTrendIngredientId) {
             const data = await invoke<PricePoint[]>("report_price_trends", { ingredientId: priceTrendIngredientId, days });
-            if (data && data.length) setPriceTrends(data); // TEMP guard for screenshot
+            setPriceTrends(data);
           }
           break;
         }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import { useNavigate } from "react-router-dom";
 import { invoke } from "../lib/devInvoke";
 import { useToast } from "../components/ui/Toast";
 import PageHeader from "../components/ui/PageHeader";
@@ -37,6 +38,7 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(false);
   const { showToast } = useToast();
   const { t } = useI18n();
+  const navigate = useNavigate();
   const dayShortLabels = getDayShortLabels(t);
   const monthLabels = getMonthLabels(t);
   const mealLabels = getMealLabels(t);
@@ -79,8 +81,10 @@ export default function CalendarPage() {
     setSelectedDate(date);
   }
 
-  function handleMealClick(entry: MealPlanEntryWithRecipe) {
-    window.location.href = `/receitas/${entry.recipe_id}`;
+  function handleMealClick(_entry: MealPlanEntryWithRecipe) {
+    // ponytail: no recipe detail route exists yet, only the list — send there
+    // instead of a dead URL. Add /receitas/:id when a detail page exists.
+    navigate("/receitas");
   }
 
   const getMonthDays = useMemo(() => {
