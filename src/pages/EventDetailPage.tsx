@@ -100,7 +100,7 @@ export default function EventDetailPage() {
       setIngredientCreateOpen(false);
       await load();
     } catch (e) {
-      showToast(t("events.copyError"), "err");
+      showToast(t("events.ingredientCreateError"), "err");
     } finally {
       setIngredientSaving(false);
     }
@@ -203,7 +203,7 @@ export default function EventDetailPage() {
       setCreateOpen(false);
       await load();
     } catch (e) {
-      showToast(t("events.copyError"), "err");
+      showToast(t("events.recipeCreateError"), "err");
     } finally {
       setSaving(false);
     }
