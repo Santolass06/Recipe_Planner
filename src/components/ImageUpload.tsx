@@ -147,7 +147,7 @@ export default function ImageUpload({
               maxHeight: "200px",
               borderRadius: "var(--radius-md)",
               boxShadow: "var(--shadow-sm)",
-              border: "1px solid var(--color-border)",
+              border: "1px solid var(--line)",
             }}
           />
           <button
@@ -161,7 +161,7 @@ export default function ImageUpload({
               top: "-8px",
               right: "-8px",
               zIndex: 10,
-              background: "var(--color-danger)",
+              background: "var(--red)",
               boxShadow: "var(--shadow-md)",
             }}
           >
