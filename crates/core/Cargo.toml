@@ -12,7 +12,6 @@ chrono = { workspace = true }
 validator = { workspace = true }
 specta = { workspace = true }
 ts-rs = { workspace = true }
-image = { workspace = true }
 dirs = { workspace = true }
 base64 = { workspace = true }
 reqwest = { workspace = true }
