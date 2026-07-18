@@ -86,6 +86,7 @@ function KpiRow({ stats, navigateToStock, navigateToShopping, t }: {
         icon="euro" color="var(--ember)" label={t("dashboard.kpi.stockValue")}
         value={formatEur(stats?.total_stock_value ?? 0)}
         subIcon="inventory_2" sub={t("dashboard.kpi.stockValueSub", { count: stats?.total_ingredients ?? 0 })}
+        onClick={navigateToStock}
       />
       <KpiCard
         icon="warning" color="var(--amber)" label={t("dashboard.kpi.lowStock")}
@@ -109,9 +110,9 @@ function KpiRow({ stats, navigateToStock, navigateToShopping, t }: {
   );
 }
 
-function AlertsPanel({ lowStock, navigateToShopping, t }: { lowStock: StockItemWithIngredient[]; navigateToShopping: () => void; t: T }) {
+function AlertsPanel({ lowStock, navigateToStock, navigateToShopping, t }: { lowStock: StockItemWithIngredient[]; navigateToStock: () => void; navigateToShopping: () => void; t: T }) {
   return (
-    <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+    <div className="card" style={{ padding: 0, overflow: "hidden", cursor: "pointer" }} onClick={navigateToStock}>
       <div style={{ padding: "15px 19px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span className="ms" style={{ fontSize: 19, color: "var(--amber)" }}>warning</span>
@@ -141,7 +142,7 @@ function AlertsPanel({ lowStock, navigateToShopping, t }: { lowStock: StockItemW
                 </div>
                 <StatusPill status={isOut ? "out" : "low"} label={isOut ? t("dashboard.alerts.outOfStock") : t("dashboard.alerts.low")} />
                 <button
-                  onClick={navigateToShopping}
+                  onClick={(e) => { e.stopPropagation(); navigateToShopping(); }}
                   style={{ border: "1px solid var(--line)", background: "var(--inset)", borderRadius: 7, height: 28, padding: "0 10px", fontSize: "11.5px", fontWeight: 600, color: "var(--ink-2)", cursor: "pointer", fontFamily: "var(--sans)" }}
                 >
                   {t("dashboard.alerts.addToList")}
@@ -155,8 +156,8 @@ function AlertsPanel({ lowStock, navigateToShopping, t }: { lowStock: StockItemW
   );
 }
 
-function WeekPanel({ upcomingMeals, mealsThisWeek, navigateToMealPlanner, t }: {
-  upcomingMeals: MealPlanEntryWithRecipe[]; mealsThisWeek: number; navigateToMealPlanner: () => void; t: T;
+function WeekPanel({ upcomingMeals, mealsThisWeek, navigateToMealPlanner, navigateToCalendar, t }: {
+  upcomingMeals: MealPlanEntryWithRecipe[]; mealsThisWeek: number; navigateToMealPlanner: () => void; navigateToCalendar: () => void; t: T;
 }) {
   const dowShort = getDowShort(t);
   const localKey = (d: Date) =>
@@ -174,7 +175,7 @@ function WeekPanel({ upcomingMeals, mealsThisWeek, navigateToMealPlanner, t }: {
   });
 
   return (
-    <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+    <div className="card" style={{ padding: 0, overflow: "hidden", cursor: "pointer" }} onClick={navigateToCalendar}>
       <div style={{ padding: "15px 19px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span className="ms" style={{ fontSize: 19, color: "var(--ember)" }}>calendar_view_week</span>
@@ -182,7 +183,7 @@ function WeekPanel({ upcomingMeals, mealsThisWeek, navigateToMealPlanner, t }: {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{t("dashboard.week.planned", { count: mealsThisWeek })}</span>
-          <button onClick={navigateToMealPlanner} className="mono" style={{ fontSize: 11, color: "var(--ember)", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
+          <button onClick={(e) => { e.stopPropagation(); navigateToMealPlanner(); }} className="mono" style={{ fontSize: 11, color: "var(--ember)", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
             {t("dashboard.week.plan")}
           </button>
         </div>
@@ -195,7 +196,7 @@ function WeekPanel({ upcomingMeals, mealsThisWeek, navigateToMealPlanner, t }: {
               <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: d.isToday ? "var(--ember)" : "var(--ink)" }}>{d.dayNum}</div>
             </div>
             {d.meals.slice(0, 2).map(m => (
-              <div key={m.id} style={{ background: "var(--inset)", borderLeft: `2px solid ${MEAL_COLOR[m.meal_type] ?? "var(--ink-3)"}`, borderRadius: 4, padding: "5px 6px", cursor: "pointer" }} onClick={navigateToMealPlanner}>
+              <div key={m.id} style={{ background: "var(--inset)", borderLeft: `2px solid ${MEAL_COLOR[m.meal_type] ?? "var(--ink-3)"}`, borderRadius: 4, padding: "5px 6px", cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); navigateToMealPlanner(); }}>
                 <div style={{ fontSize: "10.5px", fontWeight: 600, color: "var(--ink)", lineHeight: 1.15 }}>{m.recipe_name}</div>
                 <div className="mono" style={{ fontSize: "8.5px", color: "var(--ink-3)" }}>{m.portions} {t("dashboard.week.portions")}</div>
               </div>
@@ -209,7 +210,7 @@ function WeekPanel({ upcomingMeals, mealsThisWeek, navigateToMealPlanner, t }: {
 
 function PendingShoppingPanel({ pendingCount, navigateToShopping, t }: { pendingCount: number; navigateToShopping: () => void; t: T }) {
   return (
-    <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", cursor: "pointer" }} onClick={navigateToShopping}>
       <div style={{ padding: "15px 19px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 8 }}>
         <span className="ms" style={{ fontSize: 19, color: "var(--ember)" }}>shopping_cart</span>
         <span style={{ fontWeight: 600, fontSize: 14 }}>{t("dashboard.pendingShopping.title")}</span>
@@ -219,7 +220,7 @@ function PendingShoppingPanel({ pendingCount, navigateToShopping, t }: { pending
         <div style={{ fontSize: "12.5px", color: "var(--ink-2)" }}>{t("dashboard.pendingShopping.itemsToBuy")}</div>
       </div>
       <div style={{ padding: "13px 19px", borderTop: "1px solid var(--line-2)" }}>
-        <button className="btn btn-ghost btn-sm" style={{ width: "100%" }} onClick={navigateToShopping}>{t("dashboard.pendingShopping.viewFullList")}</button>
+        <button className="btn btn-ghost btn-sm" style={{ width: "100%" }} onClick={(e) => { e.stopPropagation(); navigateToShopping(); }}>{t("dashboard.pendingShopping.viewFullList")}</button>
       </div>
     </div>
   );
@@ -329,6 +330,7 @@ export default function DashboardPage() {
 
   const navigateToStock = useCallback(() => navigate("/armazem"), [navigate]);
   const navigateToMealPlanner = useCallback(() => navigate("/planeamento"), [navigate]);
+  const navigateToCalendar = useCallback(() => navigate("/calendario"), [navigate]);
   const navigateToShopping = useCallback(() => navigate("/compras"), [navigate]);
   const navigateToRecipes = useCallback(() => navigate("/receitas/nova"), [navigate]);
 
@@ -362,8 +364,8 @@ export default function DashboardPage() {
       <KpiRow stats={stats} navigateToStock={navigateToStock} navigateToShopping={navigateToShopping} t={t} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1.05fr 1.35fr", gap: 16, marginBottom: 16 }}>
-        <AlertsPanel lowStock={lowStock} navigateToShopping={navigateToShopping} t={t} />
-        <WeekPanel upcomingMeals={upcomingMeals} mealsThisWeek={stats?.meals_this_week ?? 0} navigateToMealPlanner={navigateToMealPlanner} t={t} />
+        <AlertsPanel lowStock={lowStock} navigateToStock={navigateToStock} navigateToShopping={navigateToShopping} t={t} />
+        <WeekPanel upcomingMeals={upcomingMeals} mealsThisWeek={stats?.meals_this_week ?? 0} navigateToMealPlanner={navigateToMealPlanner} navigateToCalendar={navigateToCalendar} t={t} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>

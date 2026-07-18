@@ -46,21 +46,44 @@ const stock = [
   { id: 8, ingredient_id: 14, ingredient_name: "Vinho branco", ingredient_unit: "liter", quantity: 1, min_quantity: 3, price_per_unit: 4.2, updated_at: now },
 ];
 
-function recipe(id: number, name: string, category: string, portions: number, prep: number, cook: number, tags: string[], favorite = false) {
+// ri: ingredient_name is looked up from `ingredients` so it can never drift
+// from the catalog entry the id points to.
+function ri(id: number, recipe_id: number, ingredient_id: number, quantity: number, unit: string) {
+  const ingredient_name = ingredients.find((i) => i.id === ingredient_id)?.name ?? "?";
+  return { id, recipe_id, ingredient_id, ingredient_name, quantity, unit };
+}
+
+function recipe(id: number, name: string, category: string, portions: number, prep: number, cook: number, tags: string[], recipeIngredients: ReturnType<typeof ri>[], favorite = false) {
   return {
     id, name, category, portions, instructions: "", favorite,
     prep_time_minutes: prep, cook_time_minutes: cook,
     tags: JSON.stringify(tags), image_path: null, created_at: now, updated_at: now,
+    ingredients: recipeIngredients,
   };
 }
 
 const recipes = [
-  recipe(1, "Risotto de camarão", "Pratos principais", 4, 25, 20, ["Marisco", "Cremoso", "Sazonal"], true),
-  recipe(2, "Bacalhau à Brás", "Pratos principais", 6, 20, 20, ["Peixe"]),
-  recipe(3, "Massa alho e azeite", "Massas", 4, 10, 10, ["Vegetariano"]),
-  recipe(4, "Sopa de legumes", "Sopas", 8, 15, 20, ["Vegan"]),
-  recipe(5, "Pastéis de nata", "Sobremesas", 24, 30, 30, ["Doce"]),
-  recipe(6, "Pão caseiro", "Padaria", 12, 30, 150, ["Fermento"]),
+  recipe(1, "Risotto de camarão", "Pratos principais", 4, 25, 20, ["Marisco", "Cremoso", "Sazonal"], [
+    ri(1, 1, 13, 0.6, "kilogram"), ri(2, 1, 16, 0.32, "kilogram"), ri(3, 1, 2, 0.2, "kilogram"),
+    ri(4, 1, 14, 0.15, "liter"), ri(5, 1, 8, 0.05, "kilogram"), ri(6, 1, 9, 0.1, "liter"),
+  ], true),
+  recipe(2, "Bacalhau à Brás", "Pratos principais", 6, 20, 20, ["Peixe"], [
+    ri(7, 2, 12, 0.9, "kilogram"), ri(8, 2, 4, 0.6, "kilogram"), ri(9, 2, 10, 8, "piece"),
+    ri(10, 2, 2, 0.3, "kilogram"), ri(11, 2, 5, 0.08, "liter"),
+  ]),
+  recipe(3, "Massa alho e azeite", "Massas", 4, 10, 10, ["Vegetariano"], [
+    ri(12, 3, 1, 4, "piece"), ri(13, 3, 5, 0.1, "liter"), ri(14, 3, 7, 0.01, "kilogram"), ri(15, 3, 15, 20, "gram"),
+  ]),
+  recipe(4, "Sopa de legumes", "Sopas", 8, 15, 20, ["Vegan"], [
+    ri(16, 4, 2, 0.4, "kilogram"), ri(17, 4, 3, 0.6, "kilogram"), ri(18, 4, 4, 0.8, "kilogram"),
+    ri(19, 4, 5, 0.05, "liter"), ri(20, 4, 7, 0.02, "kilogram"),
+  ]),
+  recipe(5, "Pastéis de nata", "Sobremesas", 24, 30, 30, ["Doce"], [
+    ri(21, 5, 10, 12, "piece"), ri(22, 5, 9, 0.5, "liter"), ri(23, 5, 8, 0.3, "kilogram"), ri(24, 5, 6, 0.4, "kilogram"),
+  ]),
+  recipe(6, "Pão caseiro", "Padaria", 12, 30, 150, ["Fermento"], [
+    ri(25, 6, 6, 1, "kilogram"), ri(26, 6, 7, 0.02, "kilogram"),
+  ]),
 ];
 
 const suppliers = [
@@ -71,8 +94,10 @@ const suppliers = [
 ];
 
 const dashboardStats = {
-  low_stock_count: 5, expiring_soon_count: 3, meals_this_week: 6,
-  total_stock_value: 3284, total_recipes: recipes.length, total_ingredients: ingredients.length,
+  low_stock_count: stock.filter((s) => s.quantity > 0 && s.quantity <= s.min_quantity).length,
+  expiring_soon_count: 0, meals_this_week: 6,
+  total_stock_value: stock.reduce((sum, s) => sum + s.quantity * s.price_per_unit, 0),
+  total_recipes: recipes.length, total_ingredients: ingredients.length,
   pending_shopping_items: 12,
 };
 
