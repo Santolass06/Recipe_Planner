@@ -5545,3 +5545,154 @@ mod fase3_stock_tests {
         assert_eq!(recipes[0].ingredients[0].ingredient_name, "Farinha");
     }
 }
+
+/// Regression coverage for the base CRUD paths (ingredients, recipes, stock,
+/// suppliers) — the "bloqueador comercial" gap flagged by the hermes audit
+/// (dim_04, 2.7% coverage). Not exhaustive; covers create/read/update/delete
+/// for each so the god-object split in db.rs (planned separately) has a
+/// safety net to refactor against.
+#[cfg(test)]
+mod crud_base_tests {
+    use super::*;
+
+    async fn test_db() -> Database {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("mise_test_{unique}.db"));
+        let db = Builder::new_local(path.to_str().unwrap()).build().await.unwrap();
+        let _ = get_conn(&db).await.unwrap().query("PRAGMA journal_mode = WAL;", ()).await.unwrap();
+        run_migrations(&db).await.unwrap();
+        db
+    }
+
+    #[tokio::test]
+    async fn ingredient_crud_round_trip() {
+        let db = test_db().await;
+
+        let created = create_ingredient(&db, IngredientInput {
+            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.2, category: None, event_id: None,
+        }).await.unwrap();
+        assert_eq!(created.name, "Farinha");
+        assert_eq!(created.unit, Unit::Kilogram);
+        assert!(!created.favorite);
+
+        let listed = ingredients_list(&db).await.unwrap();
+        assert!(listed.iter().any(|i| i.id == created.id));
+
+        let updated = update_ingredient(&db, created.id, IngredientInput {
+            name: "Farinha Integral".into(), unit: Unit::Gram, price_per_unit: 2.5, category: None, event_id: None,
+        }).await.unwrap();
+        assert_eq!(updated.name, "Farinha Integral");
+        assert_eq!(updated.unit, Unit::Gram);
+        assert_eq!(updated.price_per_unit, 2.5);
+
+        let favorited = toggle_ingredient_favorite(&db, created.id).await.unwrap();
+        assert!(favorited.favorite);
+        let unfavorited = toggle_ingredient_favorite(&db, created.id).await.unwrap();
+        assert!(!unfavorited.favorite);
+
+        delete_ingredient(&db, created.id).await.unwrap();
+        let listed_after = ingredients_list(&db).await.unwrap();
+        assert!(!listed_after.iter().any(|i| i.id == created.id));
+    }
+
+    #[tokio::test]
+    async fn recipe_crud_round_trip() {
+        let db = test_db().await;
+        let ingredient = create_ingredient(&db, IngredientInput {
+            name: "Ovo".into(), unit: Unit::Piece, price_per_unit: 0.2, category: None, event_id: None,
+        }).await.unwrap();
+
+        let created = create_recipe(&db, RecipeInput {
+            name: "Omelete".into(), category: "Pequeno-almoço".into(), portions: 2,
+            instructions: "Bater e fritar.".into(), prep_time_minutes: Some(5), cook_time_minutes: Some(5),
+            tags: vec!["rápido".into()], image_base64: None, event_id: None,
+            ingredients: vec![RecipeIngredientInput { ingredient_id: ingredient.id, quantity: 3.0, unit: Unit::Piece }],
+        }).await.unwrap();
+        assert_eq!(created.recipe.name, "Omelete");
+        assert_eq!(created.ingredients.len(), 1);
+
+        let fetched = get_recipe(&db, created.recipe.id).await.unwrap();
+        assert_eq!(fetched.name, "Omelete");
+
+        let updated = update_recipe(&db, created.recipe.id, RecipeInput {
+            name: "Omelete de Queijo".into(), category: "Pequeno-almoço".into(), portions: 3,
+            instructions: "Bater, juntar queijo e fritar.".into(), prep_time_minutes: Some(5), cook_time_minutes: Some(7),
+            tags: vec![], image_base64: None, event_id: None,
+            ingredients: vec![RecipeIngredientInput { ingredient_id: ingredient.id, quantity: 4.0, unit: Unit::Piece }],
+        }).await.unwrap();
+        assert_eq!(updated.recipe.name, "Omelete de Queijo");
+        assert_eq!(updated.recipe.portions, 3);
+        assert_eq!(updated.ingredients[0].quantity, 4.0);
+
+        let favorited = toggle_recipe_favorite(&db, created.recipe.id).await.unwrap();
+        assert!(favorited.favorite);
+
+        let cloned = clone_recipe(&db, created.recipe.id).await.unwrap();
+        assert_eq!(cloned.recipe.name, "Omelete de Queijo (Cópia)");
+        assert_ne!(cloned.recipe.id, created.recipe.id);
+        assert_eq!(cloned.ingredients.len(), 1);
+
+        delete_recipe(&db, created.recipe.id).await.unwrap();
+        let listed_after = recipes_list(&db).await.unwrap();
+        assert!(!listed_after.iter().any(|r| r.recipe.id == created.recipe.id));
+    }
+
+    #[tokio::test]
+    async fn stock_crud_round_trip() {
+        let db = test_db().await;
+        let ingredient = create_ingredient(&db, IngredientInput {
+            name: "Açúcar".into(), unit: Unit::Kilogram, price_per_unit: 0.9, category: None, event_id: None,
+        }).await.unwrap();
+
+        let created = upsert_stock(&db, StockInput {
+            ingredient_id: ingredient.id, quantity: 5.0, min_quantity: 1.0,
+        }).await.unwrap();
+        assert_eq!(created.quantity, 5.0);
+        assert_eq!(created.min_quantity, 1.0);
+
+        let fetched = get_stock(&db, ingredient.id).await.unwrap();
+        assert_eq!(fetched.quantity, 5.0);
+
+        // upsert_stock on an existing row updates rather than duplicating
+        let upserted = upsert_stock(&db, StockInput {
+            ingredient_id: ingredient.id, quantity: 8.0, min_quantity: 2.0,
+        }).await.unwrap();
+        assert_eq!(upserted.quantity, 8.0);
+        let all_stock = stock_list(&db).await.unwrap();
+        assert_eq!(all_stock.iter().filter(|s| s.ingredient_id == ingredient.id).count(), 1);
+
+        let quantity_set = update_stock_quantity(&db, ingredient.id, 3.0).await.unwrap();
+        assert_eq!(quantity_set.quantity, 3.0);
+
+        delete_stock(&db, ingredient.id).await.unwrap();
+        let listed_after = stock_list(&db).await.unwrap();
+        assert!(!listed_after.iter().any(|s| s.ingredient_id == ingredient.id));
+    }
+
+    #[tokio::test]
+    async fn supplier_crud_round_trip() {
+        let db = test_db().await;
+
+        let created = create_supplier(&db, SupplierInput {
+            name: "Continente".into(), contact: Some("geral@continente.pt".into()), notes: None,
+        }).await.unwrap();
+        assert_eq!(created.name, "Continente");
+
+        let fetched = supplier_get(&db, created.id).await.unwrap();
+        assert_eq!(fetched.name, "Continente");
+
+        let updated = update_supplier(&db, created.id, SupplierInput {
+            name: "Continente Online".into(), contact: Some("online@continente.pt".into()), notes: Some("entrega grátis".into()),
+        }).await.unwrap();
+        assert_eq!(updated.name, "Continente Online");
+        assert_eq!(updated.notes.as_deref(), Some("entrega grátis"));
+
+        let listed = suppliers_list(&db).await.unwrap();
+        assert!(listed.iter().any(|s| s.id == created.id));
+
+        delete_supplier(&db, created.id).await.unwrap();
+        let listed_after = suppliers_list(&db).await.unwrap();
+        assert!(!listed_after.iter().any(|s| s.id == created.id));
+    }
+}
