@@ -1,0 +1,572 @@
+# Auditoria de Arquitetura — Recipe Planner (Mise)
+
+**Agente:** #1 (Arquitetura)
+**Data:** 2026-07-18
+**Ficheiros lidos:** 42 ficheiros, ~8.753 linhas Rust + ~11.332 linhas TypeScript/CSS ≈ ~20.085 linhas
+
+---
+
+## Sumário Executivo
+
+| Dimensão | Rating |
+|----------|--------|
+| Separação entre crates | 8/10 |
+| Fluxo de dados frontend→backend | 7/10 |
+| Acoplamento entre módulos | 6/10 |
+| Coesão de componentes React | 6/10 |
+| Router organization | 4/10 |
+| State management | 5/10 |
+| Tratamento de erros | 4/10 |
+| Duplicação de lógica | 3/10 |
+| Ausência de dependências circulares | 9/10 |
+| Escalabilidade | 5/10 |
+| **GLOBAL** | **5.7/10** |
+
+---
+
+## Rating Global: 6/10
+
+**Justificação:** A arquitetura tem uma base sólida — crates bem separados em papel (core/domínio, tauri/commands, src-tauri/binary), sem dependências circulares, com domínios tipados (Unit, Ingredient, Recipe, etc.) e i18n lazy-loaded. No entanto, sofre de problemas estruturais reais que penalizam a manutenção e escalabilidade: db.rs monolítico (5825 linhas), duplicação massiva de parsing de unidades (8+ blocos idênticos), 3 camadas de delegação desnecessárias no backend, ausência de lazy-loading no router (15 páginas carregadas eager), tipo `Result<_, String>` que perde toda a informação de erro, e ausência de state management partilhado (cada página refaz os mesmos fetch à DB). A app é funcional para single-user mas escalar para multi-user, cloud-sync, ou equipas grandes exigiria refactor significativo.
+
+---
+
+## Achados Detalhados
+
+### 1. Separação de Responsabilidades entre Crates
+
+#### 1.1. [HIGH] Três camadas de delegação desnecessárias no backend
+
+**Ficheiro:** `crates/tauri/src/lib.rs` (linhas 67-519)
+**Problema:** Cada comando Tauri (linha 535+) chama um método em `AppDb` (linha 67+), que por sua vez chama `mise_core::db::*`. Isto cria 3 níveis de indentação para cada operação: `pub async fn ingredient_create(...)` → `db.create_ingredient(input)` → `mise_core::db::create_ingredient(...)`. O `AppDb` wrapper é uma pass-through que não adiciona valor — não faz caching, logging, validação extra, ou transformação.
+
+**Código exemplo (linhas 541-547):**
+```rust
+#[tauri::command]
+pub async fn ingredient_create(
+    db: tauri::State<'_, crate::AppDb>,
+    input: IngredientInput,
+) -> Result<Ingredient, String> {
+    db.create_ingredient(input).await.map_err(|e| e.to_string())
+}
+```
+
+**Código exemplo (linhas 71-73):**
+```rust
+pub async fn create_ingredient(&self, input: IngredientInput) -> Result<Ingredient, String> {
+    mise_core::db::create_ingredient(&self.db, input).await.map_err(|e| e.to_string())
+}
+```
+
+**Impacto:** 50+ métodos pass-through que precisam de ser mantidos, testados, e actualizados em paralelo. Cada novo endpoint requer tocar 3 ficheiros.
+
+**Sugestão:** Remover `AppDb` e fazer os comandos Tauri chamarem `mise_core::db::*` directamente com `db: tauri::State<'_, Database>`. Se o `data_dir` é necessário para imagens, passar como `State` separado. Isto elimina uma camada inteira.
+
+---
+
+#### 1.2. [MEDIUM] `crates/tauri` depende de `mise-core` mas também de `libsql` e `chrono` que já estão em core
+
+**Ficheiro:** `crates/tauri/Cargo.toml` (linhas 17-20)
+**Problema:** `mise-tauri` repete dependências (`serde`, `tokio`, `specta`, `ts-rs`, `libsql`, `chrono`) que já são resolvidas via `mise-core`. Embora o workspace as tenha como `workspace.dependencies`, a lista em `mise-tauri/Cargo.toml` é redundante para as que vêm através de `mise-core`.
+
+**Código (linhas 17-20):**
+```toml
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+specta = { workspace = true }
+ts-rs = { workspace = true }
+libsql = { workspace = true }
+chrono = { workspace = true }
+```
+
+**Impacto:** Baixo — são workspace references, não versões duplicadas. Mas `libsql` e `chrono` são re-exportados por `mise-core` e raramente precisam de ser dependências directas.
+
+**Sugestão:** Remover `libsql`, `chrono`, `serde_json` de `mise-tauri/Cargo.toml` se não forem usados directamente no crate (só via `mise-core::*`).
+
+---
+
+### 2. Fluxo de Dados Frontend→Tauri IPC→Core→DB
+
+#### 2.1. [MEDIUM] Frontend importa bindings TypeScript do caminho absoluto `../../crates/core/bindings/`
+
+**Ficheiros:** `src/pages/RecipesPage.tsx` (linha 11-13), `src/pages/ShoppingListPage.tsx` (linha 11-15), etc.
+**Problema:** As páginas importam tipos gerados pelo `ts-rs` via `../../crates/core/bindings/RecipeWithIngredients`. Este caminho depende da estrutura do workspace Rust e não há garantia de que os ficheiros sejam regenerados antes de cada build.
+
+**Código exemplo (RecipesPage.tsx:11):**
+```typescript
+import type { RecipeWithIngredients as Recipe } from "../../crates/core/bindings/RecipeWithIngredients";
+```
+
+**Impacto:** Se `ts-rs` não for executado no `beforeDevCommand`/`beforeBuildCommand`, os bindings podem estar stale ou ausentes. Também cria acoplamento à estrutura interna do workspace Rust.
+
+**Sugestão:** Gerar bindings para `src/bindings/` e configurar `ts-rs` para exportar para esse diretório. Ou usar `cargo test` para garantir que os bindings estão actualizados no `beforeDevCommand`.
+
+---
+
+#### 2.2. [LOW] Uso de `invoke` genérico sem tipos fortes no lado TypeScript
+
+**Ficheiro:** `src/lib/devInvoke.ts` (linha 157-164)
+**Problema:** `invoke<T>(cmd, args)` usa genérico, mas o mapeamento entre comandos e tipos não é validado em tempo de compilação. Um comando `ingredient_create` que devolve `Ingredient` mas é invocado como `invoke<Recipe>(...)` só falha em runtime.
+
+**Código (linhas 157-164):**
+```typescript
+export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (isTauri()) return tauriInvoke<T>(cmd, args);
+  ...
+}
+```
+
+**Impacto:** Segurança de tipos frágil na fronteira IPC. O specta no Rust pode gerar tipos, mas o frontend não os usa diretamente — o `invoke` aceita qualquer `T`.
+
+**Sugestão:** Criar wrappers tipadas (ex: `ingredientsList(): Promise<Ingredient[]>`) que chamam `invoke` internamente. Isto também centralizaria a lógica de devInvoke vs real.
+
+---
+
+### 3. Acoplamento Entre Módulos
+
+#### 3.1. [MEDIUM] Todas as páginas importam bindings de `../../crates/core/bindings/*` diretamente, sem barrel
+
+**Ficheiros:** Todas as 15 páginas em `src/pages/*.tsx`
+**Problema:** Cada página importa tipos individuais de caminhos deep. Se a estrutura de bindings mudar, todas as páginas precisam de ser actualizadas. Não há um barrel (`index.ts`) para re-exportar.
+
+**Impacto:** Manutenção difícil quando se adicionam ou renomeiam tipos.
+
+**Sugestão:** Criar `src/lib/bindings.ts` que re-exporta todos os tipos.
+
+---
+
+### 4. Coesão de Componentes React
+
+#### 4.1. [HIGH] `ImageUpload.tsx` gere o seu próprio toast inline
+
+**Ficheiro:** `src/components/ImageUpload.tsx` (linhas 29-35, 205-213)
+**Problema:** O componente gerencia estado de toast localmente (`const [toast, setToast]`) com `setTimeout` manual, em vez de usar o `ToastContext` (`useToast()`) que já existe na app.
+
+**Código (linhas 32-35):**
+```typescript
+const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" | "warn" | "info" } | null>(null);
+const showToast = useCallback((msg: string, type: "ok" | "err" | "warn" | "info" = "ok") => {
+  setToast({ msg, type });
+  setTimeout(() => setToast(null), 3000);
+}, []);
+```
+
+**Impacto:** Duplicação de lógica de toast. Se o estilo do toast global mudar (ex: posição), o `ImageUpload`'s toast inline não acompanha. Já existe `useToast()` em `Toast.tsx` (linha 62).
+
+**Sugestão:** Substituir toast local por `const { showToast } = useToast()`.
+
+---
+
+#### 4.2. [MEDIUM] `Layout.tsx` gere navegação por atalhos de teclado com estado `gPressed` frágil
+
+**Ficheiro:** `src/components/Layout.tsx` (linhas 86-128)
+**Problema:** A navegação "g then i" é implementada com um timeout de 1 segundo (`gTimeout`). Se o utilizador carregar em 'g' e esperar >1s, o estado `gPressed` expira silenciosamente. É uma UX frágil que não é óbvia.
+
+**Código (linhas 108-120):**
+```typescript
+} else if (e.key.toLowerCase() === "g" && !e.ctrlKey && !e.metaKey) {
+  setGPressed(true);
+  clearTimeout(gTimeout);
+  gTimeout = setTimeout(() => setGPressed(false), 1000);
+} else if (gPressed) {
+```
+
+**Impacto:** Baixo — funcional, mas confuso para novos utilizadores que não sabem do timeout.
+
+**Sugestão:** Usar o padrão de atalhos como `Ctrl+Shift+I` para ingredientes, que não depende de estado temporal. Ou mostrar um popup de "g esperando..." quando `gPressed` está ativo.
+
+---
+
+#### 4.3. [LOW] `PlaceholderPage.tsx` com capitalização manual imperfeita
+
+**Ficheiro:** `src/components/PlaceholderPage.tsx` (linha 5)
+**Problema:** `name.charAt(0).toUpperCase() + name.slice(1)` assume que a string tem pelo menos 1 caractere. Se `name` for vazia, `name.charAt(0)` devolve uma string vazia e o resultado é `""`.
+
+**Código (linha 5):**
+```typescript
+const capitalized = name.charAt(0).toUpperCase() + name.slice(1);
+```
+
+**Impacto:** Informacional — componente usado só para páginas placeholder. Nunca crasha porque `name` é sempre hardcoded.
+
+**Sugestão:** Não precisa de fix — o componente é placeholder e os dados são estáticos. YAGNI.
+
+---
+
+### 5. Router Organization
+
+#### 5.1. [CRITICAL] Nenhuma página é lazy-loaded
+
+**Ficheiro:** `src/router.tsx` (linhas 4-18)
+**Problema:** Todas as 15 páginas são importadas estaticamente no topo do ficheiro com `import DashboardPage from "./pages/DashboardPage"`. Isto significa que o bundle inicial inclui todo o código de todas as páginas (8357 linhas de páginas + dependências).
+
+**Código (linhas 4-18):**
+```typescript
+import DashboardPage from "./pages/DashboardPage";
+import IngredientsPage from "./pages/IngredientsPage";
+import RecipesPage from "./pages/RecipesPage";
+// ... todas as 15 páginas
+```
+
+**Impacto:** Bundle inicial grande (~40KB+ minificado só de páginas). Utilizadores que só usam Dashboard+Stock pagam pelo código de Reports, ReceiptScanner, Help, etc. A Tauri serve o frontend do disco local, portanto o impacto não é catastrófico, mas vai piorar à medida que mais páginas forem adicionadas.
+
+**Sugestão:** Usar `React.lazy(() => import("./pages/DashboardPage"))` para cada página. Isto permite code-splitting por página. Dado que é Tauri (local), o ganho é menor que na web, mas a prática é boa.
+
+---
+
+#### 5.2. [LOW] Duas rotas para Dashboard (`/` e `/dashboard`)
+
+**Ficheiro:** `src/router.tsx` (linhas 25-26)
+**Problema:** Tanto `/` como `/dashboard` renderizam `<DashboardPage />`. Isto cria duas URLs para o mesmo conteúdo, o que pode causar problemas de analytics e canonical.
+
+**Código (linhas 25-26):**
+```typescript
+{ index: true, element: <DashboardPage /> },
+{ path: "dashboard", element: <DashboardPage /> },
+```
+
+**Sugestão:** Manter só `{ index: true }` e redirecionar `/dashboard` para `/` com `<Navigate>` se for necessário para compatibilidade.
+
+---
+
+### 6. State Management
+
+#### 6.1. [HIGH] Ausência de state management global partilhado
+
+**Ficheiro:** Todas as páginas em `src/pages/*.tsx`
+**Problema:** Cada página faz o seu próprio `useEffect` com `invoke()` para carregar dados. Por exemplo, `DashboardPage` faz `invoke("ingredients_list")` e `invoke("stock_list")`; se o utilizador navegar para `StockPage`, esta faz novamente `invoke("stock_list")`. Não há cache, stale-while-revalidate, ou estado partilhado entre páginas.
+
+**Código exemplo (ShoppingListPage.tsx:27-40 — padrão genérico):**
+```typescript
+useEffect(() => { loadLists(); }, []);
+const loadLists = async () => {
+  const data = await invoke<ShoppingList[]>("shopping_lists_list");
+  setLists(data);
+};
+```
+
+**Impacto:** Cada navegação descarrega e recarrega dados da DB libSQL. Com ~20K LOC e single-user, o impacto é aceitável, mas à medida que a app escala (mais utilizadores, DB remota via Turso), a latência vai tornar-se evidente. Mais grave: se o utilizador edita um ingrediente em IngredientsPage e volta ao Dashboard, o Dashboard mostra dados stale.
+
+**Sugestão:** Implementar um hook `useQuery` simples com cache em memória (mapa `string → Promise<T>` com TTL). Alternativa: usar TanStack Query (React Query) que resolve caching, refetch, stale-while-revalidate.
+
+---
+
+#### 6.2. [MEDIUM] `PageHeaderContext` expõe estado mutável via `setHeader` sem proteções
+
+**Ficheiro:** `src/components/PageHeaderContext.tsx` (linhas 19-25)
+**Problema:** `PageHeaderProvider` aceita qualquer `{ title, subtitle, actions }` sem validação. Se uma página passar `title` como vazio ou `undefined`, o topbar fica sem título.
+
+**Código (linhas 19-25):**
+```typescript
+const [state, setState] = useState<PageHeaderState>({ title: "" });
+const setHeader = useCallback((next: PageHeaderState) => setState(next), []);
+```
+
+**Impacto:** Baixo — páginas controlam o próprio título. Mas se uma página esquecer de chamar `setHeader`, o título persiste da página anterior (stale).
+
+**Sugestão:** Limpar o header no `useEffect` cleanup de cada página (`return () => setHeader({ title: "" })`) ou usar o PageHeader component que já faz isso.
+
+---
+
+### 7. Tratamento de Erros Consistente na Cadeia Inteira
+
+#### 7.1. [CRITICAL] `Result<_, String>` em toda a cadeia — perda total de tipo de erro
+
+**Ficheiros:** `crates/core/src/db.rs` (todas as funções públicas), `crates/tauri/src/lib.rs` (todas as funções AppDb e commands)
+**Problema:** `mise_core::db` devolve `LibsqlResult<T>` (que inclui detalhe do erro). O wrapper `AppDb` converte para `Result<T, String>` com `.map_err(|e| e.to_string())`. Os comandos Tauri fazem o mesmo. Isto significa que o frontend recebe apenas uma string de erro, sem código, sem contexto estrutural.
+
+**Código (crates/tauri/src/lib.rs:68):**
+```rust
+mise_core::db::ingredients_list(&self.db).await.map_err(|e| e.to_string())
+```
+
+**Código (crates/tauri/src/lib.rs:1240-1242):**
+```rust
+.map_err(|e| e.to_string())?;
+```
+
+**Impacto:** O frontend não consegue distinguir entre "ingredient not found", "DB locked", "network error" (Turso). Erros de DB são mostrados como texto cru. Não há recovery, retry, ou fallback. Para uma app single-user local, a DB raramente falha, mas quando falha é impossível dar feedback útil ao utilizador.
+
+**Sugestão:** Definir um enum `AppError` no `mise-core` que implementa `Serialize` e devolve diferentes códigos de erro. O frontend pode então mostrar mensagens localizadas (via i18n) em vez de texto cru em Inglês do Rust.
+
+---
+
+#### 7.2. [MEDIUM] Tratamento inconsistente de erros de parsing de datas
+
+**Ficheiro:** `crates/core/src/db.rs` (linhas 603-608, 626-631, 731-733, etc.)
+**Problema:** Em múltiplos `row_to_*` functions, o parsing de datas `DateTime::parse_from_rfc3339` usa `.unwrap_or_else(|_| Utc::now())`. Isto significa que se a data na DB estiver corrompida, o erro é engolido e substituído pelo timestamp actual — os dados ficam silenciosamente incorrectos.
+
+**Código (linhas 603-608):**
+```rust
+let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+    .map(|dt| dt.with_timezone(&Utc))
+    .unwrap_or_else(|_| Utc::now());
+```
+
+**Impacto:** Se uma migração falha a meio e uma data fica vazia ou mal formatada, o utilizador vê a data actual em vez da original — um bug silencioso que pode falsear relatórios de custos.
+
+**Sugestão:** Propagar o erro em vez de engolir: retornar `LibsqlResult<Ingredient>` com o erro de parsing. Usar `?` em vez de `unwrap_or_else`. Se há legacy data, fazer migração one-off para corrigir.
+
+---
+
+#### 7.3. [MEDIUM] `devInvoke.ts` engole erros silenciosamente em modo dev
+
+**Ficheiro:** `src/lib/devInvoke.ts` (linha 148-149)
+**Problema:** Em fallback dev, comandos que não estão em `fixtures` e não correspondem a nenhum padrão devolvem `undefined`. Isto pode causar crashes silenciosos em páginas que esperam arrays ou objetos.
+
+**Código (linhas 151-155):**
+```typescript
+if (cmd.endsWith("_list") || cmd.endsWith("_all")) return [];
+if (noopCommandPrefixes.some((suffix) => cmd.includes(suffix))) return undefined;
+if (cmd.startsWith("report_")) return {};
+return undefined;
+```
+
+**Impacto:** Uma página que chama `invoke("some_new_command")` recebe `undefined` sem aviso. O erro aparecerá como `Cannot read properties of undefined` em runtime, sem indicação de que o comando não está no fixture.
+
+**Sugestão:**
+```typescript
+if (import.meta.env.DEV) console.warn(`[devInvoke] No fixture for "${cmd}"`);
+```
+
+---
+
+### 8. Duplicação de Lógica
+
+#### 8.1. [CRITICAL] Parsing de `Unit` de string para enum duplicado 8+ vezes
+
+**Ficheiros:** `crates/core/src/db.rs` (linhas 577-599, 664-686, 704-726, 768-790, 994-1001, 1026-1034, 1112-1120, e mais)
+**Problema:** O mesmo match block de 20 branches (`"gram" => Unit::Gram, "kilogram" => Unit::Kilogram ... _ => Unit::Gram`) aparece pelo menos 8 vezes ao longo de db.rs.
+
+**Código (linhas 577-599 — primeiro bloco, repetido em 664, 704, 768, etc.):**
+```rust
+let unit = match unit_str.as_str() {
+    "gram" => Unit::Gram,
+    "kilogram" => Unit::Kilogram,
+    "milligram" => Unit::Milligram,
+    // ... todos os 20 branches
+    _ => Unit::Gram,
+};
+```
+
+**Impacto:** Se um novo unit for adicionado ao enum `Unit` (domain.rs), é necessário actualizar TODOS os match blocks em db.rs (8+ locais). Erro de omissão é quase certo. Total de ~160 linhas duplicadas.
+
+**Sugestão:** Implementar `impl FromStr for Unit` em domain.rs com um método `fn from_str(s: &str) -> Result<Unit, ...>`. Depois substituir todos os match blocks por `let unit: Unit = unit_str.parse()?;` ou `Unit::from_str(&unit_str).unwrap_or(Unit::Gram)`. Isto reduz 8 match blocks para 1 implementação central.
+
+---
+
+#### 8.2. [MEDIUM] Duplicação de `DateTime` parsing pattern
+
+**Ficheiro:** `crates/core/src/db.rs` (múltiplos locais)
+**Problema:** O padrão de parsing de datetime aparece em TODAS as `row_to_*` functions (~8 locais):
+```rust
+let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+    .map(|dt| dt.with_timezone(&Utc))
+    .unwrap_or_else(|_| Utc::now());
+```
+
+**Sugestão:** Extrair uma função auxiliar `fn parse_date(s: &str) -> DateTime<Utc>` na própria db.rs ou domain.rs.
+
+---
+
+#### 8.3. [MEDIUM] Duplicação de `Unit` label/group/conversion entre Rust e TypeScript
+
+**Ficheiros:** `crates/core/src/domain.rs` (linhas 36-113), `src/lib/units.ts` (linhas 1-47)
+**Problema:** `domain.rs` define `Unit::to_base_factor()`, `Unit::group()`, `Unit::label()`, `convert_to()`. `units.ts` reimplementa `UNIT_GROUP`, `UNIT_BASE_FACTOR`, `convertUnit()` com os mesmos valores. São duas fontes de verdade que podem divergir.
+
+**Código (domain.rs:76-96 vs units.ts:31-37):**
+```rust
+// Rust
+Unit::Gram => Some(1.0),
+Unit::Kilogram => Some(1000.0),
+```
+```typescript
+// TypeScript
+const UNIT_BASE_FACTOR: Record<string, number | null> = {
+  gram: 1, kilogram: 1000, ...
+};
+```
+
+**Impacto:** Se um factor de conversão for alterado no Rust, o TypeScript fica stale até alguém se lembrar de actualizar o `units.ts`. A app calcula custos de forma diferente no frontend (pré-visualização) vs backend (confirmação). Para uma app de custos, isto é problemático.
+
+**Sugestão:** Eliminar `units.ts` e fazer conversões de unidade sempre no backend, devolvendo valores já convertidos ao frontend. Alternativa: usar `specta`/`ts-rs` para gerar uma tabela de factores de conversão para TypeScript a partir do enum Rust.
+
+---
+
+### 9. Dependências Circulares
+
+#### 9.1. [LOW] Ausência de dependências circulares — bem gerido
+
+Não foram encontradas dependências circulares. O grafo de dependências é linear:
+```
+mise-core ← mise-tauri ← src-tauri (mise_lib)
+```
+
+E no frontend:
+```
+i18n ← components ← pages
+lib ← pages
+```
+
+**Nota:** `ImageUpload` importa `../../crates/core/bindings/Image` que tecnicamente não é uma dependência circular porque os bindings são ficheiros gerados isolados, não módulos Rust.
+
+---
+
+### 10. Escalabilidade
+
+#### 10.1. [HIGH] `db.rs` com 5825 linhas é um god object
+
+**Ficheiro:** `crates/core/src/db.rs` (5825 linhas)
+**Problema:** Todos os métodos de DB vivem num único ficheiro `db.rs` — desde migrações, seed data, row mappers, queries CRUD, relatórios, import/export, receitas, eventos, etc. Não há separação por domínio.
+
+**Código (apenas estrutura de funções públicas):**
+```
+- open_db / get_conn / resolve_data_dir / run_migrations / add_column_if_missing
+- row_to_ingredient / row_to_recipe / row_to_stock_item / row_to_shopping_list / ...
+- ingredients_list / event_ingredients_list / create_ingredient / update_ingredient / ...
+- recipes_list / get_recipe / create_recipe / update_recipe / ...
+- stock_list / upsert_stock / ...
+- shopping_lists_list / create_shopping_list / ...
+- suggest_recipes / calculate_cost / analyze_cost
+- categories CRUD / suppliers CRUD / events CRUD
+- meal_plans CRUD, entries CRUD
+- dashboard stats, activity, upcoming meals, low stock
+- reports: cost, waste, stock trends, meal stats, price trends
+- images CRUD, upload, search proxy
+- stock purchases
+- receipt OCR
+- recipe import from URL
+- import/export
+- usage events, problem reports
+```
+
+**Impacto:** Ficheiro impossível de navegar. Difícil de testar isoladamente (mock incompleto). Se a app crescer para multi-tenant ou sync, este ficheiro vai explodir.
+
+**Sugestão:** Dividir em módulos: `db/ingredients.rs`, `db/recipes.rs`, `db/stock.rs`, `db/shopping.rs`, `db/meal_plans.rs`, `db/reports.rs`, etc. Cada módulo exporta funções públicas. `db.rs` re-exporta tudo.
+
+---
+
+#### 10.2. [MEDIUM] Ausência de testes
+
+Não foram encontrados ficheiros de teste (`*_test.rs`, `*.spec.ts`, `*.test.ts`). Não é um bug em si, mas para escalar, a ausência de testes é um risco.
+
+**Sugestão:** Adicionar testes de integração para as funções DB (que são a maior fonte de regressões).
+
+---
+
+#### 10.3. [MEDIUM] Configuração de sync/cloud apenas placeholder
+
+**Ficheiro:** `src-tauri/tauri.conf.json` (linha 26), `src/i18n/locales/en.ts` (linhas 105-108)
+**Problema:** A app tem configuração de Turso URL e Auth Token nas settings, mas a secção sync está marcada como "Under development". O CSP permite `connect-src 'self' ipc: http://ipc.localhost` — que não incluiria um endpoint Turso remoto.
+
+**Código (en.ts:105-108):**
+```typescript
+tursoUrl: "Turso Database URL",
+syncInDevelopment: "Under development:",
+syncPlaceholder: "Sync is under development...",
+```
+
+**Impacto:** Se sync for activada, o CSP terá de ser alterado e a arquitetura de single-user terá de ser repensada (autenticação, conflitos, etc.).
+
+**Sugestão:** Manter como está — é honesto sobre o estado actual. Mas começar a pensar na estratégia de sync (CRDT? last-write-wins?).
+
+---
+
+### 11. Outros Achados
+
+#### 11.1. [LOW] `theme.css` contém alias layer para CSS antigo
+
+**Ficheiro:** `src/styles/theme.css` (linhas 33-45)
+**Problema:** Existe uma secção "legacy alias layer" que mapeia variáveis novas para nomes antigos (`--bg-base: var(--bg)`, `--bg-surface: var(--surface)`, etc.).
+
+**Código (linhas 33-45):**
+```css
+/* legacy alias layer — bridges older component code */
+--bg-base: var(--bg); --bg-surface: var(--surface); --bg-elevated: var(--inset);
+--border: var(--line); --border-mid: var(--line); --border-subtle: var(--line-2);
+```
+
+**Impacto:** Gera duplicação de tokens CSS. Se os componentes forem refactorados, esta camada pode ser removida.
+
+**Sugestão:** Criar uma task para migrar componentes que usam `var(--bg-base)` para `var(--bg)` e depois remover a alias layer. Baixa prioridade.
+
+---
+
+#### 11.2. [LOW] `systemPrefersDark()` em `theme.ts` faz Tauri invoke mesmo em plataformas não-Linux
+
+**Ficheiro:** `src/theme.ts` (linhas 8-15)
+**Problema:** `systemPrefersDark()` tenta `invoke("get_system_theme")` e só faz fallback ao CSS media query se o invoke falhar. Em Windows/macOS, `system_prefers_dark()` no Rust devolve sempre `false`, o que significa que o tema "system" nunca deteta corretamente dark mode nessas plataformas.
+
+**Código (Rust, linhas 32-35):**
+```rust
+#[cfg(not(target_os = "linux"))]
+fn system_prefers_dark() -> bool {
+    false
+}
+```
+
+**Impacto:** Utilizadores de Windows/macOS com tema "system" ficam sempre com tema claro.
+
+**Sugestão:** Em plataformas não-Linux, fazer o invoke falhar propositadamente (ou não invocar) para que o fallback do CSS media query seja usado, que funciona bem em Windows/macOS.
+
+---
+
+#### 11.3. [HIGH] `ingredient_name` denormalizado em varias tabelas — risco de inconsistência
+
+**Ficheiros:** `crates/core/src/db.rs` (várias migrations)
+**Problema:** As tabelas `recipe_ingredients`, `stock`, `shopping_list_items`, `stock_purchases` armazenam `ingredient_name` como TEXT denormalizado. Se um ingrediente for renomeado, todos os registos históricos ficam com o nome antigo.
+
+**Código (db.rs:144):**
+```sql
+ingredient_name TEXT NOT NULL, -- denormalized for display
+```
+
+**Impacto:** Se um ingrediente "Cebola" for renomeado para "Cebola roxa", as receitas antigas continuam a mostrar "Cebola". Para uma app de custos onde o histórico é importante, isto pode ser intencional (preservar o nome no momento da receita), mas não é documentado como decisão.
+
+**Sugestão:** Adicionar comentário explícito nas migrations que documente que a denormalização é intencional para preservar histórico. Se não for intencional, usar JOINs em vez de denormalizar.
+
+---
+
+## Tabela de Severidade
+
+| Severidade | Contagem | Achados |
+|-----------|----------|---------|
+| CRITICAL | 2 | 5.1 (sem lazy loading), 7.1 (Result<String>), 8.1 (Unit parsing duplicado) |
+| HIGH | 3 | 4.1 (ImageUpload toast inline), 6.1 (sem state management), 10.1 (db.rs god object) |
+| MEDIUM | 8 | 2.1, 3.1, 4.2, 6.2, 7.2, 7.3, 8.2, 8.3, 10.2, 10.3 |
+| LOW | 4 | 2.2, 4.3, 5.2, 11.1, 11.2, 11.3 |
+
+---
+
+## Resumo por Camada
+
+### Backend Rust (8753 linhas)
+- ✅ Boa separação conceptual em 3 crates
+- ✅ Sem dependências circulares
+- ❌ `db.rs` com 5825 linhas (god object)
+- ❌ Duplicação massiva de Unit parsing (8+ match blocks)
+- ❌ 3 camadas de delegação desnecessárias (command → AppDb → core::db)
+- ❌ `Result<_, String>` perde toda a informação de erro
+- ⚠️ Datas corrompidas são engolidas silenciosamente
+
+### Frontend TypeScript/React (~11332 linhas)
+- ✅ Componentes UI pequenos e focados (média 25 linhas)
+- ✅ i18n lazy-loaded com fallback para referência
+- ❌ Nenhuma página lazy-loaded (todas eager)
+- ❌ Sem state management global ou cache
+- ❌ ImageUpload com toast inline duplicado
+- ❌ Duplicação de lógica de unidades entre Rust e TS
+
+## Conclusão
+
+A arquitetura é pragmática e funcional para uma app single-user local. As escolhas de design (monolito db.rs, sem lazy loading, Result<String>) são trade-offs aceitáveis para ~20K LOC. No entanto, há 3 problemas que devem ser resolvidos antes de escalar:
+
+1. **Extrair `Unit::from_str()`** — ~160 linhas duplicadas eliminadas
+2. **Remover camada `AppDb`** — elimina 50+ pass-through methods
+3. **Adicionar lazy-loading ao router** — prática standard de React que não custa nada
+
+O resto (state management, error handling, db.rs modular) pode esperar por uma v2.
+
+---
+
+*Fim do relatório — Agente #1*
