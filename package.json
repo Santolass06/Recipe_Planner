@@ -10,7 +10,11 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@fontsource/hanken-grotesk": "^5.2.8",
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/newsreader": "^5.2.10",
     "@tauri-apps/api": "^2",
+    "material-symbols": "^0.45.8",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.0.0",
