@@ -194,6 +194,7 @@ body {
   display: inline-flex; align-items: center; gap: 6px; padding: 0 15px; height: 38px;
   background: var(--ember); border: none; border-radius: 9px;
   color: var(--ember-ink); font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--sans);
+  white-space: nowrap; flex-shrink: 0;
 }
 .btn-primary:hover { filter: brightness(1.06); }
 .btn-primary:active { transform: scale(0.98); }
