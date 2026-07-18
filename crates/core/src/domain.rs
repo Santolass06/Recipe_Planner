@@ -122,6 +122,38 @@ impl Unit {
     }
 }
 
+/// DB/wire representation — snake_case, matches `#[serde(rename_all = "snake_case")]`.
+impl std::fmt::Display for Unit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
+            Unit::Ounce => "ounce", Unit::Pound => "pound",
+            Unit::Milliliter => "milliliter", Unit::Liter => "liter", Unit::FluidOunce => "fluid_ounce",
+            Unit::Cup => "cup", Unit::Pint => "pint", Unit::Quart => "quart", Unit::Gallon => "gallon",
+            Unit::Teaspoon => "teaspoon", Unit::Tablespoon => "tablespoon",
+            Unit::Piece => "piece", Unit::Dozen => "dozen",
+            Unit::Pinch => "pinch", Unit::Bunch => "bunch", Unit::Clove => "clove", Unit::Slice => "slice",
+        };
+        f.write_str(s)
+    }
+}
+
+impl std::str::FromStr for Unit {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "gram" => Unit::Gram, "kilogram" => Unit::Kilogram, "milligram" => Unit::Milligram,
+            "ounce" => Unit::Ounce, "pound" => Unit::Pound,
+            "milliliter" => Unit::Milliliter, "liter" => Unit::Liter, "fluid_ounce" => Unit::FluidOunce,
+            "cup" => Unit::Cup, "pint" => Unit::Pint, "quart" => Unit::Quart, "gallon" => Unit::Gallon,
+            "teaspoon" => Unit::Teaspoon, "tablespoon" => Unit::Tablespoon,
+            "piece" => Unit::Piece, "dozen" => Unit::Dozen,
+            "pinch" => Unit::Pinch, "bunch" => Unit::Bunch, "clove" => Unit::Clove, "slice" => Unit::Slice,
+            _ => return Err(format!("unidade desconhecida: {s}")),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
 pub enum UnitGroup { Weight, Volume, Count }
@@ -1303,4 +1335,22 @@ pub struct RecipeImportPreview {
     pub cook_time_minutes: Option<u32>,
     pub image_url: Option<String>,
     pub ingredients: Vec<RecipeImportIngredient>,
+}
+
+#[cfg(test)]
+mod unit_parse_tests {
+    use super::Unit;
+
+    #[test]
+    fn every_unit_round_trips_through_display_and_from_str() {
+        for &unit in Unit::all() {
+            let s = unit.to_string();
+            assert_eq!(s.parse::<Unit>().unwrap(), unit, "round-trip failed for {s}");
+        }
+    }
+
+    #[test]
+    fn unknown_string_is_rejected() {
+        assert!("not_a_unit".parse::<Unit>().is_err());
+    }
 }

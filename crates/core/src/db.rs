@@ -574,29 +574,7 @@ pub mod migrations {
 /// Map a libsql Row to Ingredient
 fn row_to_ingredient(row: &Row) -> LibsqlResult<Ingredient> {
     let unit_str: String = row.get(2)?;
-    let unit = match unit_str.as_str() {
-        "gram" => Unit::Gram,
-        "kilogram" => Unit::Kilogram,
-        "milligram" => Unit::Milligram,
-        "ounce" => Unit::Ounce,
-        "pound" => Unit::Pound,
-        "milliliter" => Unit::Milliliter,
-        "liter" => Unit::Liter,
-        "fluid_ounce" => Unit::FluidOunce,
-        "cup" => Unit::Cup,
-        "pint" => Unit::Pint,
-        "quart" => Unit::Quart,
-        "gallon" => Unit::Gallon,
-        "teaspoon" => Unit::Teaspoon,
-        "tablespoon" => Unit::Tablespoon,
-        "piece" => Unit::Piece,
-        "dozen" => Unit::Dozen,
-        "pinch" => Unit::Pinch,
-        "bunch" => Unit::Bunch,
-        "clove" => Unit::Clove,
-        "slice" => Unit::Slice,
-        _ => Unit::Gram,
-    };
+    let unit = unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
 
     let created_at_str: String = row.get(5)?;
     let updated_at_str: String = row.get(6)?;
@@ -661,29 +639,7 @@ async fn row_to_recipe_with_ingredients(db: &Database, recipe: Recipe) -> Libsql
     let mut ingredients = Vec::new();
     while let Some(row) = rows.next().await? {
         let unit_str: String = row.get(5)?;
-        let unit = match unit_str.as_str() {
-            "gram" => Unit::Gram,
-            "kilogram" => Unit::Kilogram,
-            "milligram" => Unit::Milligram,
-            "ounce" => Unit::Ounce,
-            "pound" => Unit::Pound,
-            "milliliter" => Unit::Milliliter,
-            "liter" => Unit::Liter,
-            "fluid_ounce" => Unit::FluidOunce,
-            "cup" => Unit::Cup,
-            "pint" => Unit::Pint,
-            "quart" => Unit::Quart,
-            "gallon" => Unit::Gallon,
-            "teaspoon" => Unit::Teaspoon,
-            "tablespoon" => Unit::Tablespoon,
-            "piece" => Unit::Piece,
-            "dozen" => Unit::Dozen,
-            "pinch" => Unit::Pinch,
-            "bunch" => Unit::Bunch,
-            "clove" => Unit::Clove,
-            "slice" => Unit::Slice,
-            _ => Unit::Gram,
-        };
+        let unit = unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
 
         ingredients.push(RecipeIngredient {
             id: row.get(0)?,
@@ -701,29 +657,7 @@ async fn row_to_recipe_with_ingredients(db: &Database, recipe: Recipe) -> Libsql
 /// Map a libsql Row to StockItem
 fn row_to_stock_item(row: &Row) -> LibsqlResult<StockItem> {
     let unit_str: String = row.get(3)?;
-    let unit = match unit_str.as_str() {
-        "gram" => Unit::Gram,
-        "kilogram" => Unit::Kilogram,
-        "milligram" => Unit::Milligram,
-        "ounce" => Unit::Ounce,
-        "pound" => Unit::Pound,
-        "milliliter" => Unit::Milliliter,
-        "liter" => Unit::Liter,
-        "fluid_ounce" => Unit::FluidOunce,
-        "cup" => Unit::Cup,
-        "pint" => Unit::Pint,
-        "quart" => Unit::Quart,
-        "gallon" => Unit::Gallon,
-        "teaspoon" => Unit::Teaspoon,
-        "tablespoon" => Unit::Tablespoon,
-        "piece" => Unit::Piece,
-        "dozen" => Unit::Dozen,
-        "pinch" => Unit::Pinch,
-        "bunch" => Unit::Bunch,
-        "clove" => Unit::Clove,
-        "slice" => Unit::Slice,
-        _ => Unit::Gram,
-    };
+    let unit = unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
 
     // SELECT order: s.id(0), s.ingredient_id(1), i.name(2), i.unit(3),
     // s.quantity(4), s.min_quantity(5), s.updated_at(6)
@@ -765,29 +699,7 @@ fn row_to_shopping_item(row: &Row) -> LibsqlResult<ShoppingItem> {
     // ingredient_unit(4), needed_quantity(5), stock_quantity(6), to_buy_quantity(7),
     // category(8), estimated_cost(9), purchased(10), notes(11), purchased_at(12), created_at(13)
     let unit_str: String = row.get(4)?;
-    let unit = match unit_str.as_str() {
-        "gram" => Unit::Gram,
-        "kilogram" => Unit::Kilogram,
-        "milligram" => Unit::Milligram,
-        "ounce" => Unit::Ounce,
-        "pound" => Unit::Pound,
-        "milliliter" => Unit::Milliliter,
-        "liter" => Unit::Liter,
-        "fluid_ounce" => Unit::FluidOunce,
-        "cup" => Unit::Cup,
-        "pint" => Unit::Pint,
-        "quart" => Unit::Quart,
-        "gallon" => Unit::Gallon,
-        "teaspoon" => Unit::Teaspoon,
-        "tablespoon" => Unit::Tablespoon,
-        "piece" => Unit::Piece,
-        "dozen" => Unit::Dozen,
-        "pinch" => Unit::Pinch,
-        "bunch" => Unit::Bunch,
-        "clove" => Unit::Clove,
-        "slice" => Unit::Slice,
-        _ => Unit::Gram,
-    };
+    let unit = unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
 
     let purchased_at_str: Option<String> = row.get(12)?;
     let purchased_at = purchased_at_str
@@ -991,15 +903,7 @@ pub async fn ingredient_promote_to_catalog(db: &Database, id: i64) -> LibsqlResu
 /// Create ingredient
 pub async fn create_ingredient(db: &Database, input: IngredientInput) -> LibsqlResult<Ingredient> {
     let conn = get_conn(db).await?;
-    let unit_str = match input.unit {
-        Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
-        Unit::Ounce => "ounce", Unit::Pound => "pound",
-        Unit::Milliliter => "milliliter", Unit::Liter => "liter", Unit::FluidOunce => "fluid_ounce",
-        Unit::Cup => "cup", Unit::Pint => "pint", Unit::Quart => "quart", Unit::Gallon => "gallon",
-        Unit::Teaspoon => "teaspoon", Unit::Tablespoon => "tablespoon",
-        Unit::Piece => "piece", Unit::Dozen => "dozen",
-        Unit::Pinch => "pinch", Unit::Bunch => "bunch", Unit::Clove => "clove", Unit::Slice => "slice",
-    };
+    let unit_str = input.unit.to_string();
 
     let category_id: Option<i64> = input.category.and_then(|c| c.parse().ok());
 
@@ -1023,15 +927,7 @@ pub async fn create_ingredient(db: &Database, input: IngredientInput) -> LibsqlR
 /// Update ingredient
 pub async fn update_ingredient(db: &Database, id: i64, input: IngredientInput) -> LibsqlResult<Ingredient> {
     let conn = get_conn(db).await?;
-    let unit_str = match input.unit {
-        Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
-        Unit::Ounce => "ounce", Unit::Pound => "pound",
-        Unit::Milliliter => "milliliter", Unit::Liter => "liter", Unit::FluidOunce => "fluid_ounce",
-        Unit::Cup => "cup", Unit::Pint => "pint", Unit::Quart => "quart", Unit::Gallon => "gallon",
-        Unit::Teaspoon => "teaspoon", Unit::Tablespoon => "tablespoon",
-        Unit::Piece => "piece", Unit::Dozen => "dozen",
-        Unit::Pinch => "pinch", Unit::Bunch => "bunch", Unit::Clove => "clove", Unit::Slice => "slice",
-    };
+    let unit_str = input.unit.to_string();
 
     let category_id: Option<i64> = input.category.and_then(|c| c.parse().ok());
 
@@ -1109,15 +1005,7 @@ pub async fn recipes_list(db: &Database) -> LibsqlResult<Vec<RecipeWithIngredien
     let mut ingredients_by_recipe: std::collections::HashMap<i64, Vec<RecipeIngredient>> = std::collections::HashMap::new();
     while let Some(row) = rows.next().await? {
         let unit_str: String = row.get(5)?;
-        let unit = match unit_str.as_str() {
-            "gram" => Unit::Gram, "kilogram" => Unit::Kilogram, "milligram" => Unit::Milligram,
-            "ounce" => Unit::Ounce, "pound" => Unit::Pound, "milliliter" => Unit::Milliliter,
-            "liter" => Unit::Liter, "fluid_ounce" => Unit::FluidOunce, "cup" => Unit::Cup,
-            "pint" => Unit::Pint, "quart" => Unit::Quart, "gallon" => Unit::Gallon,
-            "teaspoon" => Unit::Teaspoon, "tablespoon" => Unit::Tablespoon, "piece" => Unit::Piece,
-            "dozen" => Unit::Dozen, "pinch" => Unit::Pinch, "bunch" => Unit::Bunch,
-            "clove" => Unit::Clove, "slice" => Unit::Slice, _ => Unit::Gram,
-        };
+        let unit = unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
 
         let recipe_id: i64 = row.get(1)?;
         let ingredient = RecipeIngredient {
@@ -1197,15 +1085,7 @@ pub async fn create_recipe(db: &Database, input: RecipeInput) -> LibsqlResult<Re
 
     // Insert recipe ingredients
     for ingredient_input in &input.ingredients {
-        let unit_str = match ingredient_input.unit {
-            Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
-            Unit::Ounce => "ounce", Unit::Pound => "pound",
-            Unit::Milliliter => "milliliter", Unit::Liter => "liter", Unit::FluidOunce => "fluid_ounce",
-            Unit::Cup => "cup", Unit::Pint => "pint", Unit::Quart => "quart", Unit::Gallon => "gallon",
-            Unit::Teaspoon => "teaspoon", Unit::Tablespoon => "tablespoon",
-            Unit::Piece => "piece", Unit::Dozen => "dozen",
-            Unit::Pinch => "pinch", Unit::Bunch => "bunch", Unit::Clove => "clove", Unit::Slice => "slice",
-        };
+        let unit_str = ingredient_input.unit.to_string();
 
         // Get ingredient name for denormalization
         let mut rows = conn.query(
@@ -1242,15 +1122,7 @@ pub async fn update_recipe(db: &Database, id: i64, input: RecipeInput) -> Libsql
 
     // Insert new recipe ingredients
     for ingredient_input in &input.ingredients {
-        let unit_str = match ingredient_input.unit {
-            Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
-            Unit::Ounce => "ounce", Unit::Pound => "pound",
-            Unit::Milliliter => "milliliter", Unit::Liter => "liter", Unit::FluidOunce => "fluid_ounce",
-            Unit::Cup => "cup", Unit::Pint => "pint", Unit::Quart => "quart", Unit::Gallon => "gallon",
-            Unit::Teaspoon => "teaspoon", Unit::Tablespoon => "tablespoon",
-            Unit::Piece => "piece", Unit::Dozen => "dozen",
-            Unit::Pinch => "pinch", Unit::Bunch => "bunch", Unit::Clove => "clove", Unit::Slice => "slice",
-        };
+        let unit_str = ingredient_input.unit.to_string();
 
         let mut rows = conn.query(
             "SELECT name FROM ingredients WHERE id = ?1",
@@ -1459,15 +1331,7 @@ pub async fn create_shopping_list(db: &Database, name: String, items: Vec<Shoppi
     let list_id = conn.last_insert_rowid();
 
     for item in items {
-        let unit_str = match item.ingredient_unit {
-            Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
-            Unit::Ounce => "ounce", Unit::Pound => "pound",
-            Unit::Milliliter => "milliliter", Unit::Liter => "liter", Unit::FluidOunce => "fluid_ounce",
-            Unit::Cup => "cup", Unit::Pint => "pint", Unit::Quart => "quart", Unit::Gallon => "gallon",
-            Unit::Teaspoon => "teaspoon", Unit::Tablespoon => "tablespoon",
-            Unit::Piece => "piece", Unit::Dozen => "dozen",
-            Unit::Pinch => "pinch", Unit::Bunch => "bunch", Unit::Clove => "clove", Unit::Slice => "slice",
-        };
+        let unit_str = item.ingredient_unit.to_string();
         conn.execute(
             "INSERT INTO shopping_list_items (shopping_list_id, ingredient_id, ingredient_name, ingredient_unit, needed_quantity, stock_quantity, to_buy_quantity, category, estimated_cost, purchased, notes)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
@@ -1525,15 +1389,7 @@ pub async fn shopping_list_add_item(
 ) -> LibsqlResult<ShoppingItem> {
     let conn = get_conn(db).await?;
     
-    let unit_str = match input.ingredient_unit {
-        Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
-        Unit::Ounce => "ounce", Unit::Pound => "pound",
-        Unit::Milliliter => "milliliter", Unit::Liter => "liter", Unit::FluidOunce => "fluid_ounce",
-        Unit::Cup => "cup", Unit::Pint => "pint", Unit::Quart => "quart", Unit::Gallon => "gallon",
-        Unit::Teaspoon => "teaspoon", Unit::Tablespoon => "tablespoon",
-        Unit::Piece => "piece", Unit::Dozen => "dozen",
-        Unit::Pinch => "pinch", Unit::Bunch => "bunch", Unit::Clove => "clove", Unit::Slice => "slice",
-    };
+    let unit_str = input.ingredient_unit.to_string();
 
     conn.execute(
         "INSERT INTO shopping_list_items (shopping_list_id, ingredient_id, ingredient_name, ingredient_unit, needed_quantity, stock_quantity, to_buy_quantity, category, estimated_cost, purchased, notes)
@@ -1573,15 +1429,7 @@ pub async fn shopping_list_update_item(
 ) -> LibsqlResult<ShoppingItem> {
     let conn = get_conn(db).await?;
 
-    let unit_str = match input.ingredient_unit {
-        Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
-        Unit::Ounce => "ounce", Unit::Pound => "pound",
-        Unit::Milliliter => "milliliter", Unit::Liter => "liter", Unit::FluidOunce => "fluid_ounce",
-        Unit::Cup => "cup", Unit::Pint => "pint", Unit::Quart => "quart", Unit::Gallon => "gallon",
-        Unit::Teaspoon => "teaspoon", Unit::Tablespoon => "tablespoon",
-        Unit::Piece => "piece", Unit::Dozen => "dozen",
-        Unit::Pinch => "pinch", Unit::Bunch => "bunch", Unit::Clove => "clove", Unit::Slice => "slice",
-    };
+    let unit_str = input.ingredient_unit.to_string();
 
     conn.execute(
         "UPDATE shopping_list_items 
@@ -1827,16 +1675,7 @@ pub async fn calculate_cost(db: &Database, recipe_id: i64) -> LibsqlResult<CostB
     let mut total_cost = 0.0_f64;
 
     fn parse_unit(unit_str: &str) -> Unit {
-        match unit_str {
-            "gram" => Unit::Gram, "kilogram" => Unit::Kilogram, "milligram" => Unit::Milligram,
-            "ounce" => Unit::Ounce, "pound" => Unit::Pound,
-            "milliliter" => Unit::Milliliter, "liter" => Unit::Liter, "fluid_ounce" => Unit::FluidOunce,
-            "cup" => Unit::Cup, "pint" => Unit::Pint, "quart" => Unit::Quart, "gallon" => Unit::Gallon,
-            "teaspoon" => Unit::Teaspoon, "tablespoon" => Unit::Tablespoon,
-            "piece" => Unit::Piece, "dozen" => Unit::Dozen,
-            "pinch" => Unit::Pinch, "bunch" => Unit::Bunch, "clove" => Unit::Clove, "slice" => Unit::Slice,
-            _ => Unit::Gram,
-        }
+        unit_str.parse().unwrap_or(Unit::Gram)
     }
 
     while let Some(row) = rows.next().await? {
@@ -3065,29 +2904,7 @@ pub async fn price_quotes_all(db: &Database) -> LibsqlResult<Vec<PriceQuoteWithI
     let mut quotes = Vec::new();
     while let Some(row) = rows.next().await? {
         let unit_str: String = row.get(9)?;
-        let unit = match unit_str.as_str() {
-            "gram" => Unit::Gram,
-            "kilogram" => Unit::Kilogram,
-            "milligram" => Unit::Milligram,
-            "ounce" => Unit::Ounce,
-            "pound" => Unit::Pound,
-            "milliliter" => Unit::Milliliter,
-            "liter" => Unit::Liter,
-            "fluid_ounce" => Unit::FluidOunce,
-            "cup" => Unit::Cup,
-            "pint" => Unit::Pint,
-            "quart" => Unit::Quart,
-            "gallon" => Unit::Gallon,
-            "teaspoon" => Unit::Teaspoon,
-            "tablespoon" => Unit::Tablespoon,
-            "piece" => Unit::Piece,
-            "dozen" => Unit::Dozen,
-            "pinch" => Unit::Pinch,
-            "bunch" => Unit::Bunch,
-            "clove" => Unit::Clove,
-            "slice" => Unit::Slice,
-            _ => Unit::Gram,
-        };
+        let unit = unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
         let valid_from_str: Option<String> = row.get(4)?;
         let valid_to_str: Option<String> = row.get(5)?;
         let created_at_str: String = row.get(7)?;
@@ -3482,16 +3299,7 @@ pub async fn generate_shopping_list_from_meal_plan(db: &Database, plan_id: i64, 
             let price_per_unit: f64 = row.get(4)?;
             let category_id: Option<i64> = row.get(5)?;
 
-            let unit = match unit_str.as_str() {
-                "gram" => Unit::Gram, "kilogram" => Unit::Kilogram, "milligram" => Unit::Milligram,
-                "ounce" => Unit::Ounce, "pound" => Unit::Pound,
-                "milliliter" => Unit::Milliliter, "liter" => Unit::Liter, "fluid_ounce" => Unit::FluidOunce,
-                "cup" => Unit::Cup, "pint" => Unit::Pint, "quart" => Unit::Quart, "gallon" => Unit::Gallon,
-                "teaspoon" => Unit::Teaspoon, "tablespoon" => Unit::Tablespoon,
-                "piece" => Unit::Piece, "dozen" => Unit::Dozen,
-                "pinch" => Unit::Pinch, "bunch" => Unit::Bunch, "clove" => Unit::Clove, "slice" => Unit::Slice,
-                _ => Unit::Gram,
-            };
+            let unit = unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
 
             // Get category name
             let category = if let Some(cat_id) = category_id {
@@ -3942,29 +3750,7 @@ pub async fn get_low_stock_ingredients(db: &Database, threshold: f64) -> LibsqlR
     let mut items = Vec::new();
     while let Some(row) = rows.next().await? {
         let unit_str: String = row.get(3)?;
-        let unit = match unit_str.as_str() {
-            "gram" => Unit::Gram,
-            "kilogram" => Unit::Kilogram,
-            "milligram" => Unit::Milligram,
-            "ounce" => Unit::Ounce,
-            "pound" => Unit::Pound,
-            "milliliter" => Unit::Milliliter,
-            "liter" => Unit::Liter,
-            "fluid_ounce" => Unit::FluidOunce,
-            "cup" => Unit::Cup,
-            "pint" => Unit::Pint,
-            "quart" => Unit::Quart,
-            "gallon" => Unit::Gallon,
-            "teaspoon" => Unit::Teaspoon,
-            "tablespoon" => Unit::Tablespoon,
-            "piece" => Unit::Piece,
-            "dozen" => Unit::Dozen,
-            "pinch" => Unit::Pinch,
-            "bunch" => Unit::Bunch,
-            "clove" => Unit::Clove,
-            "slice" => Unit::Slice,
-            _ => Unit::Gram,
-        };
+        let unit = unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
 
         let updated_at_str: String = row.get(7)?;
         let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
@@ -4690,29 +4476,7 @@ pub async fn image_search_proxy(query: String, per_page: Option<u32>) -> Result<
 
 /// Parse a unit column string into Unit, defaulting to Gram on unknown values.
 fn parse_unit_str(unit_str: &str) -> Unit {
-    match unit_str {
-        "gram" => Unit::Gram,
-        "kilogram" => Unit::Kilogram,
-        "milligram" => Unit::Milligram,
-        "ounce" => Unit::Ounce,
-        "pound" => Unit::Pound,
-        "milliliter" => Unit::Milliliter,
-        "liter" => Unit::Liter,
-        "fluid_ounce" => Unit::FluidOunce,
-        "cup" => Unit::Cup,
-        "pint" => Unit::Pint,
-        "quart" => Unit::Quart,
-        "gallon" => Unit::Gallon,
-        "teaspoon" => Unit::Teaspoon,
-        "tablespoon" => Unit::Tablespoon,
-        "piece" => Unit::Piece,
-        "dozen" => Unit::Dozen,
-        "pinch" => Unit::Pinch,
-        "bunch" => Unit::Bunch,
-        "clove" => Unit::Clove,
-        "slice" => Unit::Slice,
-        _ => Unit::Gram,
-    }
+    unit_str.parse().unwrap_or(Unit::Gram)
 }
 
 /// Map a libsql Row to StockPurchase. Expects columns in exactly this order:
@@ -4760,15 +4524,7 @@ fn row_to_stock_purchase(row: &Row) -> LibsqlResult<StockPurchase> {
 pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> LibsqlResult<StockPurchase> {
     let conn = get_conn(db).await?;
     
-    let unit_str = match input.unit {
-        Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
-        Unit::Ounce => "ounce", Unit::Pound => "pound",
-        Unit::Milliliter => "milliliter", Unit::Liter => "liter", Unit::FluidOunce => "fluid_ounce",
-        Unit::Cup => "cup", Unit::Pint => "pint", Unit::Quart => "quart", Unit::Gallon => "gallon",
-        Unit::Teaspoon => "teaspoon", Unit::Tablespoon => "tablespoon",
-        Unit::Piece => "piece", Unit::Dozen => "dozen",
-        Unit::Pinch => "pinch", Unit::Bunch => "bunch", Unit::Clove => "clove", Unit::Slice => "slice",
-    };
+    let unit_str = input.unit.to_string();
     
     // Get ingredient name and unit for denormalization
     let mut rows = conn.query(
@@ -4778,16 +4534,7 @@ pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> Lib
     let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
     let ingredient_name: String = row.get(0)?;
     let ingredient_unit_str: String = row.get(1)?;
-    let _ingredient_unit = match ingredient_unit_str.as_str() {
-        "gram" => Unit::Gram, "kilogram" => Unit::Kilogram, "milligram" => Unit::Milligram,
-        "ounce" => Unit::Ounce, "pound" => Unit::Pound,
-        "milliliter" => Unit::Milliliter, "liter" => Unit::Liter, "fluid_ounce" => Unit::FluidOunce,
-        "cup" => Unit::Cup, "pint" => Unit::Pint, "quart" => Unit::Quart, "gallon" => Unit::Gallon,
-        "teaspoon" => Unit::Teaspoon, "tablespoon" => Unit::Tablespoon,
-        "piece" => Unit::Piece, "dozen" => Unit::Dozen,
-        "pinch" => Unit::Pinch, "bunch" => Unit::Bunch, "clove" => Unit::Clove, "slice" => Unit::Slice,
-        _ => Unit::Gram,
-    };
+    let _ingredient_unit = ingredient_unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
     
     // Get supplier name if provided
     let _supplier_name = if let Some(supplier_id) = input.supplier_id {
@@ -5143,27 +4890,10 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
         let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
         let ingredient_name: String = row.get(0)?;
         let ingredient_unit_str: String = row.get(1)?;
-        let _ingredient_unit = match ingredient_unit_str.as_str() {
-            "gram" => Unit::Gram, "kilogram" => Unit::Kilogram, "milligram" => Unit::Milligram,
-            "ounce" => Unit::Ounce, "pound" => Unit::Pound,
-            "milliliter" => Unit::Milliliter, "liter" => Unit::Liter, "fluid_ounce" => Unit::FluidOunce,
-            "cup" => Unit::Cup, "pint" => Unit::Pint, "quart" => Unit::Quart, "gallon" => Unit::Gallon,
-            "teaspoon" => Unit::Teaspoon, "tablespoon" => Unit::Tablespoon,
-            "piece" => Unit::Piece, "dozen" => Unit::Dozen,
-            "pinch" => Unit::Pinch, "bunch" => Unit::Bunch, "clove" => Unit::Clove, "slice" => Unit::Slice,
-            _ => Unit::Gram,
-        };
+        let _ingredient_unit = ingredient_unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
         
         // Convert unit string for purchase
-        let unit_str = match item.unit {
-            Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
-            Unit::Ounce => "ounce", Unit::Pound => "pound",
-            Unit::Milliliter => "milliliter", Unit::Liter => "liter", Unit::FluidOunce => "fluid_ounce",
-            Unit::Cup => "cup", Unit::Pint => "pint", Unit::Quart => "quart", Unit::Gallon => "gallon",
-            Unit::Teaspoon => "teaspoon", Unit::Tablespoon => "tablespoon",
-            Unit::Piece => "piece", Unit::Dozen => "dozen",
-            Unit::Pinch => "pinch", Unit::Bunch => "bunch", Unit::Clove => "clove", Unit::Slice => "slice",
-        };
+        let unit_str = item.unit.to_string();
         
         // Insert stock purchase
         let purchase_date = chrono::Utc::now(); // Could parse from receipt but using now
@@ -5230,15 +4960,7 @@ async fn create_or_find_ingredient(conn: &Connection, name: &str, unit: Unit) ->
         return Ok(row.get(0)?);
     }
     
-    let unit_str = match unit {
-        Unit::Gram => "gram", Unit::Kilogram => "kilogram", Unit::Milligram => "milligram",
-        Unit::Ounce => "ounce", Unit::Pound => "pound",
-        Unit::Milliliter => "milliliter", Unit::Liter => "liter", Unit::FluidOunce => "fluid_ounce",
-        Unit::Cup => "cup", Unit::Pint => "pint", Unit::Quart => "quart", Unit::Gallon => "gallon",
-        Unit::Teaspoon => "teaspoon", Unit::Tablespoon => "tablespoon",
-        Unit::Piece => "piece", Unit::Dozen => "dozen",
-        Unit::Pinch => "pinch", Unit::Bunch => "bunch", Unit::Clove => "clove", Unit::Slice => "slice",
-    };
+    let unit_str = unit.to_string();
     
     conn.execute(
         "INSERT INTO ingredients (name, unit, price_per_unit, favorite) VALUES (?1, ?2, 0, 0)",
