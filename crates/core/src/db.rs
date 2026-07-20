@@ -4124,7 +4124,11 @@ async fn save_base64_image(base64: &str, entity_type: &str, entity_id: i64, data
 
     // Decode base64
     let bytes = STANDARD.decode(base64).map_err(|e| e.to_string())?;
-    
+    const MAX_IMAGE_BYTES: usize = 15 * 1024 * 1024;
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err("Imagem demasiado grande (máximo 15MB).".to_string());
+    }
+
     // Detect mime type from bytes (simple detection)
     let mime_type = if bytes.starts_with(b"\xFF\xD8\xFF") {
         "image/jpeg"
