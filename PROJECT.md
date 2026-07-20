@@ -1251,8 +1251,8 @@ Estado por achado, não a gravidade original da auditoria às cegas:
 | DOM-003 / FUN-002 | Export/import só cobre ingredientes+receitas | ⏳ Aberto, real. Decisão de produto (documentar limite vs. backup completo) — Fase de Polishing/Fase 4. |
 | FUN-001 / BLD-002 | Câmara do Scanner não verificada em máquina limpa | Já é o bug pendente da Fase 0 — preso ao teste em máquina limpa, agora no fim da Fase de Polishing. |
 | FUN-003 | OCR só validado numa cadeia (Pingo Doce) | Já é o item 3-bis (PRIORIDADE ALTA) — aberto, à espera de mais recibos. |
-| QA-002 | Sem CI (`cargo test`/`npm run build` em PR) | ⏳ Aberto, real, quick win. |
-| SEC-002 | Import de receita por URL sem allowlist/timeout/limite | ⏳ Aberto, real, quick win. |
+| QA-002 | Sem CI (`cargo test`/`npm run build` em PR) | ✅ Corrigido 2026-07-20 (`d5e9b60`) — `.github/workflows/ci.yml` |
+| SEC-002 | Import de receita por URL sem allowlist/timeout/limite | ✅ Corrigido 2026-07-20 (`83f2696`) — allowlist http(s), timeout 10s, limite 5MB |
 | DOM-004 | `PRAGMA foreign_keys` nunca ligado | ⏳ Aberto, real, mas **não é quick win** — precisa de auditoria aos caminhos de delete antes de ligar (risco de quebrar cascatas manuais existentes). |
 | DOM-005 | Sem `schema_version`/`user_version` | ⏳ Aberto, real. |
 | DOM-008 | `receipt_confirm` não transacional | ⏳ Aberto, real. |
@@ -1260,23 +1260,24 @@ Estado por achado, não a gravidade original da auditoria às cegas:
 | ARC-001 | `db.rs` monolítico (~5698 linhas) | Já é o "god-components adiado" da Fase 2 — deliberado, sem ação agendada. |
 | ARC-002 | "God pages" no frontend | Já é o "god-components adiado" da Fase 2 — deliberado, sem ação agendada. |
 | ARC-004 | Conversão de unidades duplicada FE/BE | ⏳ Aberto, baixo risco. |
-| SEC-003 | `validator` derives nunca chamados (`.validate()`) | ⏳ Aberto — decisão pendente: ligar validação a sério, ou apagar os derives mortos (mais lazy, mata a falsa confiança). |
-| SEC-004 | Upload de imagem base64 sem limite de tamanho | ⏳ Aberto, real, quick win. |
+| SEC-003 | `validator` derives nunca chamados (`.validate()`) | ✅ Corrigido 2026-07-20 (`19beefc`) — `input.validate()` ligado no funil único `AppDb`, todos os comandos passam por lá; teste de regressão |
+| SEC-004 | Upload de imagem base64 sem limite de tamanho | ✅ Corrigido 2026-07-20 (`6c12c8e`) — limite de 15MB |
 | SEC-007 | Plugins `dialog`/`fs`/`shell` sem capability correspondente | ⏳ Aberto, real. |
 | SEC-010 | Superfície de rede por documentar | ⏳ Aberto, documentação. |
 | UX-002/003/004 | Empty/error inconsistente; fluxos densos sem undo; a11y | Fica para Fase de Polishing / Multi-plataforma, como o resto de UX. |
-| FUN-004 | Rota `/sugestor` morta (stub) | ⏳ Aberto, trivial — já está no Backlog como "Recipe Suggester — UI por fazer". |
+| FUN-004 | Rota `/sugestor` morta (stub) | ✅ Corrigido 2026-07-20 (`2e3868a`) — rota e `PlaceholderPage.tsx` removidos; backend `suggester_suggest` fica (Backlog: "Recipe Suggester — UI por fazer"). |
 | QA-004 / QA-006 | Seams por testar; validação ainda manual | ⏳ Aberto, acompanha QA-001/002. |
 | BLD-003/004/005/006 | README sobre-vende plataformas; bundle OCR 37MB; dev shell Nix-specific; mobile não iniciado | Já são decisões conhecidas e aceites (ver Fase 4/Multi-plataforma), não achados novos. |
 | Cluster P3 | Notas de polish e positivas (ARC-003/005/006/007, DOM-006/007/010, FUN-005/006/007, UX-001/005/006/007, SEC-005/006/008/009, QA-003, BLD-007) | Sem ação — ver `docs/AUDIT.md` para detalhe, nada aqui muda o roadmap. |
 
-**Recomendação para "antes de avançar":** nada bloqueia estritamente — o
-teste em máquina limpa e o 3-bis já estão adiados por falta de recibos, a
-Instrumentação não tem consumidores até haver utilizadores reais, e a
-Fase Multi-plataforma está atrás do Polishing. Os fixes baratos da
-auditoria (SEC-002, SEC-004, SEC-003, QA-002, FUN-004) não são
-pré-requisito de nada — são só o trabalho de baixo custo mais próximo à
-mão enquanto o resto espera.
+**Quick wins corrigidos (2026-07-20):** SEC-002, SEC-004, SEC-003, QA-002,
+FUN-004 — `83f2696`, `6c12c8e`, `19beefc`, `d5e9b60`, `2e3868a`. Nenhum era
+pré-requisito de nada (nada bloqueia estritamente avançar: teste em
+máquina limpa e o 3-bis já adiados por falta de recibos, Instrumentação
+sem consumidores até haver utilizadores reais, Multi-plataforma atrás do
+Polishing) — eram só o trabalho de baixo custo mais próximo à mão.
+`cargo check`/`test --workspace` (110 testes) e `tsc --noEmit` limpos
+depois de todos.
 
 ---
 
