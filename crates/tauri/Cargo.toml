@@ -12,9 +12,13 @@ tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
 libsql = { workspace = true }
 chrono = { workspace = true }
+validator = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
+
+[dev-dependencies]
+tokio = { workspace = true }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

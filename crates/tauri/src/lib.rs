@@ -5,6 +5,7 @@
 
 use mise_core::*;
 use libsql::Database;
+use validator::Validate;
 use tauri::Manager;
 use tauri::path::BaseDirectory;
 use chrono::{DateTime, Utc};
@@ -69,10 +70,12 @@ impl AppDb {
     }
 
     pub async fn create_ingredient(&self, input: IngredientInput) -> Result<Ingredient, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::create_ingredient(&self.db, input).await.map_err(|e| e.to_string())
     }
 
     pub async fn update_ingredient(&self, id: i64, input: IngredientInput) -> Result<Ingredient, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::update_ingredient(&self.db, id, input).await.map_err(|e| e.to_string())
     }
 
@@ -98,10 +101,12 @@ impl AppDb {
     }
 
     pub async fn create_recipe(&self, input: RecipeInput) -> Result<RecipeWithIngredients, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::create_recipe(&self.db, input).await.map_err(|e| e.to_string())
     }
 
     pub async fn update_recipe(&self, id: i64, input: RecipeInput) -> Result<RecipeWithIngredients, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::update_recipe(&self.db, id, input).await.map_err(|e| e.to_string())
     }
 
@@ -127,6 +132,7 @@ impl AppDb {
     }
 
     pub async fn upsert_stock(&self, input: StockInput) -> Result<StockItem, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::upsert_stock(&self.db, input).await.map_err(|e| e.to_string())
     }
 
@@ -168,10 +174,12 @@ impl AppDb {
     }
 
     pub async fn shopping_list_add_item(&self, list_id: i64, input: ShoppingItemInput) -> Result<ShoppingItem, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::shopping_list_add_item(&self.db, list_id, input).await.map_err(|e| e.to_string())
     }
 
     pub async fn shopping_list_update_item(&self, list_id: i64, item_id: i64, input: ShoppingItemInput) -> Result<ShoppingItem, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::shopping_list_update_item(&self.db, list_id, item_id, input).await.map_err(|e| e.to_string())
     }
 
@@ -180,6 +188,7 @@ impl AppDb {
     }
 
     pub async fn shopping_list_mark_purchased(&self, input: ShoppingListMarkPurchasedInput) -> Result<ShoppingItem, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::shopping_list_mark_purchased(&self.db, input).await.map_err(|e| e.to_string())
     }
 
@@ -246,10 +255,12 @@ impl AppDb {
     }
 
     pub async fn create_category(&self, input: CategoryInput) -> Result<Category, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::create_category(&self.db, input).await.map_err(|e| e.to_string())
     }
 
     pub async fn update_category(&self, id: i64, input: CategoryInput) -> Result<Category, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::update_category(&self.db, id, input).await.map_err(|e| e.to_string())
     }
 
@@ -267,10 +278,12 @@ impl AppDb {
     }
 
     pub async fn create_supplier(&self, input: SupplierInput) -> Result<Supplier, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::create_supplier(&self.db, input).await.map_err(|e| e.to_string())
     }
 
     pub async fn update_supplier(&self, id: i64, input: SupplierInput) -> Result<Supplier, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::update_supplier(&self.db, id, input).await.map_err(|e| e.to_string())
     }
 
@@ -284,10 +297,12 @@ impl AppDb {
     }
 
     pub async fn create_event(&self, input: EventInput) -> Result<Event, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::create_event(&self.db, input).await.map_err(|e| e.to_string())
     }
 
     pub async fn update_event(&self, id: i64, input: EventInput) -> Result<Event, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::update_event(&self.db, id, input).await.map_err(|e| e.to_string())
     }
 
@@ -333,10 +348,12 @@ impl AppDb {
     }
 
     pub async fn create_price_quote(&self, input: PriceQuoteInput) -> Result<PriceQuote, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::create_price_quote(&self.db, input).await.map_err(|e| e.to_string())
     }
 
     pub async fn update_price_quote(&self, id: i64, input: PriceQuoteInput) -> Result<PriceQuote, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::update_price_quote(&self.db, id, input).await.map_err(|e| e.to_string())
     }
 
@@ -363,10 +380,12 @@ impl AppDb {
     }
 
     pub async fn meal_plan_create(&self, input: MealPlanInput) -> Result<MealPlan, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::create_meal_plan(&self.db, input).await.map_err(|e| e.to_string())
     }
 
     pub async fn meal_plan_update(&self, id: i64, input: MealPlanInput) -> Result<MealPlan, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::update_meal_plan(&self.db, id, input).await.map_err(|e| e.to_string())
     }
 
@@ -375,10 +394,12 @@ impl AppDb {
     }
 
     pub async fn meal_entry_add(&self, meal_plan_id: i64, input: MealEntryInput) -> Result<MealPlanEntry, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::add_meal_entry(&self.db, meal_plan_id, input).await.map_err(|e| e.to_string())
     }
 
     pub async fn meal_entry_update(&self, id: i64, input: MealEntryInput) -> Result<MealPlanEntry, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::update_meal_entry(&self.db, id, input).await.map_err(|e| e.to_string())
     }
 
@@ -451,6 +472,7 @@ impl AppDb {
 
     // ===== IMAGES =====
     pub async fn image_upload(&self, input: ImageUploadInput) -> Result<Image, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::image_upload(&self.db, input, &self.data_dir).await.map_err(|e| e.to_string())
     }
 
@@ -476,6 +498,7 @@ impl AppDb {
 
     // ===== INSTRUMENTAÇÃO (Fase de Instrumentação, local-only) =====
     pub async fn problem_report_create(&self, input: ProblemReportInput) -> Result<ProblemReport, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::problem_report_create(&self.db, input, &self.data_dir).await.map_err(|e| e.to_string())
     }
 
@@ -488,6 +511,7 @@ impl AppDb {
 
     // ===== STOCK PURCHASES =====
     pub async fn stock_purchase_add(&self, input: StockPurchaseInput) -> Result<StockPurchase, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::stock_purchase_add(&self.db, input).await.map_err(|e| e.to_string())
     }
 
@@ -501,6 +525,7 @@ impl AppDb {
 
     // ===== RECEIPT OCR =====
     pub async fn receipt_scan(&self, input: ReceiptScanInput) -> Result<ReceiptParseResult, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::receipt_scan(&self.db, input, &self.data_dir).await.map_err(|e| e.to_string())
     }
 
@@ -509,6 +534,7 @@ impl AppDb {
     }
 
     pub async fn receipt_confirm(&self, input: ReceiptConfirmInput) -> Result<Vec<StockPurchase>, String> {
+        input.validate().map_err(|e| e.to_string())?;
         mise_core::db::receipt_confirm(&self.db, input).await.map_err(|e| e.to_string())
     }
 
@@ -1439,6 +1465,37 @@ pub async fn initialize_app_state(app: &tauri::AppHandle) -> Result<(), String> 
         .map_err(|e| e.to_string())?;
     app.manage(AppDb::new(db, app_data_dir));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_app_db() -> AppDb {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("mise_tauri_test_{unique}"));
+        let db = mise_core::db::open_db(Some(dir.clone())).await.unwrap();
+        AppDb::new(db, dir)
+    }
+
+    /// Regression test for SEC-003: `Validate` derives on *Input structs
+    /// existed but nothing ever called `.validate()`, so e.g. an empty
+    /// ingredient name reached the database unchecked.
+    #[tokio::test]
+    async fn create_ingredient_rejects_blank_name() {
+        let app_db = test_app_db().await;
+        let result = app_db
+            .create_ingredient(IngredientInput {
+                name: "".into(),
+                unit: Unit::Gram,
+                price_per_unit: 1.0,
+                category: None,
+                event_id: None,
+            })
+            .await;
+        assert!(result.is_err(), "blank ingredient name must be rejected by validation");
+    }
 }
 
 // Re-export AppDb for src-tauri
