@@ -2744,16 +2744,28 @@ fn parse_ingredient_line(raw: &str) -> RecipeImportIngredient {
 /// name to pre-fill `matched_ingredient_id` where possible. Saving is a separate,
 /// explicit step the user takes after reviewing the preview.
 pub async fn recipe_import_from_url(db: &Database, url: String) -> Result<RecipeImportPreview, String> {
-    let client = reqwest::Client::new();
-    let html = client
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("Só são permitidos URLs http:// ou https://.".to_string());
+    }
+    const MAX_BODY_BYTES: u64 = 5 * 1024 * 1024; // recipe pages are plain HTML, 5MB is generous
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client
         .get(&url)
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
         .send()
         .await
-        .map_err(|e| e.to_string())?
-        .text()
-        .await
         .map_err(|e| e.to_string())?;
+    if response.content_length().is_some_and(|len| len > MAX_BODY_BYTES) {
+        return Err("A página é demasiado grande para importar.".to_string());
+    }
+    let html = response.text().await.map_err(|e| e.to_string())?;
+    if html.len() as u64 > MAX_BODY_BYTES {
+        return Err("A página é demasiado grande para importar.".to_string());
+    }
 
     let recipe_json = extract_recipe_json_ld(&html)
         .ok_or_else(|| "Não foi possível encontrar dados de receita (schema.org/Recipe) nesta página.".to_string())?;
