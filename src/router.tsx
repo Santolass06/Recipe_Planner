@@ -1,6 +1,5 @@
 import { createBrowserRouter } from "react-router-dom";
 import Layout from "./components/Layout";
-import PlaceholderPage from "./components/PlaceholderPage";
 import DashboardPage from "./pages/DashboardPage";
 import IngredientsPage from "./pages/IngredientsPage";
 import RecipesPage from "./pages/RecipesPage";
@@ -33,7 +32,6 @@ export const router = createBrowserRouter([
       { path: "eventos/:id", element: <EventDetailPage /> },
       { path: "planeamento", element: <MealPlannerPage /> },
       { path: "calendario", element: <CalendarPage /> },
-      { path: "sugestor", element: <PlaceholderPage name="sugestor" /> },
       { path: "relatorios", element: <ReportsPage /> },
       { path: "fornecedores", element: <SuppliersPage /> },
       { path: "scanner", element: <ReceiptScannerPage /> },
