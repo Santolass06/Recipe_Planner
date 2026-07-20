@@ -48,8 +48,11 @@ Sequência decidida após rever o plano contra o estado real do código:
    `tesseract.js` nem para o nativo. Isto não depende de utilizadores
    reais nem do Polishing — só de reunir mais recibos de teste — por isso
    sobe para **antes** da Fase de Polishing, não fica à espera dela.
-4. **Fase 4 — Distribuição** (secção abaixo) — empacotamento, fix do
-   path `mise/mise/mise.db` com migração de dados, teste em máquina limpa.
+4. **Fase 4 — Distribuição** (secção abaixo) — empacotamento (✅), fix do
+   path `mise/mise/mise.db` com migração de dados (✅). **Teste em máquina
+   limpa adiado indefinidamente (revisão 2026-07-20):** movido para o
+   último item da Fase de Polishing, ver lá — não bloqueia o resto da
+   sequência abaixo.
    **Bug da câmara (Fase 0) sobe de prioridade (2026-07-10):** deixa de
    ser "resolve-se ou descarta-se sozinho na Fase 4" — a câmara é a
    interação principal do Scanner e "câmara funciona" passa a checkpoint
@@ -58,7 +61,9 @@ Sequência decidida após rever o plano contra o estado real do código:
    `getUserMedia`/WebKitGTK — código diferente do bug de desktop — por
    isso este bug **não bloqueia o arranque** da Fase Multi-plataforma, só
    fica marcado como PRIORIDADE ALTA por não poder fechar-se em silêncio
-   como antes.
+   como antes. **Diagnóstico também adiado (2026-07-20):** dependia do
+   mesmo teste em máquina limpa, agora no fim da Fase de Polishing — fica
+   sem fix nem descarte até lá, não é uma reabertura do debugging.
 5. **Fase de Instrumentação de uso** (nova, ver secção abaixo) — regista
    dados de uso reais desde o início, para alimentar as decisões da Fase
    de Polishing.
@@ -1045,12 +1050,9 @@ buraco e é pré-requisito do Polishing.
   build` limpos e teste visual em browser (upload → OCR → extração →
   revisão com itens reais em português), rede confirmada sem nenhum pedido
   a `cdn.jsdelivr.net`.
-- [ ] **Teste em máquina limpa** — instalar o pacote numa máquina sem Nix
-  e validar o essencial de ponta a ponta (criar ingrediente/receita,
-  compra de stock, scanner por upload, evento). Inclui o teste da câmara
-  do Scanner: se funcionar aí, o bug pendente da Fase 0 fecha-se como
-  "ambiente de dev, sem fix"; se não, passa a ter um diagnóstico num
-  ambiente representativo.
+- [ ] ~~Teste em máquina limpa~~ **Movido (2026-07-20) para o último item
+  da Fase de Polishing** — adiado indefinidamente, ver lá para o âmbito e
+  a razão.
 - [ ] **Primeira execução** — decidir se o onboarding de língua (ver
   [[Roadmap i18n]]) entra aqui ou fica para depois do primeiro feedback.
 
@@ -1171,6 +1173,18 @@ heurística. Não é trabalho novo — é validar/comparar decisões já tomadas
   motor. A escolha nativa-vs-`tesseract.js` volta a ser um item de
   qualidade de OCR, não de segurança, e fica na Fase de Polishing.
   Vision LLM local saiu desta escolha (ver Fase de experimentação abaixo).
+- **Teste em máquina limpa** (movido da Fase 4, 2026-07-20) — instalar o
+  pacote `.deb`/AppImage numa máquina sem Nix e validar o essencial de
+  ponta a ponta (criar ingrediente/receita, compra de stock, scanner por
+  upload, evento). Inclui o teste da câmara do Scanner (bug pendente da
+  Fase 0: se funcionar aí, fecha-se como "ambiente de dev, sem fix"; se
+  não, ganha diagnóstico num ambiente representativo). **Adiado
+  indefinidamente**: à espera de acumular recibos de mais cadeias
+  portuguesas para correr, na mesma sessão de teste real, também a
+  validação multi-cadeia do OCR (item 3-bis, [[OCR — Digitalização de
+  recibos]], que continua PRIORIDADE ALTA e não depende disto — só faz
+  sentido juntar as duas por conveniência de teste manual, não por
+  dependência técnica). Sem data-alvo.
 
 ---
 
@@ -1214,6 +1228,55 @@ local mais pesada:
   [[OCR — Digitalização de recibos]]. Adiado deliberadamente do item
   "Escolha de motor de OCR": exige runtime externo instalado e a correr,
   peso desproporcional antes de haver utilizadores reais.
+
+---
+
+## Auditoria externa (2026-07-20)
+
+Relatório completo em `docs/AUDIT.md` (modelo externo, método estático —
+sem instalação em máquina limpa nem campanha de OCR multi-cadeia, ver
+[[#Fase de Polishing]] acima). Cada achado foi verificado contra o código
+real antes de entrar aqui — a auditoria acerta quase sempre em factos
+pontuais (citações file:line, contagens de linhas exatas), mas errou num
+número agregado (ver QA-001 abaixo), o mesmo padrão de falha já visto na
+auditoria "hermes" anterior (ver memória `hermes-audit-reliability`).
+Estado por achado, não a gravidade original da auditoria às cegas:
+
+| ID | Título | Estado |
+|----|--------|--------|
+| SEC-001 | Keystore de release trackada no git | ✅ Corrigido 2026-07-20 (`830e1f2`) — untracked + `.gitignore`; **rotação da chave por decisão do utilizador, não feita aqui** |
+| DOM-002 | `receipt_confirm` sem conversão de unidade | ✅ Corrigido 2026-07-20 (`a908966`) + teste de regressão |
+| QA-001 | "quase zero testes automatizados" | ⚠️ **Achado errado** — 109 testes já passam (`cargo test --workspace`); a auditoria contou mal o agregado |
+| DOM-001 / BLD-001 | Path da BD aninha `mise` extra | ⚠️ **Parcialmente desatualizado** — o bug de double-nesting real (`mise/mise/mise.db`) já foi corrigido na Fase 4 (2026-07-10, `resolve_data_dir`); resta um nesting residual cosmético (`AppData` já namespaced pelo identifier + mais um `"mise"`). Baixo valor corrigir agora — implicaria mais uma migração manual nesta máquina de dev por um ganho pequeno. Fica registado, sem ação agendada. |
+| DOM-003 / FUN-002 | Export/import só cobre ingredientes+receitas | ⏳ Aberto, real. Decisão de produto (documentar limite vs. backup completo) — Fase de Polishing/Fase 4. |
+| FUN-001 / BLD-002 | Câmara do Scanner não verificada em máquina limpa | Já é o bug pendente da Fase 0 — preso ao teste em máquina limpa, agora no fim da Fase de Polishing. |
+| FUN-003 | OCR só validado numa cadeia (Pingo Doce) | Já é o item 3-bis (PRIORIDADE ALTA) — aberto, à espera de mais recibos. |
+| QA-002 | Sem CI (`cargo test`/`npm run build` em PR) | ⏳ Aberto, real, quick win. |
+| SEC-002 | Import de receita por URL sem allowlist/timeout/limite | ⏳ Aberto, real, quick win. |
+| DOM-004 | `PRAGMA foreign_keys` nunca ligado | ⏳ Aberto, real, mas **não é quick win** — precisa de auditoria aos caminhos de delete antes de ligar (risco de quebrar cascatas manuais existentes). |
+| DOM-005 | Sem `schema_version`/`user_version` | ⏳ Aberto, real. |
+| DOM-008 | `receipt_confirm` não transacional | ⏳ Aberto, real. |
+| DOM-009 | Sem schema para waste/histórico de stock | Já documentado como vazio-por-desenho no README; feature nova, não bug — Fase de Polishing se houver pedido real. |
+| ARC-001 | `db.rs` monolítico (~5698 linhas) | Já é o "god-components adiado" da Fase 2 — deliberado, sem ação agendada. |
+| ARC-002 | "God pages" no frontend | Já é o "god-components adiado" da Fase 2 — deliberado, sem ação agendada. |
+| ARC-004 | Conversão de unidades duplicada FE/BE | ⏳ Aberto, baixo risco. |
+| SEC-003 | `validator` derives nunca chamados (`.validate()`) | ⏳ Aberto — decisão pendente: ligar validação a sério, ou apagar os derives mortos (mais lazy, mata a falsa confiança). |
+| SEC-004 | Upload de imagem base64 sem limite de tamanho | ⏳ Aberto, real, quick win. |
+| SEC-007 | Plugins `dialog`/`fs`/`shell` sem capability correspondente | ⏳ Aberto, real. |
+| SEC-010 | Superfície de rede por documentar | ⏳ Aberto, documentação. |
+| UX-002/003/004 | Empty/error inconsistente; fluxos densos sem undo; a11y | Fica para Fase de Polishing / Multi-plataforma, como o resto de UX. |
+| FUN-004 | Rota `/sugestor` morta (stub) | ⏳ Aberto, trivial — já está no Backlog como "Recipe Suggester — UI por fazer". |
+| QA-004 / QA-006 | Seams por testar; validação ainda manual | ⏳ Aberto, acompanha QA-001/002. |
+| BLD-003/004/005/006 | README sobre-vende plataformas; bundle OCR 37MB; dev shell Nix-specific; mobile não iniciado | Já são decisões conhecidas e aceites (ver Fase 4/Multi-plataforma), não achados novos. |
+| Cluster P3 | Notas de polish e positivas (ARC-003/005/006/007, DOM-006/007/010, FUN-005/006/007, UX-001/005/006/007, SEC-005/006/008/009, QA-003, BLD-007) | Sem ação — ver `docs/AUDIT.md` para detalhe, nada aqui muda o roadmap. |
+
+**Recomendação para "antes de avançar":** nada bloqueia estritamente — o
+teste em máquina limpa e o 3-bis já estão adiados por falta de recibos, a
+Instrumentação não tem consumidores até haver utilizadores reais, e a
+Fase Multi-plataforma está atrás do Polishing. Os fixes baratos da
+auditoria (SEC-002, SEC-004, SEC-003, QA-002, FUN-004) não são
+pré-requisito de nada — são só o trabalho de baixo custo mais próximo à
+mão enquanto o resto espera.
 
 ---
 
