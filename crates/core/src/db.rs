@@ -4890,10 +4890,18 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
         let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
         let ingredient_name: String = row.get(0)?;
         let ingredient_unit_str: String = row.get(1)?;
-        let _ingredient_unit = ingredient_unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
-        
+        let ingredient_unit = ingredient_unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
+
         // Convert unit string for purchase
         let unit_str = item.unit.to_string();
+
+        // Stock is always tracked in the ingredient's own unit; a receipt
+        // line quantified in a different (but compatible) unit must be
+        // converted before being added, or "1 kg" would add "1" to a
+        // stock tracked in grams instead of "1000".
+        let quantity_in_ingredient_unit = item.unit
+            .convert_to(ingredient_unit, item.quantity)
+            .unwrap_or(item.quantity);
         
         // Insert stock purchase
         let purchase_date = chrono::Utc::now(); // Could parse from receipt but using now
@@ -4918,12 +4926,12 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
             ],
         ).await?;
         
-        // Update stock quantity
+        // Update stock quantity (in the ingredient's own unit, see conversion above)
         conn.execute(
             "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity, updated_at)
              VALUES (?1, ?2, ?3, ?4, 0, datetime('now'))
              ON CONFLICT(ingredient_id) DO UPDATE SET quantity = quantity + ?4, updated_at = datetime('now')",
-            params![ingredient_id, ingredient_name, ingredient_unit_str, item.quantity],
+            params![ingredient_id, ingredient_name, ingredient_unit_str, quantity_in_ingredient_unit],
         ).await?;
         
         let purchase_id = conn.last_insert_rowid();
@@ -5694,5 +5702,44 @@ mod crud_base_tests {
         delete_supplier(&db, created.id).await.unwrap();
         let listed_after = suppliers_list(&db).await.unwrap();
         assert!(!listed_after.iter().any(|s| s.id == created.id));
+    }
+
+    /// Regression test for DOM-002: a receipt line quantified in a unit
+    /// different from (but compatible with) the ingredient's own unit must
+    /// be converted before being added to stock.
+    #[tokio::test]
+    async fn receipt_confirm_converts_quantity_into_ingredient_unit() {
+        let db = test_db().await;
+        let ingredient = create_ingredient(&db, IngredientInput {
+            name: "Farinha".into(), unit: Unit::Gram, price_per_unit: 0.002, category: None, event_id: None,
+        }).await.unwrap();
+
+        let conn = get_conn(&db).await.unwrap();
+        conn.execute(
+            "INSERT INTO receipt_imports (image_path, status) VALUES ('x.jpg', 'parsed')",
+            (),
+        ).await.unwrap();
+        let import_id = conn.last_insert_rowid();
+
+        receipt_confirm(&db, ReceiptConfirmInput {
+            import_id,
+            supplier_id: None,
+            items: vec![ParsedReceiptItem {
+                ingredient_name: "Farinha".into(),
+                quantity: 1.0,
+                unit: Unit::Kilogram,
+                price_per_unit: 2.0,
+                total_price: 2.0,
+                is_discount: false,
+                discount_percent: 0.0,
+                matched_ingredient_id: Some(ingredient.id),
+                confidence: 1.0,
+                brand: None,
+                notes: None,
+            }],
+        }).await.unwrap();
+
+        let stock = stock_list(&db).await.unwrap().into_iter().find(|s| s.ingredient_id == ingredient.id).unwrap();
+        assert_eq!(stock.quantity, 1000.0, "1 kg confirmed against a gram-tracked ingredient must add 1000, not 1");
     }
 }
