@@ -1051,8 +1051,9 @@ buraco e é pré-requisito do Polishing.
   revisão com itens reais em português), rede confirmada sem nenhum pedido
   a `cdn.jsdelivr.net`.
 - [ ] ~~Teste em máquina limpa~~ **Movido (2026-07-20) para o último item
-  da Fase de Polishing** — adiado indefinidamente, ver lá para o âmbito e
-  a razão.
+  da Fase de Polishing** — corrido parcialmente em 2026-07-22 (dois bugs de
+  bloqueio encontrados e corrigidos: build Nix não-portável + resize
+  WebKitGTK), ver lá para detalhe e o que falta confirmar.
 - [ ] **Primeira execução** — decidir se o onboarding de língua (ver
   [[Roadmap i18n]]) entra aqui ou fica para depois do primeiro feedback.
 
@@ -1178,13 +1179,28 @@ heurística. Não é trabalho novo — é validar/comparar decisões já tomadas
   ponta a ponta (criar ingrediente/receita, compra de stock, scanner por
   upload, evento). Inclui o teste da câmara do Scanner (bug pendente da
   Fase 0: se funcionar aí, fecha-se como "ambiente de dev, sem fix"; se
-  não, ganha diagnóstico num ambiente representativo). **Adiado
-  indefinidamente**: à espera de acumular recibos de mais cadeias
-  portuguesas para correr, na mesma sessão de teste real, também a
-  validação multi-cadeia do OCR (item 3-bis, [[OCR — Digitalização de
-  recibos]], que continua PRIORIDADE ALTA e não depende disto — só faz
-  sentido juntar as duas por conveniência de teste manual, não por
-  dependência técnica). Sem data-alvo.
+  não, ganha diagnóstico num ambiente representativo). **Parcialmente
+  corrido (2026-07-22):** o `.deb` da v0.1.12 nem sequer abria na máquina
+  limpa (nem nesta máquina de dev, uma vez recolhido o profile Nix) — causa
+  raiz era o build local via `nix-shell` a gravar caminhos
+  `/nix/store/...` no `INTERP`/`RUNPATH` do binário ELF, inutilizável fora
+  desse store exato. ✅ Corrigido: novo `.github/workflows/release.yml`
+  builda em runner `ubuntu-latest` limpo (sem Nix) e reenvia os bundles
+  para o release existente (`3089a65`, `0ac5863`). Confirmado via
+  `readelf` que o binário reconstruído já usa o interpretador padrão
+  `/lib64/ld-linux-x86-64.so.2`. Um segundo bug apareceu já com o `.deb`
+  a abrir: em ecrã 2560×1440, maximizar/fullscreen deixava o conteúdo
+  preso ao tamanho pré-maximização, num canto (bug de
+  realocação de widget do WebKitGTK, não DPI/scaling — confirmado com o
+  utilizador). ✅ Corrigido: `on_window_event` em `src-tauri/src/lib.rs`
+  força `window.set_size()` em cada `Resized`, obrigando o GTK a refazer o
+  size-allocate (`a9aca4b`). Assets da v0.1.12 reconstruídos com ambos os
+  fixes; **falta o utilizador confirmar na máquina limpa** que o essencial
+  de ponta a ponta (incl. câmara do Scanner) agora funciona. À espera
+  também de acumular recibos de mais cadeias portuguesas para correr, na
+  mesma sessão de teste real, a validação multi-cadeia do OCR (item 3-bis,
+  [[OCR — Digitalização de recibos]], que continua PRIORIDADE ALTA e não
+  depende disto).
 
 ---
 
