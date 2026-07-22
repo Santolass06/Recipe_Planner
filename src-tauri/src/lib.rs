@@ -7,6 +7,15 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
+        .on_window_event(|window, event| {
+            // WebKitGTK sometimes doesn't reallocate the webview widget when
+            // the window is maximized via the window manager (content stays
+            // at its pre-maximize size, pinned to a corner). Re-asserting the
+            // size on Resized forces GTK to redo the size-allocate cycle.
+            if let tauri::WindowEvent::Resized(size) = event {
+                let _ = window.set_size(*size);
+            }
+        })
         .setup(|app| {
             // Initialize database and state via mise-tauri.
             // Run SYNCHRONOUSLY and blocking via block_on (NOT spawn) so that
