@@ -1052,8 +1052,8 @@ buraco e é pré-requisito do Polishing.
   a `cdn.jsdelivr.net`.
 - [ ] ~~Teste em máquina limpa~~ **Movido (2026-07-20) para o último item
   da Fase de Polishing** — corrido parcialmente em 2026-07-22 (dois bugs de
-  bloqueio encontrados e corrigidos: build Nix não-portável + resize
-  WebKitGTK), ver lá para detalhe e o que falta confirmar.
+  bloqueio encontrados e corrigidos: build Nix não-portável + `max-width`
+  fixo no CSS de conteúdo), ver lá para detalhe e o que falta confirmar.
 - [ ] **Primeira execução** — decidir se o onboarding de língua (ver
   [[Roadmap i18n]]) entra aqui ou fica para depois do primeiro feedback.
 
@@ -1189,18 +1189,24 @@ heurística. Não é trabalho novo — é validar/comparar decisões já tomadas
   para o release existente (`3089a65`, `0ac5863`). Confirmado via
   `readelf` que o binário reconstruído já usa o interpretador padrão
   `/lib64/ld-linux-x86-64.so.2`. Um segundo bug apareceu já com o `.deb`
-  a abrir: em ecrã 2560×1440, maximizar/fullscreen deixava o conteúdo
-  preso ao tamanho pré-maximização, num canto (bug de
-  realocação de widget do WebKitGTK, não DPI/scaling — confirmado com o
-  utilizador). ✅ Corrigido: `on_window_event` em `src-tauri/src/lib.rs`
-  força `window.set_size()` em cada `Resized`, obrigando o GTK a refazer o
-  size-allocate (`a9aca4b`). Assets da v0.1.12 reconstruídos com ambos os
-  fixes; **falta o utilizador confirmar na máquina limpa** que o essencial
-  de ponta a ponta (incl. câmara do Scanner) agora funciona. À espera
-  também de acumular recibos de mais cadeias portuguesas para correr, na
-  mesma sessão de teste real, a validação multi-cadeia do OCR (item 3-bis,
-  [[OCR — Digitalização de recibos]], que continua PRIORIDADE ALTA e não
-  depende disto).
+  a abrir: em ecrã 2560×1440, a área de conteúdo (dashboard, ingredientes,
+  etc.) ficava presa a ~1320px de largura, encostada à esquerda, com a
+  sidebar e a topbar corretamente redimensionadas — **diagnóstico inicial
+  errado** (`a9aca4b`, revertido): não é bug de realocação do WebKitGTK
+  (isso partiria a sidebar/topbar também), é o `max-width: 1320px` da
+  classe `.content` em `theme.css`, herdado por todas as páginas exceto
+  `RecipesPage` (única com `maxWidth: "none"` inline, por isso só a
+  receita redimensionava). ✅ Corrigido: removido o `max-width` fixo de
+  `.content`; verificado visualmente com Playwright a 2560×1440 no dev
+  server, a dashboard preenche agora a largura toda. `on_window_event`
+  removido de `src-tauri/src/lib.rs` por ser código morto da teoria
+  errada. Assets da v0.1.12 a reconstruir com este fix; **falta o
+  utilizador confirmar na máquina limpa** que o essencial de ponta a ponta
+  (incl. câmara do Scanner) agora funciona. À espera também de acumular
+  recibos de mais cadeias portuguesas para correr, na mesma sessão de
+  teste real, a validação multi-cadeia do OCR (item 3-bis, [[OCR —
+  Digitalização de recibos]], que continua PRIORIDADE ALTA e não depende
+  disto).
 
 ---
 
