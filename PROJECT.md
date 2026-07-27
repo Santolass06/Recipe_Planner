@@ -75,6 +75,17 @@ Sequência decidida após rever o plano contra o estado real do código:
    para OCR de recibos, e outras ideias que dependam de IA local pesada,
    só depois de haver sinal real de utilização a justificar o custo.
 
+**Revisão de 2026-07-28 (auditoria interna de 2026-07-26, ver secção
+abaixo):** as fundações de dados que a auditoria apontou estão fechadas
+(transações, unidades, `user_version`, backup real), o que desbloqueia
+**3.6 — Movimentos de stock**. Passa a ser o próximo trabalho
+estruturante, **antes** de Instrumentação e de Multi-plataforma: é dele
+que dependem as duas tabs vazias dos relatórios, o Recipe Suggester e o
+mise Pro inteiro. A **3.7 — Lista de compras a partir de receitas** é
+independente e mais pequena, entra quando houver espaço. As decisões
+adiadas (`f64`→cêntimos, DOM-05, PERF-01) resolvem-se dentro de 3.6, que é
+onde passam a ter motivo concreto e migração barata.
+
 God-components (adiado na Fase 2) e i18n de vocabulário só entram se o
 feedback de utilização real apontar para lá.
 
@@ -769,6 +780,89 @@ Auchan, etc.) — só verificado com Pingo Doce até agora.
 
 ---
 
+### 3.6 — Movimentos de stock (2026-07-28) — POR IMPLEMENTAR
+
+Origem: PRD-01 da auditoria de 2026-07-26. **Desenho completo em
+`docs/AUDIT-2026-07.md` §2.4** — não repetido aqui para não haver duas
+versões a divergir.
+
+O problema numa frase: **a app modela aquisição e nunca modela consumo.**
+Todos os caminhos que escrevem em `stock` são de entrada (compra, recibo,
+seed, upsert manual); o único que desce é o utilizador a corrigir o número
+à mão. Não existe `cook`, `consume`, `produce`, `sell` nem `waste`. Isso
+explica de uma só vez a tab de desperdício vazia, a tendência de stock
+vazia, o Recipe Suggester sem base de decisão, e o stock divergir da
+realidade ao fim de uma semana de uso.
+
+Forma decidida: **uma tabela** `stock_movements` (alvo, quantidade na
+unidade canónica do alvo, tipo `purchase`/`production`/`consumption`/
+`sale`/`loss`/`adjustment`, motivo, custo unitário e preço de venda no
+momento, timestamp, referência opcional à produção que o originou).
+`stock.quantity` fica como cache do somatório — event sourcing puro
+pagaria dez vezes o preço pelo mesmo resultado.
+
+Decisões já fechadas no desenho, para não serem reabertas na
+implementação:
+
+- **Multiplicador, não porções fracionárias.** A receita continua canónica
+  («rende 40 bolachas»); meia fornada é `0.5`. Não é preciso tornar
+  `portions` fracionário nem inventar tamanhos nomeados.
+- **Preço de venda gravado no movimento**, nunca consultado depois — senão
+  o histórico reescreve-se a cada alteração de preço.
+- **Vender algo que não é receita** aponta para um ingrediente: a mesma
+  forma polimórfica que `shopping_list_items.ingredient_id: Option<i64>`
+  já usa.
+- **Stock insuficiente avisa, não bloqueia.** Numa cozinha real o stock
+  registado está quase sempre errado; uma app que se recusa a aceitar «eu
+  fiz as bolachas» é abandonada ao fim de uma semana.
+
+Pré-requisitos: ✅ todos fechados na branch `fix/audit-2026-07` — TRX-01
+(transações), DOM-01/DOM-02 (unidades) e MIG-01 (`user_version`). Cada
+movimento é multi-tabela e carrega uma unidade e um custo; construir por
+cima dos defeitos antigos garantia gráficos do Pro nascidos errados.
+
+Entram nesta fase, por serem aqui que ganham motivo concreto e migração
+barata: **DOM-05** (janela temporal vs. FIFO no custo de receita),
+**`f64`→cêntimos** (73 ocorrências em `domain.rs`; meio dia hoje, uma
+semana com dados reais) e **PERF-01**.
+
+Desbloqueia, quando existir: tabs de desperdício e tendências, Recipe
+Suggester, contagem de vendidos/perdidos do mise Pro, orçamento por
+evento (previsto vs. real) e alerta de validade com ação directa.
+
+### 3.7 — Lista de compras a partir de receitas — POR IMPLEMENTAR
+
+`create_shopping_list_from_recipes` (`db.rs`, comando registado e exposto
+ao frontend) **é um stub**: aceita `recipe_ids` e `portions_multiplier`,
+ignora ambos e cria uma lista vazia chamada «Compras \<data\>». O comentário
+no corpo — `// This is a complex query - simplified implementation` — diz
+exatamente isso. A auditoria de 2026-07-26
+classificou-o como código morto a apagar; **é o contrário — é uma feature
+por implementar**, e o nome já diz qual. Fica registada aqui para não ser
+apagada por engano numa próxima limpeza.
+
+Comportamento pretendido: expandir as receitas escolhidas em linhas de
+ingrediente (quantidade × `portions_multiplier`, convertida para a unidade
+canónica do ingrediente), somar as linhas do mesmo ingrediente, descontar
+o que já existe em stock, e criar a lista só com o que falta.
+
+Notas que a implementação não pode ignorar:
+
+- É escrita multi-tabela (`shopping_lists` + `shopping_list_items`) —
+  transacional desde o primeiro commit, como as cinco corrigidas em TRX-01.
+- A conversão de unidades passa pelo mesmo caminho que `to_ingredient_unit`
+  já usa; um ingrediente comprado numa unidade inconvertível é rejeitado
+  com o nome do ingrediente na mensagem, não adivinhado.
+- `shopping_list_items.ingredient_id` é `Option<i64>` — as linhas geradas
+  daqui têm-no sempre preenchido, ao contrário das escritas à mão.
+- `portions_multiplier` é `u32` na assinatura atual: meia receita não é
+  exprimível. Se 3.6 já tiver passado o multiplicador de produção a
+  fracionário, alinhar os dois na mesma altura.
+
+Independente de 3.6: só lê stock e receitas, não precisa de movimentos.
+
+---
+
 ## Roadmap i18n
 
 Implementado agora (branch `feature/i18n-full-translation`): PT/EN completos
@@ -1270,24 +1364,24 @@ Estado por achado, não a gravidade original da auditoria às cegas:
 | DOM-002 | `receipt_confirm` sem conversão de unidade | ✅ Corrigido 2026-07-20 (`a908966`) + teste de regressão |
 | QA-001 | "quase zero testes automatizados" | ⚠️ **Achado errado** — 109 testes já passam (`cargo test --workspace`); a auditoria contou mal o agregado |
 | DOM-001 / BLD-001 | Path da BD aninha `mise` extra | ⚠️ **Parcialmente desatualizado** — o bug de double-nesting real (`mise/mise/mise.db`) já foi corrigido na Fase 4 (2026-07-10, `resolve_data_dir`); resta um nesting residual cosmético (`AppData` já namespaced pelo identifier + mais um `"mise"`). Baixo valor corrigir agora — implicaria mais uma migração manual nesta máquina de dev por um ganho pequeno. Fica registado, sem ação agendada. |
-| DOM-003 / FUN-002 | Export/import só cobre ingredientes+receitas | ⏳ Aberto, real. Decisão de produto (documentar limite vs. backup completo) — Fase de Polishing/Fase 4. |
+| DOM-003 / FUN-002 | Export/import só cobre ingredientes+receitas | ✅ Corrigido 2026-07-27 (`36b2c3f`) — decidido pelo backup completo: `backup_export`/`backup_restore` cobrem 18 tabelas + imagens (DOM-04 da auditoria seguinte) |
 | FUN-001 / BLD-002 | Câmara do Scanner não verificada em máquina limpa | Já é o bug pendente da Fase 0 — preso ao teste em máquina limpa, agora no fim da Fase de Polishing. |
 | FUN-003 | OCR só validado numa cadeia (Pingo Doce) | Já é o item 3-bis (PRIORIDADE ALTA) — aberto, à espera de mais recibos. |
 | QA-002 | Sem CI (`cargo test`/`npm run build` em PR) | ✅ Corrigido 2026-07-20 (`d5e9b60`) — `.github/workflows/ci.yml` |
 | SEC-002 | Import de receita por URL sem allowlist/timeout/limite | ✅ Corrigido 2026-07-20 (`83f2696`) — allowlist http(s), timeout 10s, limite 5MB |
-| DOM-004 | `PRAGMA foreign_keys` nunca ligado | ⏳ Aberto, real, mas **não é quick win** — precisa de auditoria aos caminhos de delete antes de ligar (risco de quebrar cascatas manuais existentes). |
-| DOM-005 | Sem `schema_version`/`user_version` | ⏳ Aberto, real. |
-| DOM-008 | `receipt_confirm` não transacional | ⏳ Aberto, real. |
-| DOM-009 | Sem schema para waste/histórico de stock | Já documentado como vazio-por-desenho no README; feature nova, não bug — Fase de Polishing se houver pedido real. |
+| DOM-004 | `PRAGMA foreign_keys` nunca ligado | ⚠️ **Achado errado** — o libsql aplica FKs por omissão, verificado com teste na auditoria de 2026-07-26 (ARC-01). O comentário do código que dizia o contrário estava errado e foi corrigido (`4719696`). |
+| DOM-005 | Sem `schema_version`/`user_version` | ✅ Corrigido 2026-07-27 (`8aced69`) — `PRAGMA user_version` + `run_data_migrations` (MIG-01) |
+| DOM-008 | `receipt_confirm` não transacional | ✅ Corrigido 2026-07-27 (`65619a6`) — junto com as outras quatro escritas multi-tabela (TRX-01) |
+| DOM-009 | Sem schema para waste/histórico de stock | ⏳ Aberto, e **subestimado aqui**: não é "feature nova se houver pedido", é metade do domínio em falta. Passou a [[#3.6 — Movimentos de stock]], o próximo trabalho estruturante. |
 | ARC-001 | `db.rs` monolítico (~5698 linhas) | Já é o "god-components adiado" da Fase 2 — deliberado, sem ação agendada. |
 | ARC-002 | "God pages" no frontend | Já é o "god-components adiado" da Fase 2 — deliberado, sem ação agendada. |
 | ARC-004 | Conversão de unidades duplicada FE/BE | ⏳ Aberto, baixo risco. |
 | SEC-003 | `validator` derives nunca chamados (`.validate()`) | ✅ Corrigido 2026-07-20 (`19beefc`) — `input.validate()` ligado no funil único `AppDb`, todos os comandos passam por lá; teste de regressão |
 | SEC-004 | Upload de imagem base64 sem limite de tamanho | ✅ Corrigido 2026-07-20 (`6c12c8e`) — limite de 15MB |
-| SEC-007 | Plugins `dialog`/`fs`/`shell` sem capability correspondente | ⏳ Aberto, real. |
-| SEC-010 | Superfície de rede por documentar | ⏳ Aberto, documentação. |
+| SEC-007 | Plugins `dialog`/`fs`/`shell` sem capability correspondente | ✅ Corrigido 2026-07-27 (`eac7965`) — os três plugins tinham zero consumidores; apagados em vez de configurados (BLD-01) |
+| SEC-010 | Superfície de rede por documentar | ✅ Corrigido 2026-07-27 (`eac7965`) — o proxy Unsplash/Pexels era a superfície não documentada e também não tinha consumidores; apagado (SEC-02). Resta o import por URL, agora com guarda de rede local (2026-07-28) |
 | UX-002/003/004 | Empty/error inconsistente; fluxos densos sem undo; a11y | Fica para Fase de Polishing / Multi-plataforma, como o resto de UX. |
-| FUN-004 | Rota `/sugestor` morta (stub) | ✅ Corrigido 2026-07-20 (`2e3868a`) — rota e `PlaceholderPage.tsx` removidos; backend `suggester_suggest` fica (Backlog: "Recipe Suggester — UI por fazer"). |
+| FUN-004 | Rota `/sugestor` morta (stub) | ✅ Corrigido 2026-07-20 (`2e3868a`) — rota e `PlaceholderPage.tsx` removidos. O backend `suggester_suggest` foi apagado a 2026-07-27 (`eac7965`): era um stub sem base de decisão possível enquanto não houver consumo registado. Volta com [[#3.6 — Movimentos de stock]]. |
 | QA-004 / QA-006 | Seams por testar; validação ainda manual | ⏳ Aberto, acompanha QA-001/002. |
 | BLD-003/004/005/006 | README sobre-vende plataformas; bundle OCR 37MB; dev shell Nix-specific; mobile não iniciado | Já são decisões conhecidas e aceites (ver Fase 4/Multi-plataforma), não achados novos. |
 | Cluster P3 | Notas de polish e positivas (ARC-003/005/006/007, DOM-006/007/010, FUN-005/006/007, UX-001/005/006/007, SEC-005/006/008/009, QA-003, BLD-007) | Sem ação — ver `docs/AUDIT.md` para detalhe, nada aqui muda o roadmap. |
@@ -1300,12 +1394,65 @@ sem consumidores até haver utilizadores reais, Multi-plataforma atrás do
 Polishing) — eram só o trabalho de baixo custo mais próximo à mão.
 `cargo check`/`test --workspace` e `tsc --noEmit` limpos depois de todos.
 
+---
+
+## Auditoria interna (2026-07-26)
+
+Relatório completo em `docs/AUDIT-2026-07.md`. Ao contrário da de
+2026-07-20, esta não aceitou como verdade nem o `docs/AUDIT.md` nem as
+tabelas de estado deste ficheiro — reverificou tudo no código e **provou
+os achados de dados com testes executáveis** antes de os escrever. Sete
+correções dadas como fechadas foram reabertas por isso.
+
+A lição estrutural, registada porque se repetiu duas vezes: **corrigiu-se
+o sintoma nomeado no achado e não se procurou o irmão.** SEC-001 removeu o
+keystore do índice e não rodou a chave; DOM-002 converteu unidades no
+`receipt_confirm` e deixou o `stock_purchase_add` por converter. Regra que
+fica: quando um achado nomeia um caminho, procurar os outros caminhos que
+escrevem o mesmo dado **antes** de fechar.
+
+Corrigidos na branch `fix/audit-2026-07` (2026-07-27/28), um commit por
+achado:
+
+| ID | Título | Estado |
+|----|--------|--------|
+| TRX-01 / DOM-03 | Cinco escritas multi-tabela sem transação | ✅ `65619a6` — inclui `clone_recipe`; uma gravação de receita que falha a meio já não a deixa mutilada |
+| DOM-01 / DOM-02 | `stock_purchase_add` não converte unidades; preço médio soma unidades diferentes | ✅ `8aced69` — invariante nova: **toda a linha de `stock_purchases` está na unidade do ingrediente**. Corrigido nos **dois** caminhos, não só no nomeado |
+| MIG-01 | Sem slot de versão de schema | ✅ `8aced69` — `PRAGMA user_version` + `run_data_migrations`, que normaliza as compras gravadas antes do fix |
+| MIG-02 | Dois caminhos de dados possíveis | ✅ `6fd0e18` |
+| DOM-06 | Relatório de custos somava estimativas de listas | ✅ `68400fb` — `total_spent`/`by_category` vêm de `stock_purchases`; o scanner de recibos passa a contar |
+| DOM-04 | «Exportar dados» não era backup | ✅ `36b2c3f` — `backup_export`/`backup_restore`, 18 tabelas + imagens, restauro com confirmação |
+| QA-01 / QA-02 / BLD-02 | Métrica de testes enganadora; sem `tsc` no CI; `nix-shell` por documentar | ✅ `ac80611` — os 4 testes de prova passam a regressão, nenhum `#[ignore]` |
+| BLD-01 / SEC-02 | Plugins e proxy de imagens sem consumidores | ✅ `eac7965` — apagados, não configurados |
+| FUN-01 / ARC-01 / `minWidth` / `unwrap` do parser | Achados pequenos | ✅ `4719696` |
+| UX-01 / UX-02 | A causa real do erro desaparecia; tabs vazias sem explicação | ✅ `2946812`, `797e09d` |
+| SEC-01 | Keystore recuperável de repositório público | ✅ Fechado 2026-07-28 — ver SEC-001 na tabela acima |
+| SEC-002 (residual) | Allowlist de esquema não cobria a rede local | ✅ 2026-07-28 — `assert_safe_url` rejeita loopback/privado/link-local, e os redirects passam a ser seguidos à mão para que **cada hop** seja verificado |
+
+Não corrigidos, com motivo:
+
+| ID | Decisão |
+|----|---------|
+| PRD-01 | Não é um fix — é [[#3.6 — Movimentos de stock]], o próximo trabalho estruturante |
+| DOM-05, `f64`→cêntimos, PERF-01 | Adiados **para dentro de 3.6**, onde ganham motivo concreto e migração barata. Hoje nenhum produz erro observável |
+| ARC-004 (duplicação de unidades FE/BE) | Sem ação — o risco é de divergência futura, não há defeito atual |
+| `create_shopping_list_from_recipes` | A auditoria classificou-o como código morto a apagar. **Errado** — é feature por implementar, ver [[#3.7 — Lista de compras a partir de receitas]] |
+| «Índice duplicado» em `shopping_list_items` | **Achado errado** — a reparação reconstrói a tabela e os índices vão com a antiga. Ficou um comentário no código |
+
+Estado no fim: `cargo test --workspace` 117 a passar, 0 ignorados — **39
+de comportamento** (36 em `db::`, 2 em `domain::unit_parse_tests`, 1 em
+`mise-tauri`) e 78 `export_bindings_*`, ver nota abaixo. `npx tsc
+--noEmit` e `npm run build` limpos.
+
 **Nota sobre a contagem de testes (auditoria de 2026-07-26, QA-01):** o
 total que o `cargo test --workspace` imprime inclui **80 testes
 `export_bindings_*` gerados pelo `ts-rs`**, que escrevem o ficheiro de
 bindings TypeScript e não asseveram comportamento nenhum. Citar o total
-como medida de cobertura inflaciona-a ~3,7×. Para o número que interessa:
-`cargo test --workspace 2>&1 | grep -c "^test db::"`.
+como medida de cobertura inflaciona-a ~3×. Para o número que interessa:
+
+```
+cargo test --workspace 2>&1 | grep "^test " | grep -vc export_bindings
+```
 
 ---
 
@@ -1347,7 +1494,9 @@ Nunca trabalhar diretamente em `main`.
 ## Backlog / Deferido (sem data)
 
 - Export para PDF/CSV.
-- Recipe Suggester — UI (backend `suggester_suggest` já existe).
+- Recipe Suggester — backend e UI. O `suggester_suggest` que existia era um
+  stub e foi apagado (2026-07-27); sem consumo registado não há base de
+  decisão para sugerir nada. Depende de [[#3.6 — Movimentos de stock]].
 - Suporte macOS desktop (build/assinatura/notarização Apple).
 - Suporte iPad/iOS (Tauri iOS) — decisão de arquitetura adiada até Fase 0
   estar concluída.

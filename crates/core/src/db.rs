@@ -2875,26 +2875,103 @@ fn parse_ingredient_line(raw: &str) -> RecipeImportIngredient {
     }
 }
 
+/// True for addresses that never belong to a public recipe site: this machine,
+/// the local network, and the link-local range that carries cloud metadata.
+fn is_local_address(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.octets()[0] == 0
+                // carrier-grade NAT, 100.64.0.0/10
+                || (v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]))
+        }
+        std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => is_local_address(&std::net::IpAddr::V4(v4)),
+            // unique-local (fc00::/7) and link-local (fe80::/10); the std helpers
+            // for both are still unstable, hence the prefix checks.
+            None => {
+                v6.is_loopback()
+                    || v6.is_unspecified()
+                    || (v6.segments()[0] & 0xfe00) == 0xfc00
+                    || (v6.segments()[0] & 0xffc0) == 0xfe80
+            }
+        },
+    }
+}
+
+/// Rejects anything that is not http(s) or that points at this machine or the local
+/// network. The user types these URLs, but a pasted link should not be able to reach
+/// the router's admin page or a service listening on localhost.
+///
+/// ponytail: resolving here and letting reqwest resolve again leaves a DNS-rebinding
+/// window. Closing it means a custom resolver holding the checked address; not worth
+/// it while the only source of URLs is the user's own paste.
+async fn assert_safe_url(url: &str) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(url).map_err(|_| "URL inválido.".to_string())?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err("Só são permitidos URLs http:// ou https://.".to_string());
+    }
+    let host = parsed.host_str().ok_or_else(|| "URL sem servidor.".to_string())?;
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    // Also parses bare IP literals, so hosts written as an address need no special case.
+    let addrs: Vec<std::net::IpAddr> = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|_| format!("Não foi possível resolver o servidor '{host}'."))?
+        .map(|addr| addr.ip())
+        .collect();
+    if addrs.is_empty() || addrs.iter().any(is_local_address) {
+        return Err("Este URL aponta para a rede local; só é possível importar de sites públicos.".to_string());
+    }
+    Ok(())
+}
+
 /// Import a recipe preview from a URL's schema.org/Recipe JSON-LD (Fase 3.4).
 /// Read-only: never writes to the DB, only looks up existing ingredients by exact
 /// name to pre-fill `matched_ingredient_id` where possible. Saving is a separate,
 /// explicit step the user takes after reviewing the preview.
 pub async fn recipe_import_from_url(db: &Database, url: String) -> Result<RecipeImportPreview, String> {
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err("Só são permitidos URLs http:// ou https://.".to_string());
-    }
     const MAX_BODY_BYTES: u64 = 5 * 1024 * 1024; // recipe pages are plain HTML, 5MB is generous
+    const MAX_REDIRECTS: usize = 5;
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
+        // Followed by hand below, so that every hop passes assert_safe_url — reqwest's
+        // own follower would only ever check the URL the user typed.
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| e.to_string())?;
-    let response = client
-        .get(&url)
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+
+    let mut current = url;
+    let mut hops = 0usize;
+    let response = loop {
+        assert_safe_url(&current).await?;
+        let res = client
+            .get(&current)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !res.status().is_redirection() {
+            break res;
+        }
+        hops += 1;
+        if hops > MAX_REDIRECTS {
+            return Err("A página redireciona demasiadas vezes.".to_string());
+        }
+        let location = res
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| "A página redireciona para um destino inválido.".to_string())?;
+        current = reqwest::Url::parse(&current)
+            .and_then(|base| base.join(location))
+            .map_err(|_| "A página redireciona para um destino inválido.".to_string())?
+            .to_string();
+    };
     if response.content_length().is_some_and(|len| len > MAX_BODY_BYTES) {
         return Err("A página é demasiado grande para importar.".to_string());
     }
@@ -6112,6 +6189,25 @@ mod audit_2026_07 {
             exported.ingredients[0].category.as_deref(), Some(category_name.as_str()),
             "the export carried something other than the category's name"
         );
+    }
+
+    /// SEC-002 residual: the scheme allowlist let a pasted link reach the local
+    /// network. No network needed — IP literals and `localhost` resolve offline.
+    #[tokio::test]
+    async fn importing_from_the_local_network_is_refused() {
+        for url in [
+            "http://127.0.0.1:8080/receita",
+            "http://localhost/receita",
+            "http://192.168.1.1/admin",
+            "http://169.254.169.254/latest/meta-data",
+            "http://[::1]/receita",
+            "file:///etc/passwd",
+        ] {
+            assert!(
+                assert_safe_url(url).await.is_err(),
+                "'{url}' was accepted as a public recipe site"
+            );
+        }
     }
 
     /// DOM-01: `receipt_confirm` converts the purchased quantity into the
