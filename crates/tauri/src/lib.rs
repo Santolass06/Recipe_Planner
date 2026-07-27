@@ -521,7 +521,7 @@ impl AppDb {
     }
 
     pub async fn receipt_parse(&self, raw_text: String) -> Result<Vec<ParsedReceiptItem>, String> {
-        mise_core::db::receipt_parse(&self.db, raw_text).await.map_err(|e| e.to_string())
+        mise_core::db::receipt_parse(raw_text).await.map_err(|e| e.to_string())
     }
 
     pub async fn receipt_confirm(&self, input: ReceiptConfirmInput) -> Result<Vec<StockPurchase>, String> {

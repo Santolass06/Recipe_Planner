@@ -431,8 +431,11 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
         "#,
         (),
     ).await?;
-    // ponytail: no FK/ON DELETE CASCADE — this codebase never enables
-    // `PRAGMA foreign_keys`, so cascades are handled manually (see delete_event).
+    // ponytail: no FK on these columns — not because cascades don't work
+    // (libsql *does* enforce foreign keys: deleting an ingredient used by a
+    // recipe fails with FOREIGN KEY constraint failed), but because deleting
+    // an event has to remove the recipes and ingredients copied into it,
+    // which is a fan-out no single ON DELETE expresses. See delete_event.
     add_column_if_missing(&conn, "recipes", "event_id", "INTEGER").await?;
     add_column_if_missing(&conn, "recipes", "base_recipe_id", "INTEGER").await?;
 
@@ -612,6 +615,8 @@ async fn repair_shopping_list_items_nullable_ingredient(conn: &Connection) -> Li
     ).await?;
     conn.execute("INSERT INTO shopping_list_items SELECT * FROM shopping_list_items_old", ()).await?;
     conn.execute("DROP TABLE shopping_list_items_old", ()).await?;
+    // Not a duplicate of the CREATE INDEX in run_migrations: the table was
+    // just rebuilt, and its indexes went with the old one.
     conn.execute("CREATE INDEX IF NOT EXISTS idx_shopping_list_items_list ON shopping_list_items(shopping_list_id);", ()).await?;
 
     Ok(())
@@ -1266,35 +1271,56 @@ pub async fn clone_recipe(db: &Database, id: i64) -> LibsqlResult<RecipeWithIngr
     let conn = get_conn(db).await?;
     let original = get_recipe(db, id).await?;
 
+    // `Recipe` doesn't carry event_id but the column does, so the clone used
+    // to land in the catalog no matter where the original lived: duplicating
+    // a recipe inside an event quietly contaminated the main catalog with
+    // catering variants, which is precisely what event mode exists to avoid.
+    let event_id: Option<i64> = {
+        let mut rows = conn.query("SELECT event_id FROM recipes WHERE id = ?1", params![id]).await?;
+        rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?
+    };
+
     let tags_json = serde_json::to_string(&serde_json::from_str::<Vec<String>>(&original.tags).unwrap_or_default())
         .unwrap_or_else(|_| "[]".to_string());
 
-    conn.execute(
-        "INSERT INTO recipes (name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, image_path)
-         VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8)",
-        params![format!("{} (Cópia)", original.name), original.category, original.portions, original.instructions, original.prep_time_minutes, original.cook_time_minutes, tags_json, original.image_path],
+    // Recipe row plus one row per ingredient line: a failure halfway leaves a
+    // copy with some of the original's ingredients.
+    let tx = conn.transaction().await?;
+
+    tx.execute(
+        "INSERT INTO recipes (name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, image_path, event_id)
+         VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9)",
+        params![format!("{} (Cópia)", original.name), original.category, original.portions, original.instructions, original.prep_time_minutes, original.cook_time_minutes, tags_json, original.image_path, event_id],
     ).await?;
 
-    let new_id = conn.last_insert_rowid();
+    let new_id = tx.last_insert_rowid();
 
     // Copy recipe ingredients
-    let mut rows = conn.query(
-        "SELECT ingredient_id, ingredient_name, quantity, unit FROM recipe_ingredients WHERE recipe_id = ?1",
-        params![id],
-    ).await?;
+    let lines = {
+        let mut rows = tx.query(
+            "SELECT ingredient_id, ingredient_name, quantity, unit FROM recipe_ingredients WHERE recipe_id = ?1",
+            params![id],
+        ).await?;
+        let mut lines = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let ingredient_id: i64 = row.get(0)?;
+            let ingredient_name: String = row.get(1)?;
+            let quantity: f64 = row.get(2)?;
+            let unit: String = row.get(3)?;
+            lines.push((ingredient_id, ingredient_name, quantity, unit));
+        }
+        lines
+    };
 
-    while let Some(row) = rows.next().await? {
-        let ingredient_id: i64 = row.get(0)?;
-        let ingredient_name: String = row.get(1)?;
-        let quantity: f64 = row.get(2)?;
-        let unit: String = row.get(3)?;
-
-        conn.execute(
+    for (ingredient_id, ingredient_name, quantity, unit) in lines {
+        tx.execute(
             "INSERT INTO recipe_ingredients (recipe_id, ingredient_id, ingredient_name, quantity, unit)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![new_id, ingredient_id, ingredient_name, quantity, unit],
         ).await?;
     }
+
+    tx.commit().await?;
 
     let recipe = get_recipe(db, new_id).await?;
     row_to_recipe_with_ingredients(db, recipe).await
@@ -2824,9 +2850,12 @@ fn parse_ingredient_line(raw: &str) -> RecipeImportIngredient {
     let core = strip_descriptive_clauses(rest);
     let words: Vec<&str> = core.split_whitespace().collect();
 
-    let (unit, name_guess) = match words.iter().position(|w| unit_from_ingredient_word(w).is_some()) {
-        Some(idx) => {
-            let unit = unit_from_ingredient_word(words[idx]).unwrap();
+    // find_map instead of position + unwrap: the unwrap was covered by the
+    // predicate, but a parser is the last place to leave a panic that depends
+    // on two expressions staying in sync.
+    let found = words.iter().enumerate().find_map(|(i, w)| unit_from_ingredient_word(w).map(|u| (i, u)));
+    let (unit, name_guess) = match found {
+        Some((idx, unit)) => {
             let name = words.iter().enumerate()
                 .filter(|(i, _)| *i != idx)
                 .map(|(_, w)| *w)
@@ -4907,9 +4936,11 @@ async fn parse_receipt_text(text: &str) -> Vec<ParsedReceiptItem> {
 }
 
 /// Parse raw receipt text (for re-parsing)
-pub async fn receipt_parse(_db: &Database, raw_text: String) -> LibsqlResult<Vec<ParsedReceiptItem>> {
-    let items = parse_receipt_text(&raw_text).await;
-    Ok(items)
+/// Pure text parsing — takes no database. Kept `async` and fallible to match
+/// the shape every other command has; the signature used to take a `&Database`
+/// it never touched, which read like it was querying something.
+pub async fn receipt_parse(raw_text: String) -> LibsqlResult<Vec<ParsedReceiptItem>> {
+    Ok(parse_receipt_text(&raw_text).await)
 }
 
 /// Confirm receipt import - creates stock purchases and ingredients
