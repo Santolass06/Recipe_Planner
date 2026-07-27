@@ -1298,8 +1298,14 @@ pré-requisito de nada (nada bloqueia estritamente avançar: teste em
 máquina limpa e o 3-bis já adiados por falta de recibos, Instrumentação
 sem consumidores até haver utilizadores reais, Multi-plataforma atrás do
 Polishing) — eram só o trabalho de baixo custo mais próximo à mão.
-`cargo check`/`test --workspace` (110 testes) e `tsc --noEmit` limpos
-depois de todos.
+`cargo check`/`test --workspace` e `tsc --noEmit` limpos depois de todos.
+
+**Nota sobre a contagem de testes (auditoria de 2026-07-26, QA-01):** o
+total que o `cargo test --workspace` imprime inclui **80 testes
+`export_bindings_*` gerados pelo `ts-rs`**, que escrevem o ficheiro de
+bindings TypeScript e não asseveram comportamento nenhum. Citar o total
+como medida de cobertura inflaciona-a ~3,7×. Para o número que interessa:
+`cargo test --workspace 2>&1 | grep -c "^test db::"`.
 
 ---
 
@@ -1313,6 +1319,9 @@ fluxo, sem exceções:
 3. Validar: `cargo check --workspace`, `cargo test --workspace` (quando
    aplicável), `npx tsc --noEmit`, `npm run build`, teste visual via
    `cargo tauri dev`.
+   **Os comandos `cargo` exigem `nix-shell`** (`nix-shell --run "cargo test
+   --workspace"`); fora dele o `openssl-sys` não encontra o `openssl.pc` e
+   a compilação falha.
 4. Confirmação visual da funcionalidade.
 5. `git merge --no-ff` para `main` → push.
 

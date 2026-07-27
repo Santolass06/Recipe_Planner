@@ -69,6 +69,13 @@ sudo apt install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
   librsvg2-dev libssl-dev pkg-config libdbus-1-dev libgtk-3-dev libsoup-3.0-dev
 ```
 
+On NixOS, `shell.nix` provides all of the above — every `cargo` command below
+has to run inside it, or `openssl-sys` fails to find `openssl.pc`:
+
+```bash
+nix-shell --run "cargo test --workspace"
+```
+
 ### Run
 
 ```bash

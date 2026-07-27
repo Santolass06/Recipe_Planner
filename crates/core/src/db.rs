@@ -5916,10 +5916,11 @@ mod crud_base_tests {
     }
 }
 
-/// Executable evidence for the 2026-07-26 audit (see docs/AUDIT-2026-07.md).
-/// Every test in this module FAILS against the current code — each one asserts
-/// the behaviour the app should have, so it flips to green when the finding is
-/// fixed. Do not "fix" these by relaxing the assertions.
+/// Regression tests for the findings of the 2026-07-26 audit (see
+/// docs/AUDIT-2026-07.md). Each one was written to fail against the code as it
+/// stood and asserts the behaviour the app should have. Anything still marked
+/// `#[ignore]` is a finding that has not been fixed yet — do not "fix" these by
+/// relaxing the assertions.
 #[cfg(test)]
 mod audit_2026_07 {
     use super::*;
@@ -5949,7 +5950,7 @@ mod audit_2026_07 {
         }).await.unwrap()
     }
 
-    /// DOM-01: `export_data` only serialises ingredients and recipes. Stock,
+    /// DOM-04: `export_data` only serialises ingredients and recipes. Stock,
     /// purchases, suppliers, shopping lists, meal plans, events and settings
     /// are absent, so "export" is not a backup of the user's data.
     #[tokio::test]
@@ -5972,11 +5973,10 @@ mod audit_2026_07 {
         );
     }
 
-    /// DOM-02: `receipt_confirm` converts the purchased quantity into the
-    /// ingredient's own unit; `stock_purchase_add` does not (it parses the
-    /// ingredient unit into `_ingredient_unit` and discards it).
+    /// DOM-01: `receipt_confirm` converts the purchased quantity into the
+    /// ingredient's own unit; `stock_purchase_add` did not (it parsed the
+    /// ingredient unit into `_ingredient_unit` and discarded it).
     #[tokio::test]
-    #[ignore = "prova de bug: falha de propósito até o achado ser corrigido — correr com `cargo test -- --ignored`"]
     async fn stock_purchase_add_must_convert_into_the_ingredient_unit() {
         let db = test_db().await;
         let f = flour(&db, Unit::Gram, 0.002).await;
@@ -5995,11 +5995,10 @@ mod audit_2026_07 {
         );
     }
 
-    /// DOM-03: `weighted_avg_stock_price` sums `quantity` across purchases
+    /// DOM-02: `weighted_avg_stock_price` sums `quantity` across purchases
     /// without normalising units, so the same real price expressed in two
-    /// units produces a nonsense average that lands straight in recipe cost.
+    /// units produced a nonsense average that landed straight in recipe cost.
     #[tokio::test]
-    #[ignore = "prova de bug: falha de propósito até o achado ser corrigido — correr com `cargo test -- --ignored`"]
     async fn weighted_average_price_must_not_mix_units() {
         let db = test_db().await;
         let f = flour(&db, Unit::Kilogram, 2.0).await;
@@ -6027,11 +6026,11 @@ mod audit_2026_07 {
         );
     }
 
-    /// DOM-04: `update_recipe` deletes every `recipe_ingredients` row before
-    /// re-inserting them, with no transaction. Any failure inside the insert
-    /// loop leaves the recipe permanently stripped of ALL its ingredients.
+    /// DOM-03: `update_recipe` deletes every `recipe_ingredients` row before
+    /// re-inserting them. Without a transaction, any failure inside the insert
+    /// loop left the recipe permanently stripped of the lines that hadn't gone
+    /// back in yet.
     #[tokio::test]
-    #[ignore = "prova de bug: falha de propósito até o achado ser corrigido — correr com `cargo test -- --ignored`"]
     async fn a_failed_recipe_update_must_not_destroy_the_existing_ingredients() {
         let db = test_db().await;
         let f = flour(&db, Unit::Kilogram, 2.0).await;
@@ -6068,6 +6067,95 @@ mod audit_2026_07 {
             "a failed recipe update left the recipe with {} of its 2 ingredients \
              instead of rolling back",
             after.ingredients.len()
+        );
+    }
+
+    /// MIG-01 + DOM-01: databases written before the fix hold purchase rows in
+    /// whatever unit was typed. The data migration has to rewrite them into the
+    /// ingredient's unit without changing the amount that was actually paid.
+    #[tokio::test]
+    async fn the_unit_migration_rewrites_purchase_rows_written_before_the_fix() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let conn = get_conn(&db).await.unwrap();
+
+        // A pre-fix row: 1 kg at 2 €/kg against a gram-tracked ingredient.
+        conn.execute(
+            "INSERT INTO stock_purchases
+             (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date)
+             VALUES (?1, 1.0, 'kilogram', 2.0, 2.0, 0, 0.0, ?2)",
+            params![f.id, Utc::now().to_rfc3339()],
+        ).await.unwrap();
+        conn.execute("PRAGMA user_version = 0", ()).await.unwrap();
+
+        run_data_migrations(&conn).await.unwrap();
+
+        let mut rows = conn.query(
+            "SELECT quantity, unit, price_per_unit FROM stock_purchases WHERE ingredient_id = ?1",
+            params![f.id],
+        ).await.unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        let quantity: f64 = row.get(0).unwrap();
+        let unit: String = row.get(1).unwrap();
+        let price: f64 = row.get(2).unwrap();
+
+        assert_eq!(quantity, 1000.0, "1 kg must become 1000 g");
+        assert_eq!(unit, "gram", "the row must end up in the ingredient's unit");
+        assert!(
+            (quantity * price - 2.0).abs() < 1e-9,
+            "the migration changed what was paid: {} € instead of 2 €",
+            quantity * price
+        );
+    }
+
+    /// DOM-01: units from another dimension are a real disagreement between
+    /// what was typed and how the ingredient is tracked. Guessing produced the
+    /// original bug, so the write is rejected instead.
+    #[tokio::test]
+    async fn buying_in_an_unconvertible_unit_is_rejected_rather_than_guessed() {
+        let db = test_db().await;
+        let eggs = create_ingredient(&db, IngredientInput {
+            name: "Ovos".into(), unit: Unit::Piece, price_per_unit: 0.3,
+            category: None, event_id: None,
+        }).await.unwrap();
+
+        let result = stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: eggs.id, quantity: 1.0, unit: Unit::Kilogram,
+            price_per_unit: 2.0, total_price: 2.0,
+            is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await;
+
+        assert!(result.is_err(), "1 kg into a piece-tracked ingredient must not be accepted");
+        assert!(
+            stock_list(&db).await.unwrap().is_empty(),
+            "the rejected purchase must not have moved any stock"
+        );
+    }
+
+    /// DOM-06: the cost report used to sum shopping-list estimates, so money
+    /// spent anywhere else — the Stock page, and every scanned receipt —
+    /// showed as €0.00.
+    #[tokio::test]
+    async fn cost_report_counts_money_spent_outside_a_shopping_list() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Kilogram, 2.0).await;
+
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 3.0, unit: Unit::Kilogram,
+            price_per_unit: 2.0, total_price: 6.0,
+            is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        let report = get_cost_report(&db, 30).await.unwrap();
+        assert_eq!(
+            report.total_spent, 6.0,
+            "a purchase made outside a shopping list must count as money spent"
+        );
+        assert_eq!(
+            report.by_category.iter().map(|c| c.total).sum::<f64>(), 6.0,
+            "the category breakdown must add up to the total it is a breakdown of"
         );
     }
 }
