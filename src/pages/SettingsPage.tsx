@@ -4,6 +4,7 @@ import { invoke, openExternal } from "../lib/devInvoke";
 import { useI18n } from "../i18n";
 import { applyTheme } from "../theme";
 import type { ProblemReportInput } from "../../crates/core/bindings/ProblemReportInput";
+import { errKey } from "../lib/errors";
 
 type SettingsMap = Record<string, string>;
 
@@ -189,7 +190,7 @@ export default function SettingsPage() {
       const data = await invoke<SettingsMap>("settings_get_all");
       setSettings(data);
     } catch (e) {
-      showToast(t("settings.loadError"), "err");
+      showToast(t(errKey(e, "settings.loadError")), "err");
     } finally {
       setLoading(false);
     }
@@ -249,7 +250,7 @@ export default function SettingsPage() {
 
       showToast(t("settings.saved"), "ok");
     } catch (e) {
-      showToast(t("settings.saveError"), "err");
+      showToast(t(errKey(e, "settings.saveError")), "err");
     } finally {
       setSaving(false);
     }
@@ -270,7 +271,7 @@ export default function SettingsPage() {
       URL.revokeObjectURL(url);
       showToast(t("settings.exportSuccess"), "ok");
     } catch (e) {
-      showToast(t("settings.exportError"), "err");
+      showToast(t(errKey(e, "settings.exportError")), "err");
     }
   };
 
@@ -299,7 +300,7 @@ export default function SettingsPage() {
       }
       setImportFile(null);
     } catch (e) {
-      showToast(t("settings.importError"), "err");
+      showToast(t(errKey(e, "settings.importError")), "err");
     }
   };
 
@@ -313,7 +314,7 @@ export default function SettingsPage() {
       setPendingRestore(null);
     } catch (e) {
       console.error("backup_restore", e);
-      showToast(t("settings.importError"), "err");
+      showToast(t(errKey(e, "settings.importError")), "err");
     } finally {
       setSaving(false);
     }
@@ -326,7 +327,7 @@ export default function SettingsPage() {
       showToast(t("settings.resetSuccess"), "ok");
       setShowResetConfirm(false);
     } catch (e) {
-      showToast(t("settings.resetError"), "err");
+      showToast(t(errKey(e, "settings.resetError")), "err");
     }
   };
 
@@ -338,7 +339,7 @@ export default function SettingsPage() {
       showToast(t("settings.deleteAllDataSuccess"), "ok");
       setShowDeleteDataConfirm(false);
     } catch (e) {
-      showToast(t("settings.deleteAllDataError"), "err");
+      showToast(t(errKey(e, "settings.deleteAllDataError")), "err");
     } finally {
       setSaving(false);
     }
@@ -350,7 +351,7 @@ export default function SettingsPage() {
       await invoke("seed_demo_data");
       showToast(t("settings.demoDataSuccess"), "ok");
     } catch (e) {
-      showToast(t("settings.demoDataError"), "err");
+      showToast(t(errKey(e, "settings.demoDataError")), "err");
     } finally {
       setSaving(false);
     }
@@ -385,7 +386,7 @@ export default function SettingsPage() {
       setReportDescription("");
       setReportImage(null);
     } catch (e) {
-      showToast(t("settings.reportProblemError"), "err");
+      showToast(t(errKey(e, "settings.reportProblemError")), "err");
     } finally {
       setReportSubmitting(false);
     }
@@ -397,7 +398,7 @@ export default function SettingsPage() {
       const path = await invoke<string>("export_usage_data");
       showToast(t("settings.usageExportSuccess", { path: path ?? "" }), "ok");
     } catch (e) {
-      showToast(t("settings.usageExportError"), "err");
+      showToast(t(errKey(e, "settings.usageExportError")), "err");
     } finally {
       setExporting(false);
     }

@@ -12,6 +12,7 @@ import type { RecipeWithIngredients as Recipe } from "../../crates/core/bindings
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import { RecipeFormContent, computeCostLines, eur, EMPTY_FORM } from "./RecipesPage";
 import { UNIT_LABELS_SHORT as UNIT_SHORT } from "../lib/units";
+import { errKey } from "../lib/errors";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -62,7 +63,7 @@ export default function EventDetailPage() {
       setCatalogIngredients(catalogIngs);
       setEventIngredients(eventIngs);
     } catch (e) {
-      showToast(t("events.loadError"), "err");
+      showToast(t(errKey(e, "events.loadError")), "err");
     }
   }, [eventId, showToast, t]);
 
@@ -75,7 +76,7 @@ export default function EventDetailPage() {
       setIngredientPickerOpen(false);
       await load();
     } catch (e) {
-      showToast(t("events.copyError"), "err");
+      showToast(t(errKey(e, "events.copyError")), "err");
     }
   }
 
@@ -100,7 +101,7 @@ export default function EventDetailPage() {
       setIngredientCreateOpen(false);
       await load();
     } catch (e) {
-      showToast(t("events.ingredientCreateError"), "err");
+      showToast(t(errKey(e, "events.ingredientCreateError")), "err");
     } finally {
       setIngredientSaving(false);
     }
@@ -112,7 +113,7 @@ export default function EventDetailPage() {
       showToast(t("events.ingredientPromoted"), "ok");
       await load();
     } catch (e) {
-      showToast(t("events.promoteError"), "err");
+      showToast(t(errKey(e, "events.promoteError")), "err");
     }
   }
 
@@ -123,7 +124,7 @@ export default function EventDetailPage() {
       showToast(t("events.ingredientDeleted"), "ok");
       await load();
     } catch (e) {
-      showToast(t("events.ingredientDeleteError"), "err");
+      showToast(t(errKey(e, "events.ingredientDeleteError")), "err");
     }
   }
 
@@ -155,7 +156,7 @@ export default function EventDetailPage() {
       setPurchaseModal(null);
       await load();
     } catch (e) {
-      showToast(t("events.purchaseError"), "err");
+      showToast(t(errKey(e, "events.purchaseError")), "err");
     } finally {
       setPurchaseSaving(false);
     }
@@ -168,7 +169,7 @@ export default function EventDetailPage() {
       setPickerOpen(false);
       await load();
     } catch (e) {
-      showToast(t("events.copyError"), "err");
+      showToast(t(errKey(e, "events.copyError")), "err");
     }
   }
 
@@ -203,7 +204,7 @@ export default function EventDetailPage() {
       setCreateOpen(false);
       await load();
     } catch (e) {
-      showToast(t("events.recipeCreateError"), "err");
+      showToast(t(errKey(e, "events.recipeCreateError")), "err");
     } finally {
       setSaving(false);
     }
@@ -215,7 +216,7 @@ export default function EventDetailPage() {
       showToast(t("events.recipePromoted"), "ok");
       await load();
     } catch (e) {
-      showToast(t("events.promoteError"), "err");
+      showToast(t(errKey(e, "events.promoteError")), "err");
     }
   }
 
@@ -261,7 +262,7 @@ export default function EventDetailPage() {
       setEditModal(null);
       await load();
     } catch (e) {
-      showToast(t("events.variantSaveError"), "err");
+      showToast(t(errKey(e, "events.variantSaveError")), "err");
     } finally {
       setSaving(false);
     }
@@ -274,7 +275,7 @@ export default function EventDetailPage() {
       showToast(t("events.variantDeleted"), "ok");
       await load();
     } catch (e) {
-      showToast(t("events.variantDeleteError"), "err");
+      showToast(t(errKey(e, "events.variantDeleteError")), "err");
     }
   }
 

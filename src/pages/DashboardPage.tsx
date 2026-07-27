@@ -11,6 +11,7 @@ import type { ActivityItem } from "../../crates/core/bindings/ActivityItem";
 import type { MealPlanEntryWithRecipe } from "../../crates/core/bindings/MealPlanEntryWithRecipe";
 import type { StockItemWithIngredient } from "../../crates/core/bindings/StockItemWithIngredient";
 import { UNIT_LABELS_SHORT as UNIT_LABELS } from "../lib/units";
+import { errKey } from "../lib/errors";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -318,7 +319,7 @@ export default function DashboardPage() {
       setUpcomingMeals(mealsData);
       setLowStock(lowStockData);
     } catch (e) {
-      showToast(t("dashboard.error"), "err");
+      showToast(t(errKey(e, "dashboard.error")), "err");
     } finally {
       setLoading(false);
     }

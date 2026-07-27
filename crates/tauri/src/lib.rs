@@ -50,6 +50,22 @@ fn apply_native_theme() {
 #[cfg(not(target_os = "linux"))]
 fn apply_native_theme() {}
 
+/// Turn a backend error into something the UI can act on.
+///
+/// Everything crossing this boundary used to be `e.to_string()`, so a foreign
+/// key refusing to orphan rows — the database doing its job — arrived at the
+/// frontend indistinguishable from any other failure and was shown as "error
+/// deleting". `IN_USE` is a stable marker the frontend maps to a message that
+/// says what actually happened; everything else passes through unchanged, and
+/// is now logged by the frontend rather than discarded (see src/lib/errors.ts).
+pub fn user_error(e: impl std::fmt::Display) -> String {
+    let text = e.to_string();
+    if text.contains("FOREIGN KEY constraint failed") {
+        return "IN_USE".to_string();
+    }
+    text
+}
+
 /// Database connection wrapper for Tauri state
 pub struct AppDb {
     pub db: Database,
@@ -66,369 +82,369 @@ impl AppDb {
 
     // Ingredients
     pub async fn ingredients_list(&self) -> Result<Vec<Ingredient>, String> {
-        mise_core::db::ingredients_list(&self.db).await.map_err(|e| e.to_string())
+        mise_core::db::ingredients_list(&self.db).await.map_err(user_error)
     }
 
     pub async fn create_ingredient(&self, input: IngredientInput) -> Result<Ingredient, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::create_ingredient(&self.db, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::create_ingredient(&self.db, input).await.map_err(user_error)
     }
 
     pub async fn update_ingredient(&self, id: i64, input: IngredientInput) -> Result<Ingredient, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::update_ingredient(&self.db, id, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::update_ingredient(&self.db, id, input).await.map_err(user_error)
     }
 
     pub async fn delete_ingredient(&self, id: i64) -> Result<(), String> {
-        mise_core::db::delete_ingredient(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::delete_ingredient(&self.db, id).await.map_err(user_error)
     }
 
     pub async fn toggle_ingredient_favorite(&self, id: i64) -> Result<Ingredient, String> {
-        mise_core::db::toggle_ingredient_favorite(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::toggle_ingredient_favorite(&self.db, id).await.map_err(user_error)
     }
 
     // Recipes
     pub async fn recipes_list(&self) -> Result<Vec<RecipeWithIngredients>, String> {
-        mise_core::db::recipes_list(&self.db).await.map_err(|e| e.to_string())
+        mise_core::db::recipes_list(&self.db).await.map_err(user_error)
     }
 
     pub async fn recipes_paginated(&self, page: u32, per_page: u32) -> Result<Paginated<Recipe>, String> {
-        mise_core::db::recipes_paginated(&self.db, page, per_page).await.map_err(|e| e.to_string())
+        mise_core::db::recipes_paginated(&self.db, page, per_page).await.map_err(user_error)
     }
 
     pub async fn get_recipe(&self, id: i64) -> Result<Recipe, String> {
-        mise_core::db::get_recipe(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::get_recipe(&self.db, id).await.map_err(user_error)
     }
 
     pub async fn create_recipe(&self, input: RecipeInput) -> Result<RecipeWithIngredients, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::create_recipe(&self.db, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::create_recipe(&self.db, input).await.map_err(user_error)
     }
 
     pub async fn update_recipe(&self, id: i64, input: RecipeInput) -> Result<RecipeWithIngredients, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::update_recipe(&self.db, id, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::update_recipe(&self.db, id, input).await.map_err(user_error)
     }
 
     pub async fn delete_recipe(&self, id: i64) -> Result<(), String> {
-        mise_core::db::delete_recipe(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::delete_recipe(&self.db, id).await.map_err(user_error)
     }
 
     pub async fn toggle_recipe_favorite(&self, id: i64) -> Result<Recipe, String> {
-        mise_core::db::toggle_recipe_favorite(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::toggle_recipe_favorite(&self.db, id).await.map_err(user_error)
     }
 
     pub async fn clone_recipe(&self, id: i64) -> Result<RecipeWithIngredients, String> {
-        mise_core::db::clone_recipe(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::clone_recipe(&self.db, id).await.map_err(user_error)
     }
 
     // Stock
     pub async fn stock_list(&self) -> Result<Vec<StockItem>, String> {
-        mise_core::db::stock_list(&self.db).await.map_err(|e| e.to_string())
+        mise_core::db::stock_list(&self.db).await.map_err(user_error)
     }
 
     pub async fn get_stock(&self, ingredient_id: i64) -> Result<StockItem, String> {
-        mise_core::db::get_stock(&self.db, ingredient_id).await.map_err(|e| e.to_string())
+        mise_core::db::get_stock(&self.db, ingredient_id).await.map_err(user_error)
     }
 
     pub async fn upsert_stock(&self, input: StockInput) -> Result<StockItem, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::upsert_stock(&self.db, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::upsert_stock(&self.db, input).await.map_err(user_error)
     }
 
     pub async fn update_stock_quantity(&self, ingredient_id: i64, quantity: f64) -> Result<StockItem, String> {
-        mise_core::db::update_stock_quantity(&self.db, ingredient_id, quantity).await.map_err(|e| e.to_string())
+        mise_core::db::update_stock_quantity(&self.db, ingredient_id, quantity).await.map_err(user_error)
     }
 
     pub async fn delete_stock(&self, ingredient_id: i64) -> Result<(), String> {
-        mise_core::db::delete_stock(&self.db, ingredient_id).await.map_err(|e| e.to_string())
+        mise_core::db::delete_stock(&self.db, ingredient_id).await.map_err(user_error)
     }
 
     // Shopping
     pub async fn shopping_lists_list(&self) -> Result<Vec<ShoppingList>, String> {
-        mise_core::db::shopping_lists_list(&self.db).await.map_err(|e| e.to_string())
+        mise_core::db::shopping_lists_list(&self.db).await.map_err(user_error)
     }
 
     pub async fn get_shopping_list(&self, id: i64) -> Result<ShoppingList, String> {
-        mise_core::db::get_shopping_list(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::get_shopping_list(&self.db, id).await.map_err(user_error)
     }
 
     pub async fn create_shopping_list(&self, name: String, items: Vec<ShoppingItem>) -> Result<ShoppingList, String> {
-        mise_core::db::create_shopping_list(&self.db, name, items).await.map_err(|e| e.to_string())
+        mise_core::db::create_shopping_list(&self.db, name, items).await.map_err(user_error)
     }
 
     pub async fn create_shopping_list_from_recipes(&self, recipe_ids: Vec<i64>, portions_multiplier: u32) -> Result<ShoppingList, String> {
-        mise_core::db::create_shopping_list_from_recipes(&self.db, recipe_ids, portions_multiplier).await.map_err(|e| e.to_string())
+        mise_core::db::create_shopping_list_from_recipes(&self.db, recipe_ids, portions_multiplier).await.map_err(user_error)
     }
 
     pub async fn update_shopping_list_item(&self, list_id: i64, item_id: i64, purchased: bool) -> Result<ShoppingList, String> {
-        mise_core::db::update_shopping_list_item(&self.db, list_id, item_id, purchased).await.map_err(|e| e.to_string())
+        mise_core::db::update_shopping_list_item(&self.db, list_id, item_id, purchased).await.map_err(user_error)
     }
 
     pub async fn delete_shopping_list(&self, id: i64) -> Result<(), String> {
-        mise_core::db::delete_shopping_list(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::delete_shopping_list(&self.db, id).await.map_err(user_error)
     }
 
     pub async fn update_shopping_list(&self, id: i64, name: String) -> Result<ShoppingList, String> {
-        mise_core::db::update_shopping_list(&self.db, id, name).await.map_err(|e| e.to_string())
+        mise_core::db::update_shopping_list(&self.db, id, name).await.map_err(user_error)
     }
 
     pub async fn shopping_list_add_item(&self, list_id: i64, input: ShoppingItemInput) -> Result<ShoppingItem, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::shopping_list_add_item(&self.db, list_id, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::shopping_list_add_item(&self.db, list_id, input).await.map_err(user_error)
     }
 
     pub async fn shopping_list_update_item(&self, list_id: i64, item_id: i64, input: ShoppingItemInput) -> Result<ShoppingItem, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::shopping_list_update_item(&self.db, list_id, item_id, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::shopping_list_update_item(&self.db, list_id, item_id, input).await.map_err(user_error)
     }
 
     pub async fn shopping_list_toggle_item(&self, list_id: i64, item_id: i64, purchased: bool) -> Result<ShoppingItem, String> {
-        mise_core::db::shopping_list_toggle_item(&self.db, list_id, item_id, purchased).await.map_err(|e| e.to_string())
+        mise_core::db::shopping_list_toggle_item(&self.db, list_id, item_id, purchased).await.map_err(user_error)
     }
 
     pub async fn shopping_list_mark_purchased(&self, input: ShoppingListMarkPurchasedInput) -> Result<ShoppingItem, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::shopping_list_mark_purchased(&self.db, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::shopping_list_mark_purchased(&self.db, input).await.map_err(user_error)
     }
 
     pub async fn shopping_list_remove_item(&self, list_id: i64, item_id: i64) -> Result<(), String> {
-        mise_core::db::shopping_list_remove_item(&self.db, list_id, item_id).await.map_err(|e| e.to_string())
+        mise_core::db::shopping_list_remove_item(&self.db, list_id, item_id).await.map_err(user_error)
     }
 
     pub async fn shopping_list_reorder_items(&self, list_id: i64, item_ids: Vec<i64>) -> Result<Vec<ShoppingItem>, String> {
-        mise_core::db::shopping_list_reorder_items(&self.db, list_id, item_ids).await.map_err(|e| e.to_string())
+        mise_core::db::shopping_list_reorder_items(&self.db, list_id, item_ids).await.map_err(user_error)
     }
 
     pub async fn shopping_list_group_by_category(&self, list_id: i64) -> Result<std::collections::HashMap<String, Vec<ShoppingItem>>, String> {
-        mise_core::db::shopping_list_group_by_category(&self.db, list_id).await.map_err(|e| e.to_string())
+        mise_core::db::shopping_list_group_by_category(&self.db, list_id).await.map_err(user_error)
     }
 
     pub async fn shopping_list_clear_purchased(&self, list_id: i64) -> Result<ShoppingList, String> {
-        mise_core::db::shopping_list_clear_purchased(&self.db, list_id).await.map_err(|e| e.to_string())
+        mise_core::db::shopping_list_clear_purchased(&self.db, list_id).await.map_err(user_error)
     }
 
     // Cost
     pub async fn calculate_cost(&self, recipe_id: i64) -> Result<CostBreakdown, String> {
-        mise_core::db::calculate_cost(&self.db, recipe_id).await.map_err(|e| e.to_string())
+        mise_core::db::calculate_cost(&self.db, recipe_id).await.map_err(user_error)
     }
 
     pub async fn analyze_cost(&self, recipe_id: i64, margin_percent: f64) -> Result<CostBreakdown, String> {
-        mise_core::db::analyze_cost(&self.db, recipe_id, margin_percent).await.map_err(|e| e.to_string())
+        mise_core::db::analyze_cost(&self.db, recipe_id, margin_percent).await.map_err(user_error)
     }
 
     // Settings
     pub async fn get_setting(&self, key: &str) -> Result<Option<String>, String> {
-        mise_core::db::get_setting(&self.db, key).await.map_err(|e| e.to_string())
+        mise_core::db::get_setting(&self.db, key).await.map_err(user_error)
     }
 
     pub async fn set_setting(&self, key: &str, value: &str) -> Result<(), String> {
-        mise_core::db::set_setting(&self.db, key, value).await.map_err(|e| e.to_string())
+        mise_core::db::set_setting(&self.db, key, value).await.map_err(user_error)
     }
 
     pub async fn get_all_settings(&self) -> Result<std::collections::HashMap<String, String>, String> {
-        mise_core::db::get_all_settings(&self.db).await.map_err(|e| e.to_string())
+        mise_core::db::get_all_settings(&self.db).await.map_err(user_error)
     }
 
     pub async fn reset_settings(&self) -> Result<(), String> {
-        mise_core::db::reset_to_defaults(&self.db).await.map_err(|e| e.to_string())
+        mise_core::db::reset_to_defaults(&self.db).await.map_err(user_error)
     }
 
     #[cfg(debug_assertions)]
     pub async fn delete_all_data(&self) -> Result<(), String> {
-        mise_core::db::delete_all_data(&self.db).await.map_err(|e| e.to_string())
+        mise_core::db::delete_all_data(&self.db).await.map_err(user_error)
     }
 
     #[cfg(debug_assertions)]
     pub async fn seed_demo_data(&self) -> Result<(), String> {
-        mise_core::db::seed_demo_data(&self.db).await.map_err(|e| e.to_string())
+        mise_core::db::seed_demo_data(&self.db).await.map_err(user_error)
     }
 
     // Categories
     pub async fn categories_list(&self, kind: Option<&str>) -> Result<Vec<Category>, String> {
-        mise_core::db::categories_list(&self.db, kind).await.map_err(|e| e.to_string())
+        mise_core::db::categories_list(&self.db, kind).await.map_err(user_error)
     }
 
     pub async fn create_category(&self, input: CategoryInput) -> Result<Category, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::create_category(&self.db, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::create_category(&self.db, input).await.map_err(user_error)
     }
 
     pub async fn update_category(&self, id: i64, input: CategoryInput) -> Result<Category, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::update_category(&self.db, id, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::update_category(&self.db, id, input).await.map_err(user_error)
     }
 
     pub async fn delete_category(&self, id: i64) -> Result<(), String> {
-        mise_core::db::delete_category(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::delete_category(&self.db, id).await.map_err(user_error)
     }
 
     // Suppliers
     pub async fn suppliers_list(&self) -> Result<Vec<Supplier>, String> {
-        mise_core::db::suppliers_list(&self.db).await.map_err(|e| e.to_string())
+        mise_core::db::suppliers_list(&self.db).await.map_err(user_error)
     }
 
     pub async fn supplier_get(&self, id: i64) -> Result<Supplier, String> {
-        mise_core::db::supplier_get(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::supplier_get(&self.db, id).await.map_err(user_error)
     }
 
     pub async fn create_supplier(&self, input: SupplierInput) -> Result<Supplier, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::create_supplier(&self.db, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::create_supplier(&self.db, input).await.map_err(user_error)
     }
 
     pub async fn update_supplier(&self, id: i64, input: SupplierInput) -> Result<Supplier, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::update_supplier(&self.db, id, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::update_supplier(&self.db, id, input).await.map_err(user_error)
     }
 
     pub async fn delete_supplier(&self, id: i64) -> Result<(), String> {
-        mise_core::db::delete_supplier(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::delete_supplier(&self.db, id).await.map_err(user_error)
     }
 
     // Events (Fase 3.2)
     pub async fn events_list(&self) -> Result<Vec<Event>, String> {
-        mise_core::db::events_list(&self.db).await.map_err(|e| e.to_string())
+        mise_core::db::events_list(&self.db).await.map_err(user_error)
     }
 
     pub async fn create_event(&self, input: EventInput) -> Result<Event, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::create_event(&self.db, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::create_event(&self.db, input).await.map_err(user_error)
     }
 
     pub async fn update_event(&self, id: i64, input: EventInput) -> Result<Event, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::update_event(&self.db, id, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::update_event(&self.db, id, input).await.map_err(user_error)
     }
 
     pub async fn delete_event(&self, id: i64) -> Result<(), String> {
-        mise_core::db::delete_event(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::delete_event(&self.db, id).await.map_err(user_error)
     }
 
     pub async fn event_recipes_list(&self, event_id: i64) -> Result<Vec<RecipeWithIngredients>, String> {
-        mise_core::db::event_recipes_list(&self.db, event_id).await.map_err(|e| e.to_string())
+        mise_core::db::event_recipes_list(&self.db, event_id).await.map_err(user_error)
     }
 
     pub async fn recipe_copy_to_event(&self, recipe_id: i64, event_id: i64) -> Result<RecipeWithIngredients, String> {
-        mise_core::db::recipe_copy_to_event(&self.db, recipe_id, event_id).await.map_err(|e| e.to_string())
+        mise_core::db::recipe_copy_to_event(&self.db, recipe_id, event_id).await.map_err(user_error)
     }
 
     pub async fn recipe_promote_to_catalog(&self, id: i64) -> Result<RecipeWithIngredients, String> {
-        mise_core::db::recipe_promote_to_catalog(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::recipe_promote_to_catalog(&self.db, id).await.map_err(user_error)
     }
 
     pub async fn event_ingredients_list(&self, event_id: i64) -> Result<Vec<Ingredient>, String> {
-        mise_core::db::event_ingredients_list(&self.db, event_id).await.map_err(|e| e.to_string())
+        mise_core::db::event_ingredients_list(&self.db, event_id).await.map_err(user_error)
     }
 
     pub async fn ingredient_copy_to_event(&self, ingredient_id: i64, event_id: i64) -> Result<Ingredient, String> {
-        mise_core::db::ingredient_copy_to_event(&self.db, ingredient_id, event_id).await.map_err(|e| e.to_string())
+        mise_core::db::ingredient_copy_to_event(&self.db, ingredient_id, event_id).await.map_err(user_error)
     }
 
     pub async fn ingredient_promote_to_catalog(&self, id: i64) -> Result<Ingredient, String> {
-        mise_core::db::ingredient_promote_to_catalog(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::ingredient_promote_to_catalog(&self.db, id).await.map_err(user_error)
     }
 
     // Price quotes
     pub async fn price_quotes_list(&self, ingredient_id: i64) -> Result<Vec<PriceQuote>, String> {
-        mise_core::db::price_quotes_list(&self.db, ingredient_id).await.map_err(|e| e.to_string())
+        mise_core::db::price_quotes_list(&self.db, ingredient_id).await.map_err(user_error)
     }
 
     pub async fn price_quotes_all(&self) -> Result<Vec<PriceQuoteWithIngredient>, String> {
-        mise_core::db::price_quotes_all(&self.db).await.map_err(|e| e.to_string())
+        mise_core::db::price_quotes_all(&self.db).await.map_err(user_error)
     }
 
     pub async fn price_quotes_stats(&self) -> Result<Vec<PriceQuoteStats>, String> {
-        mise_core::db::price_quotes_stats(&self.db).await.map_err(|e| e.to_string())
+        mise_core::db::price_quotes_stats(&self.db).await.map_err(user_error)
     }
 
     pub async fn create_price_quote(&self, input: PriceQuoteInput) -> Result<PriceQuote, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::create_price_quote(&self.db, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::create_price_quote(&self.db, input).await.map_err(user_error)
     }
 
     pub async fn update_price_quote(&self, id: i64, input: PriceQuoteInput) -> Result<PriceQuote, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::update_price_quote(&self.db, id, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::update_price_quote(&self.db, id, input).await.map_err(user_error)
     }
 
     pub async fn delete_price_quote(&self, id: i64) -> Result<(), String> {
-        mise_core::db::delete_price_quote(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::delete_price_quote(&self.db, id).await.map_err(user_error)
     }
 
     // Import/Export
     pub async fn export_data(&self) -> Result<ImportData, String> {
-        mise_core::db::export_data(&self.db).await.map_err(|e| e.to_string())
+        mise_core::db::export_data(&self.db).await.map_err(user_error)
     }
 
     pub async fn import_data(&self, data: ImportData) -> Result<ImportResult, String> {
-        mise_core::db::import_data(&self.db, data).await.map_err(|e| e.to_string())
+        mise_core::db::import_data(&self.db, data).await.map_err(user_error)
     }
 
     pub async fn backup_export(&self) -> Result<String, String> {
-        mise_core::db::backup_export(&self.db, &self.data_dir).await.map_err(|e| e.to_string())
+        mise_core::db::backup_export(&self.db, &self.data_dir).await.map_err(user_error)
     }
 
     pub async fn backup_restore(&self, json: String) -> Result<BackupRestoreResult, String> {
-        mise_core::db::backup_restore(&self.db, &self.data_dir, json).await.map_err(|e| e.to_string())
+        mise_core::db::backup_restore(&self.db, &self.data_dir, json).await.map_err(user_error)
     }
 
     // Meal Planner
     pub async fn meal_plans_list(&self) -> Result<Vec<MealPlan>, String> {
-        mise_core::db::list_meal_plans(&self.db).await.map_err(|e| e.to_string())
+        mise_core::db::list_meal_plans(&self.db).await.map_err(user_error)
     }
 
     pub async fn meal_plan_get(&self, id: i64) -> Result<MealPlanWithEntries, String> {
-        mise_core::db::get_meal_plan(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::get_meal_plan(&self.db, id).await.map_err(user_error)
     }
 
     pub async fn meal_plan_create(&self, input: MealPlanInput) -> Result<MealPlan, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::create_meal_plan(&self.db, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::create_meal_plan(&self.db, input).await.map_err(user_error)
     }
 
     pub async fn meal_plan_update(&self, id: i64, input: MealPlanInput) -> Result<MealPlan, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::update_meal_plan(&self.db, id, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::update_meal_plan(&self.db, id, input).await.map_err(user_error)
     }
 
     pub async fn meal_plan_delete(&self, id: i64) -> Result<(), String> {
-        mise_core::db::delete_meal_plan(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::delete_meal_plan(&self.db, id).await.map_err(user_error)
     }
 
     pub async fn meal_entry_add(&self, meal_plan_id: i64, input: MealEntryInput) -> Result<MealPlanEntry, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::add_meal_entry(&self.db, meal_plan_id, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::add_meal_entry(&self.db, meal_plan_id, input).await.map_err(user_error)
     }
 
     pub async fn meal_entry_update(&self, id: i64, input: MealEntryInput) -> Result<MealPlanEntry, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::update_meal_entry(&self.db, id, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::update_meal_entry(&self.db, id, input).await.map_err(user_error)
     }
 
     pub async fn meal_entry_delete(&self, id: i64) -> Result<(), String> {
-        mise_core::db::delete_meal_entry(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::delete_meal_entry(&self.db, id).await.map_err(user_error)
     }
 
     pub async fn meal_plan_generate_shopping_list(&self, plan_id: i64, portions_multiplier: u32) -> Result<MealPlanShoppingList, String> {
-        mise_core::db::generate_shopping_list_from_meal_plan(&self.db, plan_id, portions_multiplier).await.map_err(|e| e.to_string())
+        mise_core::db::generate_shopping_list_from_meal_plan(&self.db, plan_id, portions_multiplier).await.map_err(user_error)
     }
 
     // Dashboard
     pub async fn dashboard_stats(&self) -> Result<DashboardStats, String> {
-        mise_core::db::get_dashboard_stats(&self.db).await.map_err(|e| e.to_string())
+        mise_core::db::get_dashboard_stats(&self.db).await.map_err(user_error)
     }
 
     pub async fn dashboard_recent_activity(&self, limit: u32) -> Result<Vec<ActivityItem>, String> {
-        mise_core::db::get_recent_activity(&self.db, limit).await.map_err(|e| e.to_string())
+        mise_core::db::get_recent_activity(&self.db, limit).await.map_err(user_error)
     }
 
     pub async fn dashboard_upcoming_meals(&self, days: u32) -> Result<Vec<MealPlanEntryWithRecipe>, String> {
-        mise_core::db::get_upcoming_meals(&self.db, days).await.map_err(|e| e.to_string())
+        mise_core::db::get_upcoming_meals(&self.db, days).await.map_err(user_error)
     }
 
     pub async fn dashboard_low_stock(&self, threshold: f64) -> Result<Vec<StockItemWithIngredient>, String> {
-        mise_core::db::get_low_stock_ingredients(&self.db, threshold).await.map_err(|e| e.to_string())
+        mise_core::db::get_low_stock_ingredients(&self.db, threshold).await.map_err(user_error)
     }
 
     // Calendar
@@ -439,7 +455,7 @@ impl AppDb {
     ) -> Result<Vec<MealPlanEntryWithRecipe>, String> {
         mise_core::db::get_meal_plan_entries_by_date_range(&self.db, start_date, end_date)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(user_error)
     }
 
     pub async fn meal_plan_entries_by_month(
@@ -449,97 +465,97 @@ impl AppDb {
     ) -> Result<Vec<MealPlanEntryWithRecipe>, String> {
         mise_core::db::get_meal_plan_entries_by_month(&self.db, year, month)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(user_error)
     }
 
     // Reports
     pub async fn get_cost_report(&self, days: u32) -> Result<CostReport, String> {
-        mise_core::db::get_cost_report(&self.db, days).await.map_err(|e| e.to_string())
+        mise_core::db::get_cost_report(&self.db, days).await.map_err(user_error)
     }
 
     pub async fn get_waste_report(&self, days: u32) -> Result<WasteReport, String> {
-        mise_core::db::get_waste_report(&self.db, days).await.map_err(|e| e.to_string())
+        mise_core::db::get_waste_report(&self.db, days).await.map_err(user_error)
     }
 
     pub async fn get_stock_trends(&self, days: u32) -> Result<Vec<StockSnapshot>, String> {
-        mise_core::db::get_stock_trends(&self.db, days).await.map_err(|e| e.to_string())
+        mise_core::db::get_stock_trends(&self.db, days).await.map_err(user_error)
     }
 
     pub async fn get_meal_stats(&self, days: u32) -> Result<MealStats, String> {
-        mise_core::db::get_meal_stats(&self.db, days).await.map_err(|e| e.to_string())
+        mise_core::db::get_meal_stats(&self.db, days).await.map_err(user_error)
     }
 
     pub async fn get_price_trends(&self, ingredient_id: i64, days: u32) -> Result<Vec<PricePoint>, String> {
-        mise_core::db::get_price_trends(&self.db, ingredient_id, days).await.map_err(|e| e.to_string())
+        mise_core::db::get_price_trends(&self.db, ingredient_id, days).await.map_err(user_error)
     }
 
     // ===== IMAGES =====
     pub async fn image_upload(&self, input: ImageUploadInput) -> Result<Image, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::image_upload(&self.db, input, &self.data_dir).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::image_upload(&self.db, input, &self.data_dir).await.map_err(user_error)
     }
 
     pub async fn image_delete(&self, id: i64) -> Result<(), String> {
-        mise_core::db::image_delete(&self.db, id, &self.data_dir).await.map_err(|e| e.to_string())
+        mise_core::db::image_delete(&self.db, id, &self.data_dir).await.map_err(user_error)
     }
 
     pub async fn image_set_primary(&self, id: i64) -> Result<Image, String> {
-        mise_core::db::image_set_primary(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::image_set_primary(&self.db, id).await.map_err(user_error)
     }
 
     pub async fn image_get(&self, entity_type: ImageEntityType, entity_id: i64) -> Result<Vec<Image>, String> {
-        mise_core::db::image_get(&self.db, entity_type, entity_id).await.map_err(|e| e.to_string())
+        mise_core::db::image_get(&self.db, entity_type, entity_id).await.map_err(user_error)
     }
 
     pub async fn image_read_base64(&self, id: i64) -> Result<String, String> {
-        mise_core::db::image_read_base64(&self.db, id, &self.data_dir).await.map_err(|e| e.to_string())
+        mise_core::db::image_read_base64(&self.db, id, &self.data_dir).await.map_err(user_error)
     }
 
     // ===== INSTRUMENTAÇÃO (Fase de Instrumentação, local-only) =====
     pub async fn problem_report_create(&self, input: ProblemReportInput) -> Result<ProblemReport, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::problem_report_create(&self.db, input, &self.data_dir).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::problem_report_create(&self.db, input, &self.data_dir).await.map_err(user_error)
     }
 
     /// Exports always land under the app's own data dir (`exports/`), no
     /// destination picker needed — keeps this local-only and one click.
     pub async fn export_usage_data(&self) -> Result<String, String> {
         let dest_dir = self.data_dir.join("exports");
-        mise_core::db::export_usage_data(&self.db, &self.data_dir, &dest_dir).await.map_err(|e| e.to_string())
+        mise_core::db::export_usage_data(&self.db, &self.data_dir, &dest_dir).await.map_err(user_error)
     }
 
     // ===== STOCK PURCHASES =====
     pub async fn stock_purchase_add(&self, input: StockPurchaseInput) -> Result<StockPurchase, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::stock_purchase_add(&self.db, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::stock_purchase_add(&self.db, input).await.map_err(user_error)
     }
 
     pub async fn stock_purchases_list(&self, ingredient_id: i64) -> Result<Vec<StockPurchase>, String> {
-        mise_core::db::stock_purchases_list(&self.db, ingredient_id).await.map_err(|e| e.to_string())
+        mise_core::db::stock_purchases_list(&self.db, ingredient_id).await.map_err(user_error)
     }
 
     pub async fn stock_purchase_delete(&self, id: i64) -> Result<(), String> {
-        mise_core::db::stock_purchase_delete(&self.db, id).await.map_err(|e| e.to_string())
+        mise_core::db::stock_purchase_delete(&self.db, id).await.map_err(user_error)
     }
 
     // ===== RECEIPT OCR =====
     pub async fn receipt_scan(&self, input: ReceiptScanInput) -> Result<ReceiptParseResult, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::receipt_scan(&self.db, input, &self.data_dir).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::receipt_scan(&self.db, input, &self.data_dir).await.map_err(user_error)
     }
 
     pub async fn receipt_parse(&self, raw_text: String) -> Result<Vec<ParsedReceiptItem>, String> {
-        mise_core::db::receipt_parse(raw_text).await.map_err(|e| e.to_string())
+        mise_core::db::receipt_parse(raw_text).await.map_err(user_error)
     }
 
     pub async fn receipt_confirm(&self, input: ReceiptConfirmInput) -> Result<Vec<StockPurchase>, String> {
-        input.validate().map_err(|e| e.to_string())?;
-        mise_core::db::receipt_confirm(&self.db, input).await.map_err(|e| e.to_string())
+        input.validate().map_err(user_error)?;
+        mise_core::db::receipt_confirm(&self.db, input).await.map_err(user_error)
     }
 
     // ===== RECIPE IMPORT (Fase 3.4) =====
     pub async fn recipe_import_from_url(&self, url: String) -> Result<RecipeImportPreview, String> {
-        mise_core::db::recipe_import_from_url(&self.db, url).await.map_err(|e| e.to_string())
+        mise_core::db::recipe_import_from_url(&self.db, url).await.map_err(user_error)
     }
 }
 
@@ -560,7 +576,7 @@ pub mod commands {
     pub async fn ingredients_list(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<Vec<Ingredient>, String> {
-        db.ingredients_list().await.map_err(|e| e.to_string())
+        db.ingredients_list().await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -568,7 +584,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         input: IngredientInput,
     ) -> Result<Ingredient, String> {
-        db.create_ingredient(input).await.map_err(|e| e.to_string())
+        db.create_ingredient(input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -577,7 +593,7 @@ pub mod commands {
         id: i64,
         input: IngredientInput,
     ) -> Result<Ingredient, String> {
-        db.update_ingredient(id, input).await.map_err(|e| e.to_string())
+        db.update_ingredient(id, input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -585,7 +601,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<(), String> {
-        db.delete_ingredient(id).await.map_err(|e| e.to_string())
+        db.delete_ingredient(id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -593,7 +609,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<Ingredient, String> {
-        db.toggle_ingredient_favorite(id).await.map_err(|e| e.to_string())
+        db.toggle_ingredient_favorite(id).await.map_err(user_error)
     }
 
     // Recipes
@@ -601,7 +617,7 @@ pub mod commands {
     pub async fn recipes_list(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<Vec<RecipeWithIngredients>, String> {
-        db.recipes_list().await.map_err(|e| e.to_string())
+        db.recipes_list().await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -610,7 +626,7 @@ pub mod commands {
         page: u32,
         per_page: u32,
     ) -> Result<Paginated<Recipe>, String> {
-        db.recipes_paginated(page, per_page).await.map_err(|e| e.to_string())
+        db.recipes_paginated(page, per_page).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -618,7 +634,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<Recipe, String> {
-        db.get_recipe(id).await.map_err(|e| e.to_string())
+        db.get_recipe(id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -626,7 +642,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         input: RecipeInput,
     ) -> Result<RecipeWithIngredients, String> {
-        db.create_recipe(input).await.map_err(|e| e.to_string())
+        db.create_recipe(input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -635,7 +651,7 @@ pub mod commands {
         id: i64,
         input: RecipeInput,
     ) -> Result<RecipeWithIngredients, String> {
-        db.update_recipe(id, input).await.map_err(|e| e.to_string())
+        db.update_recipe(id, input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -643,7 +659,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<(), String> {
-        db.delete_recipe(id).await.map_err(|e| e.to_string())
+        db.delete_recipe(id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -651,7 +667,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<Recipe, String> {
-        db.toggle_recipe_favorite(id).await.map_err(|e| e.to_string())
+        db.toggle_recipe_favorite(id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -659,7 +675,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<RecipeWithIngredients, String> {
-        db.clone_recipe(id).await.map_err(|e| e.to_string())
+        db.clone_recipe(id).await.map_err(user_error)
     }
 
     // Stock
@@ -667,7 +683,7 @@ pub mod commands {
     pub async fn stock_list(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<Vec<StockItem>, String> {
-        db.stock_list().await.map_err(|e| e.to_string())
+        db.stock_list().await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -675,7 +691,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         ingredient_id: i64,
     ) -> Result<StockItem, String> {
-        db.get_stock(ingredient_id).await.map_err(|e| e.to_string())
+        db.get_stock(ingredient_id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -683,7 +699,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         input: StockInput,
     ) -> Result<StockItem, String> {
-        db.upsert_stock(input).await.map_err(|e| e.to_string())
+        db.upsert_stock(input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -692,7 +708,7 @@ pub mod commands {
         ingredient_id: i64,
         quantity: f64,
     ) -> Result<StockItem, String> {
-        db.update_stock_quantity(ingredient_id, quantity).await.map_err(|e| e.to_string())
+        db.update_stock_quantity(ingredient_id, quantity).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -700,7 +716,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         ingredient_id: i64,
     ) -> Result<(), String> {
-        db.delete_stock(ingredient_id).await.map_err(|e| e.to_string())
+        db.delete_stock(ingredient_id).await.map_err(user_error)
     }
 
     // Shopping
@@ -708,7 +724,7 @@ pub mod commands {
     pub async fn shopping_lists_list(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<Vec<ShoppingList>, String> {
-        db.shopping_lists_list().await.map_err(|e| e.to_string())
+        db.shopping_lists_list().await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -716,7 +732,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<ShoppingList, String> {
-        db.get_shopping_list(id).await.map_err(|e| e.to_string())
+        db.get_shopping_list(id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -725,7 +741,7 @@ pub mod commands {
         name: String,
         items: Vec<ShoppingItem>,
     ) -> Result<ShoppingList, String> {
-        db.create_shopping_list(name, items).await.map_err(|e| e.to_string())
+        db.create_shopping_list(name, items).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -736,7 +752,7 @@ pub mod commands {
     ) -> Result<ShoppingList, String> {
         db.create_shopping_list_from_recipes(recipe_ids, portions_multiplier)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(user_error)
     }
 
     #[tauri::command]
@@ -748,7 +764,7 @@ pub mod commands {
     ) -> Result<ShoppingList, String> {
         db.update_shopping_list_item(list_id, item_id, purchased)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(user_error)
     }
 
     #[tauri::command]
@@ -756,7 +772,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<(), String> {
-        db.delete_shopping_list(id).await.map_err(|e| e.to_string())
+        db.delete_shopping_list(id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -765,7 +781,7 @@ pub mod commands {
         id: i64,
         name: String,
     ) -> Result<ShoppingList, String> {
-        db.update_shopping_list(id, name).await.map_err(|e| e.to_string())
+        db.update_shopping_list(id, name).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -774,7 +790,7 @@ pub mod commands {
         list_id: i64,
         input: ShoppingItemInput,
     ) -> Result<ShoppingItem, String> {
-        db.shopping_list_add_item(list_id, input).await.map_err(|e| e.to_string())
+        db.shopping_list_add_item(list_id, input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -786,7 +802,7 @@ pub mod commands {
     ) -> Result<ShoppingItem, String> {
         db.shopping_list_update_item(list_id, item_id, input)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(user_error)
     }
 
     #[tauri::command]
@@ -798,7 +814,7 @@ pub mod commands {
     ) -> Result<ShoppingItem, String> {
         db.shopping_list_toggle_item(list_id, item_id, purchased)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(user_error)
     }
 
     #[tauri::command]
@@ -806,7 +822,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         input: ShoppingListMarkPurchasedInput,
     ) -> Result<ShoppingItem, String> {
-        db.shopping_list_mark_purchased(input).await.map_err(|e| e.to_string())
+        db.shopping_list_mark_purchased(input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -815,7 +831,7 @@ pub mod commands {
         list_id: i64,
         item_id: i64,
     ) -> Result<(), String> {
-        db.shopping_list_remove_item(list_id, item_id).await.map_err(|e| e.to_string())
+        db.shopping_list_remove_item(list_id, item_id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -826,7 +842,7 @@ pub mod commands {
     ) -> Result<Vec<ShoppingItem>, String> {
         db.shopping_list_reorder_items(list_id, item_ids)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(user_error)
     }
 
     #[tauri::command]
@@ -836,7 +852,7 @@ pub mod commands {
     ) -> Result<ShoppingList, String> {
         db.shopping_list_clear_purchased(list_id)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(user_error)
     }
 
     #[tauri::command]
@@ -846,7 +862,7 @@ pub mod commands {
     ) -> Result<std::collections::HashMap<String, Vec<ShoppingItem>>, String> {
         db.shopping_list_group_by_category(list_id)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(user_error)
     }
 
     // Cost
@@ -855,7 +871,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         recipe_id: i64,
     ) -> Result<CostBreakdown, String> {
-        db.calculate_cost(recipe_id).await.map_err(|e| e.to_string())
+        db.calculate_cost(recipe_id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -864,7 +880,7 @@ pub mod commands {
         recipe_id: i64,
         margin_percent: f64,
     ) -> Result<CostBreakdown, String> {
-        db.analyze_cost(recipe_id, margin_percent).await.map_err(|e| e.to_string())
+        db.analyze_cost(recipe_id, margin_percent).await.map_err(user_error)
     }
 
     // Settings
@@ -873,7 +889,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         key: String,
     ) -> Result<Option<String>, String> {
-        db.get_setting(&key).await.map_err(|e| e.to_string())
+        db.get_setting(&key).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -882,21 +898,21 @@ pub mod commands {
         key: String,
         value: String,
     ) -> Result<(), String> {
-        db.set_setting(&key, &value).await.map_err(|e| e.to_string())
+        db.set_setting(&key, &value).await.map_err(user_error)
     }
 
     #[tauri::command]
     pub async fn settings_get_all(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<std::collections::HashMap<String, String>, String> {
-        db.get_all_settings().await.map_err(|e| e.to_string())
+        db.get_all_settings().await.map_err(user_error)
     }
 
     #[tauri::command]
     pub async fn settings_reset(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<(), String> {
-        db.reset_settings().await.map_err(|e| e.to_string())
+        db.reset_settings().await.map_err(user_error)
     }
 
     #[cfg(debug_assertions)]
@@ -904,7 +920,7 @@ pub mod commands {
     pub async fn delete_all_data(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<(), String> {
-        db.delete_all_data().await.map_err(|e| e.to_string())
+        db.delete_all_data().await.map_err(user_error)
     }
 
     #[cfg(debug_assertions)]
@@ -912,7 +928,7 @@ pub mod commands {
     pub async fn seed_demo_data(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<(), String> {
-        db.seed_demo_data().await.map_err(|e| e.to_string())
+        db.seed_demo_data().await.map_err(user_error)
     }
 
     // Categories
@@ -921,7 +937,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         kind: Option<String>,
     ) -> Result<Vec<Category>, String> {
-        db.categories_list(kind.as_deref()).await.map_err(|e| e.to_string())
+        db.categories_list(kind.as_deref()).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -929,7 +945,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         input: CategoryInput,
     ) -> Result<Category, String> {
-        db.create_category(input).await.map_err(|e| e.to_string())
+        db.create_category(input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -938,7 +954,7 @@ pub mod commands {
         id: i64,
         input: CategoryInput,
     ) -> Result<Category, String> {
-        db.update_category(id, input).await.map_err(|e| e.to_string())
+        db.update_category(id, input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -946,7 +962,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<(), String> {
-        db.delete_category(id).await.map_err(|e| e.to_string())
+        db.delete_category(id).await.map_err(user_error)
     }
 
     // Suppliers
@@ -954,7 +970,7 @@ pub mod commands {
     pub async fn suppliers_list(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<Vec<Supplier>, String> {
-        db.suppliers_list().await.map_err(|e| e.to_string())
+        db.suppliers_list().await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -962,7 +978,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<Supplier, String> {
-        db.supplier_get(id).await.map_err(|e| e.to_string())
+        db.supplier_get(id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -970,7 +986,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         input: SupplierInput,
     ) -> Result<Supplier, String> {
-        db.create_supplier(input).await.map_err(|e| e.to_string())
+        db.create_supplier(input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -979,7 +995,7 @@ pub mod commands {
         id: i64,
         input: SupplierInput,
     ) -> Result<Supplier, String> {
-        db.update_supplier(id, input).await.map_err(|e| e.to_string())
+        db.update_supplier(id, input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -987,7 +1003,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<(), String> {
-        db.delete_supplier(id).await.map_err(|e| e.to_string())
+        db.delete_supplier(id).await.map_err(user_error)
     }
 
     // Events (Fase 3.2)
@@ -995,7 +1011,7 @@ pub mod commands {
     pub async fn events_list(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<Vec<Event>, String> {
-        db.events_list().await.map_err(|e| e.to_string())
+        db.events_list().await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1003,7 +1019,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         input: EventInput,
     ) -> Result<Event, String> {
-        db.create_event(input).await.map_err(|e| e.to_string())
+        db.create_event(input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1012,7 +1028,7 @@ pub mod commands {
         id: i64,
         input: EventInput,
     ) -> Result<Event, String> {
-        db.update_event(id, input).await.map_err(|e| e.to_string())
+        db.update_event(id, input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1020,7 +1036,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<(), String> {
-        db.delete_event(id).await.map_err(|e| e.to_string())
+        db.delete_event(id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1028,7 +1044,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         event_id: i64,
     ) -> Result<Vec<RecipeWithIngredients>, String> {
-        db.event_recipes_list(event_id).await.map_err(|e| e.to_string())
+        db.event_recipes_list(event_id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1037,7 +1053,7 @@ pub mod commands {
         recipe_id: i64,
         event_id: i64,
     ) -> Result<RecipeWithIngredients, String> {
-        db.recipe_copy_to_event(recipe_id, event_id).await.map_err(|e| e.to_string())
+        db.recipe_copy_to_event(recipe_id, event_id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1045,7 +1061,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<RecipeWithIngredients, String> {
-        db.recipe_promote_to_catalog(id).await.map_err(|e| e.to_string())
+        db.recipe_promote_to_catalog(id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1053,7 +1069,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         event_id: i64,
     ) -> Result<Vec<Ingredient>, String> {
-        db.event_ingredients_list(event_id).await.map_err(|e| e.to_string())
+        db.event_ingredients_list(event_id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1062,7 +1078,7 @@ pub mod commands {
         ingredient_id: i64,
         event_id: i64,
     ) -> Result<Ingredient, String> {
-        db.ingredient_copy_to_event(ingredient_id, event_id).await.map_err(|e| e.to_string())
+        db.ingredient_copy_to_event(ingredient_id, event_id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1070,7 +1086,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<Ingredient, String> {
-        db.ingredient_promote_to_catalog(id).await.map_err(|e| e.to_string())
+        db.ingredient_promote_to_catalog(id).await.map_err(user_error)
     }
 
     // Price quotes
@@ -1079,21 +1095,21 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         ingredient_id: i64,
     ) -> Result<Vec<PriceQuote>, String> {
-        db.price_quotes_list(ingredient_id).await.map_err(|e| e.to_string())
+        db.price_quotes_list(ingredient_id).await.map_err(user_error)
     }
 
     #[tauri::command]
     pub async fn price_quotes_all(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<Vec<PriceQuoteWithIngredient>, String> {
-        db.price_quotes_all().await.map_err(|e| e.to_string())
+        db.price_quotes_all().await.map_err(user_error)
     }
 
     #[tauri::command]
     pub async fn price_quotes_stats(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<Vec<PriceQuoteStats>, String> {
-        db.price_quotes_stats().await.map_err(|e| e.to_string())
+        db.price_quotes_stats().await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1101,7 +1117,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         input: PriceQuoteInput,
     ) -> Result<PriceQuote, String> {
-        db.create_price_quote(input).await.map_err(|e| e.to_string())
+        db.create_price_quote(input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1110,7 +1126,7 @@ pub mod commands {
         id: i64,
         input: PriceQuoteInput,
     ) -> Result<PriceQuote, String> {
-        db.update_price_quote(id, input).await.map_err(|e| e.to_string())
+        db.update_price_quote(id, input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1118,7 +1134,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<(), String> {
-        db.delete_price_quote(id).await.map_err(|e| e.to_string())
+        db.delete_price_quote(id).await.map_err(user_error)
     }
 
     // Import/Export
@@ -1126,7 +1142,7 @@ pub mod commands {
     pub async fn export_data(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<ImportData, String> {
-        db.export_data().await.map_err(|e| e.to_string())
+        db.export_data().await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1134,14 +1150,14 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         data: ImportData,
     ) -> Result<ImportResult, String> {
-        db.import_data(data).await.map_err(|e| e.to_string())
+        db.import_data(data).await.map_err(user_error)
     }
 
     #[tauri::command]
     pub async fn backup_export(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<String, String> {
-        db.backup_export().await.map_err(|e| e.to_string())
+        db.backup_export().await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1149,7 +1165,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         json: String,
     ) -> Result<BackupRestoreResult, String> {
-        db.backup_restore(json).await.map_err(|e| e.to_string())
+        db.backup_restore(json).await.map_err(user_error)
     }
 
     // Meal Planner
@@ -1157,7 +1173,7 @@ pub mod commands {
     pub async fn meal_plans_list(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<Vec<MealPlan>, String> {
-        db.meal_plans_list().await.map_err(|e| e.to_string())
+        db.meal_plans_list().await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1165,7 +1181,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<MealPlanWithEntries, String> {
-        db.meal_plan_get(id).await.map_err(|e| e.to_string())
+        db.meal_plan_get(id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1173,7 +1189,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         input: MealPlanInput,
     ) -> Result<MealPlan, String> {
-        db.meal_plan_create(input).await.map_err(|e| e.to_string())
+        db.meal_plan_create(input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1182,7 +1198,7 @@ pub mod commands {
         id: i64,
         input: MealPlanInput,
     ) -> Result<MealPlan, String> {
-        db.meal_plan_update(id, input).await.map_err(|e| e.to_string())
+        db.meal_plan_update(id, input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1190,7 +1206,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<(), String> {
-        db.meal_plan_delete(id).await.map_err(|e| e.to_string())
+        db.meal_plan_delete(id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1199,7 +1215,7 @@ pub mod commands {
         meal_plan_id: i64,
         input: MealEntryInput,
     ) -> Result<MealPlanEntry, String> {
-        db.meal_entry_add(meal_plan_id, input).await.map_err(|e| e.to_string())
+        db.meal_entry_add(meal_plan_id, input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1208,7 +1224,7 @@ pub mod commands {
         id: i64,
         input: MealEntryInput,
     ) -> Result<MealPlanEntry, String> {
-        db.meal_entry_update(id, input).await.map_err(|e| e.to_string())
+        db.meal_entry_update(id, input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1216,7 +1232,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<(), String> {
-        db.meal_entry_delete(id).await.map_err(|e| e.to_string())
+        db.meal_entry_delete(id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1227,7 +1243,7 @@ pub mod commands {
     ) -> Result<MealPlanShoppingList, String> {
         db.meal_plan_generate_shopping_list(plan_id, portions_multiplier)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(user_error)
     }
 
     // Dashboard
@@ -1235,7 +1251,7 @@ pub mod commands {
     pub async fn dashboard_stats(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<DashboardStats, String> {
-        db.dashboard_stats().await.map_err(|e| e.to_string())
+        db.dashboard_stats().await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1243,7 +1259,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         limit: u32,
     ) -> Result<Vec<ActivityItem>, String> {
-        db.dashboard_recent_activity(limit).await.map_err(|e| e.to_string())
+        db.dashboard_recent_activity(limit).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1251,7 +1267,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         days: u32,
     ) -> Result<Vec<MealPlanEntryWithRecipe>, String> {
-        db.dashboard_upcoming_meals(days).await.map_err(|e| e.to_string())
+        db.dashboard_upcoming_meals(days).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1259,7 +1275,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         threshold: f64,
     ) -> Result<Vec<StockItemWithIngredient>, String> {
-        db.dashboard_low_stock(threshold).await.map_err(|e| e.to_string())
+        db.dashboard_low_stock(threshold).await.map_err(user_error)
     }
 
     // Calendar
@@ -1271,10 +1287,10 @@ pub mod commands {
     ) -> Result<Vec<MealPlanEntryWithRecipe>, String> {
         let start = DateTime::parse_from_rfc3339(&start_date)
             .map(|dt| dt.with_timezone(&Utc))
-            .map_err(|e| e.to_string())?;
+            .map_err(user_error)?;
         let end = DateTime::parse_from_rfc3339(&end_date)
             .map(|dt| dt.with_timezone(&Utc))
-            .map_err(|e| e.to_string())?;
+            .map_err(user_error)?;
         db.meal_plan_entries_by_date_range(start, end).await
     }
 
@@ -1335,7 +1351,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         input: ImageUploadInput,
     ) -> Result<Image, String> {
-        db.image_upload(input).await.map_err(|e| e.to_string())
+        db.image_upload(input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1343,7 +1359,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<(), String> {
-        db.image_delete(id).await.map_err(|e| e.to_string())
+        db.image_delete(id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1351,7 +1367,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<Image, String> {
-        db.image_set_primary(id).await.map_err(|e| e.to_string())
+        db.image_set_primary(id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1360,7 +1376,7 @@ pub mod commands {
         entity_type: ImageEntityType,
         entity_id: i64,
     ) -> Result<Vec<Image>, String> {
-        db.image_get(entity_type, entity_id).await.map_err(|e| e.to_string())
+        db.image_get(entity_type, entity_id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1368,7 +1384,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<String, String> {
-        db.image_read_base64(id).await.map_err(|e| e.to_string())
+        db.image_read_base64(id).await.map_err(user_error)
     }
 
     // ===== INSTRUMENTAÇÃO =====
@@ -1377,14 +1393,14 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         input: ProblemReportInput,
     ) -> Result<ProblemReport, String> {
-        db.problem_report_create(input).await.map_err(|e| e.to_string())
+        db.problem_report_create(input).await.map_err(user_error)
     }
 
     #[tauri::command]
     pub async fn export_usage_data(
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<String, String> {
-        db.export_usage_data().await.map_err(|e| e.to_string())
+        db.export_usage_data().await.map_err(user_error)
     }
 
     // ===== STOCK PURCHASES =====
@@ -1393,7 +1409,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         input: StockPurchaseInput,
     ) -> Result<StockPurchase, String> {
-        db.stock_purchase_add(input).await.map_err(|e| e.to_string())
+        db.stock_purchase_add(input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1401,7 +1417,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         ingredient_id: i64,
     ) -> Result<Vec<StockPurchase>, String> {
-        db.stock_purchases_list(ingredient_id).await.map_err(|e| e.to_string())
+        db.stock_purchases_list(ingredient_id).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1409,7 +1425,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         id: i64,
     ) -> Result<(), String> {
-        db.stock_purchase_delete(id).await.map_err(|e| e.to_string())
+        db.stock_purchase_delete(id).await.map_err(user_error)
     }
 
     // ===== RECEIPT OCR =====
@@ -1418,7 +1434,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         input: ReceiptScanInput,
     ) -> Result<ReceiptParseResult, String> {
-        db.receipt_scan(input).await.map_err(|e| e.to_string())
+        db.receipt_scan(input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1426,7 +1442,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         raw_text: String,
     ) -> Result<Vec<ParsedReceiptItem>, String> {
-        db.receipt_parse(raw_text).await.map_err(|e| e.to_string())
+        db.receipt_parse(raw_text).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1434,7 +1450,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         input: ReceiptConfirmInput,
     ) -> Result<Vec<StockPurchase>, String> {
-        db.receipt_confirm(input).await.map_err(|e| e.to_string())
+        db.receipt_confirm(input).await.map_err(user_error)
     }
 
     // ===== RECIPE IMPORT (Fase 3.4) =====
@@ -1443,7 +1459,7 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         url: String,
     ) -> Result<RecipeImportPreview, String> {
-        db.recipe_import_from_url(url).await.map_err(|e| e.to_string())
+        db.recipe_import_from_url(url).await.map_err(user_error)
     }
 }
 
@@ -1455,11 +1471,11 @@ pub async fn initialize_app_state(app: &tauri::AppHandle) -> Result<(), String> 
     let app_data_dir = app
         .path()
         .resolve("mise", BaseDirectory::AppData)
-        .map_err(|e| e.to_string())?;
+        .map_err(user_error)?;
 
     let db = mise_core::db::open_db(Some(app_data_dir.clone()))
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(user_error)?;
     app.manage(AppDb::new(db, app_data_dir));
     Ok(())
 }

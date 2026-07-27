@@ -15,6 +15,7 @@ import type { MealEntryInput } from "../../crates/core/bindings/MealEntryInput";
 import type { MealPlanShoppingList } from "../../crates/core/bindings/MealPlanShoppingList";
 import type { DayOfWeek } from "../../crates/core/bindings/DayOfWeek";
 import type { MealType } from "../../crates/core/bindings/MealType";
+import { errKey } from "../lib/errors";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -69,7 +70,7 @@ export default function MealPlannerPage() {
       const plans = await invoke<MealPlan[]>("meal_plans_list");
       setMealPlans(plans);
     } catch (e) {
-      showToast(t("mealPlanner.loadPlansError"), "err");
+      showToast(t(errKey(e, "mealPlanner.loadPlansError")), "err");
     }
   }, [showToast, t]);
 
@@ -78,7 +79,7 @@ export default function MealPlannerPage() {
       const recipesData = await invoke<Recipe[]>("recipes_list");
       setRecipes(recipesData);
     } catch (e) {
-      showToast(t("mealPlanner.loadRecipesError"), "err");
+      showToast(t(errKey(e, "mealPlanner.loadRecipesError")), "err");
     }
   }, [showToast, t]);
 
@@ -88,7 +89,7 @@ export default function MealPlannerPage() {
       const plan = await invoke<MealPlanWithEntries>("meal_plan_get", { id });
       setSelectedPlan(plan);
     } catch (e) {
-      showToast(t("mealPlanner.loadPlanError"), "err");
+      showToast(t(errKey(e, "mealPlanner.loadPlanError")), "err");
     } finally {
       setLoading(false);
     }
@@ -116,7 +117,7 @@ export default function MealPlannerPage() {
       setPlanForm({ name: "", start_date: new Date().toISOString().split("T")[0], end_date: new Date(Date.now() + 6 * 86400000).toISOString().split("T")[0] });
       await loadMealPlans();
     } catch (e) {
-      showToast(t("mealPlanner.planCreateError"), "err");
+      showToast(t(errKey(e, "mealPlanner.planCreateError")), "err");
     } finally {
       setLoading(false);
     }
@@ -139,7 +140,7 @@ export default function MealPlannerPage() {
       await loadPlan(selectedPlan.meal_plan.id);
       await loadMealPlans();
     } catch (e) {
-      showToast(t("mealPlanner.planUpdateError"), "err");
+      showToast(t(errKey(e, "mealPlanner.planUpdateError")), "err");
     } finally {
       setLoading(false);
     }
@@ -153,7 +154,7 @@ export default function MealPlannerPage() {
       if (selectedPlan?.meal_plan.id === id) setSelectedPlan(null);
       await loadMealPlans();
     } catch (e) {
-      showToast(t("mealPlanner.planDeleteError"), "err");
+      showToast(t(errKey(e, "mealPlanner.planDeleteError")), "err");
     }
   }
 
@@ -179,7 +180,7 @@ export default function MealPlannerPage() {
       setModal(null);
       await loadPlan(selectedPlan.meal_plan.id);
     } catch (e) {
-      showToast(t("mealPlanner.entryAddError"), "err");
+      showToast(t(errKey(e, "mealPlanner.entryAddError")), "err");
     } finally {
       setLoading(false);
     }
@@ -204,7 +205,7 @@ export default function MealPlannerPage() {
       setModal(null);
       if (selectedPlan) await loadPlan(selectedPlan.meal_plan.id);
     } catch (e) {
-      showToast(t("mealPlanner.entryUpdateError"), "err");
+      showToast(t(errKey(e, "mealPlanner.entryUpdateError")), "err");
     } finally {
       setLoading(false);
     }
@@ -216,7 +217,7 @@ export default function MealPlannerPage() {
       showToast(t("mealPlanner.entryDeleted"), "ok");
       if (selectedPlan) await loadPlan(selectedPlan.meal_plan.id);
     } catch (e) {
-      showToast(t("mealPlanner.entryDeleteError"), "err");
+      showToast(t(errKey(e, "mealPlanner.entryDeleteError")), "err");
     }
   }
 
@@ -231,7 +232,7 @@ export default function MealPlannerPage() {
       });
       showToast(t("mealPlanner.shoppingListGenerated", { name: result.shopping_list.name }), "ok");
     } catch (e) {
-      showToast(t("mealPlanner.shoppingListError"), "err");
+      showToast(t(errKey(e, "mealPlanner.shoppingListError")), "err");
     } finally {
       setLoading(false);
     }

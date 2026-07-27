@@ -6,6 +6,7 @@ import PageHeader from "../components/ui/PageHeader";
 import { useI18n } from "../i18n";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import type { Supplier } from "../../crates/core/bindings/Supplier";
+import { errKey } from "../lib/errors";
 
 // Forma solta de item ainda por confirmar (parsing de OCR heurístico) —
 // sem binding correspondente, propositadamente fora do âmbito do i18n.
@@ -111,7 +112,7 @@ export default function ReceiptScannerPage() {
       setOcrProgress(t("receiptScanner.ocr.modelReady"));
     } catch (e) {
       setOcrProgress(t("receiptScanner.ocr.modelError"));
-      showToast(t("receiptScanner.ocr.initError"), "err");
+      showToast(t(errKey(e, "receiptScanner.ocr.initError")), "err");
     }
   };
 
@@ -119,14 +120,14 @@ export default function ReceiptScannerPage() {
     try {
       const data = await invoke<Ingredient[]>("ingredients_list");
       setIngredients(data);
-    } catch { showToast(t("receiptScanner.loadIngredientsError"), "err"); }
+    } catch (e) { showToast(t(errKey(e, "receiptScanner.loadIngredientsError")), "err"); }
   };
 
   const loadSuppliers = async () => {
     try {
       const data = await invoke<Supplier[]>("suppliers_list");
       setSuppliers(data);
-    } catch { showToast(t("receiptScanner.loadSuppliersError"), "err"); }
+    } catch (e) { showToast(t(errKey(e, "receiptScanner.loadSuppliersError")), "err"); }
   };
 
   const parseReceiptText = (text: string): ParsedLine[] => {
@@ -240,7 +241,7 @@ export default function ReceiptScannerPage() {
       // disponível para WebKitGTK neste ambiente) — diagnóstico do bug da
       // câmara, ver PROJECT.md.
       console.error("[camera]", e);
-      showToast(t("receiptScanner.cameraError"), "err");
+      showToast(t(errKey(e, "receiptScanner.cameraError")), "err");
     }
   };
 
@@ -256,7 +257,7 @@ export default function ReceiptScannerPage() {
       setOcrProgress(t("receiptScanner.ocr.linesDetected", { count: parsed.length }));
       showToast(t("receiptScanner.ocr.itemsExtracted", { count: parsed.length }), parsed.length > 0 ? "ok" : "warn");
     } catch (e) {
-      showToast(t("receiptScanner.ocr.error"), "err");
+      showToast(t(errKey(e, "receiptScanner.ocr.error")), "err");
       setOcrProgress(t("receiptScanner.ocr.error"));
     } finally {
       setProcessing(false);
@@ -322,7 +323,7 @@ export default function ReceiptScannerPage() {
       setImage(null);
       setImageFile(null);
     } catch (e) {
-      showToast(t("receiptScanner.importError"), "err");
+      showToast(t(errKey(e, "receiptScanner.importError")), "err");
     } finally {
       setProcessing(false);
     }

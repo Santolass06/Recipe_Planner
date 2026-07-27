@@ -1,4 +1,7 @@
 export const pt = {
+  errors: {
+    inUse: "Este item está a ser usado noutro sítio (receita, stock ou compra) e por isso não pode ser eliminado.",
+  },
   app: {
     title: "mise",
     subtitle: "pro-kitchen",

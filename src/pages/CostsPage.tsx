@@ -8,6 +8,7 @@ import type { RecipeWithIngredients as Recipe } from "../../crates/core/bindings
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import type { CostBreakdown } from "../../crates/core/bindings/CostBreakdown";
 import { UNIT_LABELS_SHORT } from "../lib/units";
+import { errKey } from "../lib/errors";
 
 // Cálculo só no frontend (não há endpoint de análise de margem no backend) —
 // sem binding correspondente.
@@ -48,7 +49,7 @@ export default function CostsPage() {
         setSelectedRecipeId(recipesData[0].id);
       }
     } catch (e) {
-      showToast(t("costs.loadError"), "err");
+      showToast(t(errKey(e, "costs.loadError")), "err");
     }
   }, [showToast, t]);
 
@@ -85,7 +86,7 @@ export default function CostsPage() {
         profit_total,
       });
     } catch (e) {
-      showToast(t("costs.calcError"), "err");
+      showToast(t(errKey(e, "costs.calcError")), "err");
       setAnalysis(null);
     } finally {
       setLoading(false);

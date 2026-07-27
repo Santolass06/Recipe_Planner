@@ -9,6 +9,7 @@ import EmptyState from "../components/ui/EmptyState";
 import SearchBar from "../components/ui/SearchBar";
 import { useI18n } from "../i18n";
 import type { Event } from "../../crates/core/bindings/Event";
+import { errKey } from "../lib/errors";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -84,7 +85,7 @@ export default function EventsPage() {
       const data = await invoke<Event[]>("events_list");
       setEvents(data);
     } catch (e) {
-      showToast(t("events.loadError"), "err");
+      showToast(t(errKey(e, "events.loadError")), "err");
     }
   }, [showToast, t]);
 
@@ -127,7 +128,7 @@ export default function EventsPage() {
       closeModal();
       await load();
     } catch (e) {
-      showToast(t("events.saveError"), "err");
+      showToast(t(errKey(e, "events.saveError")), "err");
     } finally {
       setLoading(false);
     }
@@ -140,7 +141,7 @@ export default function EventsPage() {
       showToast(t("events.deleted"), "ok");
       await load();
     } catch (e) {
-      showToast(t("events.deleteError"), "err");
+      showToast(t(errKey(e, "events.deleteError")), "err");
     }
   }
 

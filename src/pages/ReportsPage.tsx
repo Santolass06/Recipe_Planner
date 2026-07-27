@@ -10,6 +10,7 @@ import type { StockSnapshot } from "../../crates/core/bindings/StockSnapshot";
 import type { MealStats } from "../../crates/core/bindings/MealStats";
 import type { PricePoint } from "../../crates/core/bindings/PricePoint";
 import { UNIT_LABELS_SHORT as UNIT_LABELS } from "../lib/units";
+import { errKey } from "../lib/errors";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -677,7 +678,7 @@ export default function ReportsPage() {
         }
       }
     } catch (e) {
-      showToast(t("reports.loadError"), "err");
+      showToast(t(errKey(e, "reports.loadError")), "err");
     } finally {
       setLoading(false);
     }

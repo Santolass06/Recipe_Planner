@@ -12,6 +12,7 @@ import type { RecipeWithIngredients as Recipe } from "../../crates/core/bindings
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import type { RecipeImportPreview } from "../../crates/core/bindings/RecipeImportPreview";
 import { UNIT_LABELS_FULL as UNIT_LABELS, UNIT_LABELS_SHORT as UNIT_SHORT, convertUnit } from "../lib/units";
+import { errKey } from "../lib/errors";
 
 export type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -599,7 +600,7 @@ export default function RecipesPage() {
       setRecipes(recipesData);
       setIngredients(ingredientsData);
     } catch (e) {
-      showToast(t("recipes.loadError"), "err");
+      showToast(t(errKey(e, "recipes.loadError")), "err");
     }
   }, [showToast, t]);
 
@@ -707,7 +708,7 @@ export default function RecipesPage() {
       closeModal();
       await load();
     } catch (e) {
-      showToast(t("recipes.saveError"), "err");
+      showToast(t(errKey(e, "recipes.saveError")), "err");
     } finally {
       setLoading(false);
     }
@@ -761,7 +762,7 @@ export default function RecipesPage() {
       showToast(t("recipes.deleted"), "ok");
       await load();
     } catch (e) {
-      showToast(t("recipes.deleteError"), "err");
+      showToast(t(errKey(e, "recipes.deleteError")), "err");
     }
   }
 

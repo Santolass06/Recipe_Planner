@@ -1,4 +1,7 @@
 export const en = {
+  errors: {
+    inUse: "This item is used somewhere else (a recipe, stock or a purchase), so it cannot be deleted.",
+  },
   app: {
     title: "mise",
     subtitle: "pro-kitchen",

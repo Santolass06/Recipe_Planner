@@ -13,6 +13,7 @@ import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import type { Supplier } from "../../crates/core/bindings/Supplier";
 import type { StockPurchase } from "../../crates/core/bindings/StockPurchase";
 import { UNIT_LABELS_FULL as UNIT_LABELS, convertUnit } from "../lib/units";
+import { errKey } from "../lib/errors";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -365,7 +366,7 @@ export default function StockPage() {
       setStock(stockData);
       setIngredients(ingredientsData);
     } catch (e) {
-      showToast(t("stock.loadError"), "err");
+      showToast(t(errKey(e, "stock.loadError")), "err");
     }
   }, [showToast, t]);
 
@@ -376,7 +377,7 @@ export default function StockPage() {
       const data = await invoke<Supplier[]>("suppliers_list");
       setSuppliers(data);
     } catch (e) {
-      showToast(t("stock.suppliersLoadError"), "err");
+      showToast(t(errKey(e, "stock.suppliersLoadError")), "err");
     }
   }, [showToast, t]);
 
@@ -388,7 +389,7 @@ export default function StockPage() {
       const data = await invoke<StockPurchase[]>("stock_purchases_list", { ingredientId });
       setPurchases(data);
     } catch (e) {
-      showToast(t("stock.purchasesLoadError"), "err");
+      showToast(t(errKey(e, "stock.purchasesLoadError")), "err");
     } finally {
       setLoadingPurchases(false);
     }
@@ -450,7 +451,7 @@ export default function StockPage() {
       closeModal();
       await load();
     } catch (e) {
-      showToast(t("stock.saveError"), "err");
+      showToast(t(errKey(e, "stock.saveError")), "err");
     } finally {
       setLoading(false);
     }
@@ -463,7 +464,7 @@ export default function StockPage() {
       showToast(t("stock.deleted"), "ok");
       await load();
     } catch (e) {
-      showToast(t("stock.deleteError"), "err");
+      showToast(t(errKey(e, "stock.deleteError")), "err");
     } finally {
       setConfirmDelete(null);
     }
@@ -505,7 +506,7 @@ export default function StockPage() {
         await loadPurchases(selectedIngredientForPurchases.ingredient_id);
       }
     } catch (e) {
-      showToast(t("stock.purchaseError"), "err");
+      showToast(t(errKey(e, "stock.purchaseError")), "err");
     } finally {
       setLoading(false);
     }
