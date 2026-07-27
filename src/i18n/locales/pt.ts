@@ -903,7 +903,7 @@ export const pt = {
       spendByRecipe: "Gastos por receita",
       lastDaysTopRecipes: "últimos {days} dias · top {count} receitas",
       spendBySupplier: "Gastos por fornecedor",
-      differentSourceNote: "Fonte diferente: dados de faturas de fornecedores, não de consumo de receitas. Este total não reconcilia com os relatórios acima.",
+      estimateSourceNote: "Estimativa: valores calculados quando a lista de compras foi criada. Não reconciliam com o total gasto acima, que usa os preços realmente pagos.",
       topRecipesTable: "Top Receitas por Custo",
       colRecipe: "Receita",
       colTotalCost: "Custo Total",

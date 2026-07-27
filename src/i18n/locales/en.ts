@@ -903,7 +903,7 @@ export const en = {
       spendByRecipe: "Spending by Recipe",
       lastDaysTopRecipes: "last {days} days · top {count} recipes",
       spendBySupplier: "Spending by Supplier",
-      differentSourceNote: "Different source: supplier invoice data, not recipe consumption. This total does not reconcile with the reports above.",
+      estimateSourceNote: "Estimate: figures calculated when the shopping list was drawn up. They do not reconcile with the total spent above, which uses the prices actually paid.",
       topRecipesTable: "Top Recipes by Cost",
       colRecipe: "Recipe",
       colTotalCost: "Total Cost",

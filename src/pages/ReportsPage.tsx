@@ -214,29 +214,30 @@ function CostsTab({ costReport, days, t }: { costReport: CostReport | null; days
           <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 16 }}>{t("reports.costsTab.totalLastDays", { days })}</div>
           <BarList rows={categoryRows} t={t} />
         </div>
-        <div className="card" style={{ padding: 20 }}>
+        {/* Estimativas das listas — única secção que não vem das compras reais */}
+        <div className="card" style={{ padding: 20, border: "1px solid var(--approx)" }}>
           <div style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", marginBottom: 4 }}>{t("reports.costsTab.spendByRecipe")}</div>
-          <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 16 }}>
+          <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginBottom: 12 }}>
             {t("reports.costsTab.lastDaysTopRecipes", { days, count: Math.min(8, byRecipe.length) })}
+          </div>
+          <div style={{ display: "flex", gap: 8, background: "var(--approx-soft)", borderRadius: 9, padding: "10px 12px", marginBottom: 16 }}>
+            <span className="ms" style={{ fontSize: 17, color: "var(--approx)", flexShrink: 0 }}>info</span>
+            <span style={{ fontSize: "11.5px", color: "var(--ink-2)", lineHeight: 1.45 }}>
+              {t("reports.costsTab.estimateSourceNote")}
+            </span>
           </div>
           <BarList rows={recipeRows} t={t} />
         </div>
       </div>
 
-      {/* Gastos por fornecedor (fonte diferente) */}
-      <div className="card" style={{ padding: 20, border: "1px solid var(--approx)" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      {/* Gastos por fornecedor — subconjunto das mesmas compras do total acima */}
+      <div className="card" style={{ padding: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span className="ms" style={{ fontSize: 19, color: "var(--approx)" }}>local_shipping</span>
             <span style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>{t("reports.costsTab.spendBySupplier")}</span>
           </div>
           <span className="mono" style={{ fontSize: 16, fontWeight: 600, color: "var(--approx)" }}>€{supplierTotal.toFixed(2)}</span>
-        </div>
-        <div style={{ display: "flex", gap: 8, background: "var(--approx-soft)", borderRadius: 9, padding: "10px 12px", margin: "12px 0 16px" }}>
-          <span className="ms" style={{ fontSize: 17, color: "var(--approx)", flexShrink: 0 }}>info</span>
-          <span style={{ fontSize: "11.5px", color: "var(--ink-2)", lineHeight: 1.45 }}>
-            {t("reports.costsTab.differentSourceNote")}
-          </span>
         </div>
         <BarList rows={supplierRows} t={t} />
       </div>

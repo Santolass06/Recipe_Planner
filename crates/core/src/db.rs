@@ -3906,29 +3906,31 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
     let start_date = Utc::now() - chrono::Duration::days(days as i64);
     let start_str = start_date.to_rfc3339();
 
-    // Total spent from purchased shopping list items
+    // Total spent — from `stock_purchases`, which is the money that was
+    // actually paid, on every path that spends it. This used to sum
+    // `shopping_list_items.estimated_cost`, i.e. the estimate written when the
+    // list was drawn up, and only for things bought through a list: the real
+    // price the user typed at the till never reached the report, and a month
+    // of scanned receipts showed €0.00.
     let mut rows = conn.query(
         r#"
-        SELECT COALESCE(SUM(sli.to_buy_quantity * sli.estimated_cost / NULLIF(sli.to_buy_quantity, 0)), 0.0)
-        FROM shopping_list_items sli
-        WHERE sli.purchased = 1
-          AND sli.purchased_at IS NOT NULL
-          AND date(sli.purchased_at) >= date(?1)
+        SELECT COALESCE(SUM(sp.total_price), 0.0)
+        FROM stock_purchases sp
+        JOIN ingredients i ON sp.ingredient_id = i.id
+        WHERE i.event_id IS NULL AND date(sp.purchase_date) >= date(?1)
         "#,
         params![start_str.clone()],
     ).await?;
     let total_spent: f64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
 
-    // By category (ingredient category)
+    // By category — same source as total_spent, so the parts add up to the whole.
     let mut rows = conn.query(
         r#"
-        SELECT c.name, COALESCE(SUM(sli.to_buy_quantity * sli.estimated_cost / NULLIF(sli.to_buy_quantity, 0)), 0.0) AS total
-        FROM shopping_list_items sli
-        LEFT JOIN ingredients i ON sli.ingredient_id = i.id
+        SELECT COALESCE(c.name, 'Sem categoria'), COALESCE(SUM(sp.total_price), 0.0) AS total
+        FROM stock_purchases sp
+        JOIN ingredients i ON sp.ingredient_id = i.id
         LEFT JOIN categories c ON i.category_id = c.id
-        WHERE sli.purchased = 1
-          AND sli.purchased_at IS NOT NULL
-          AND date(sli.purchased_at) >= date(?1)
+        WHERE i.event_id IS NULL AND date(sp.purchase_date) >= date(?1)
         GROUP BY c.name
         ORDER BY total DESC
         "#,
@@ -3945,8 +3947,11 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
         });
     }
 
-    // By recipe (from meal plan entries that generated shopping lists)
-    // This is a simplified version - we look at shopping lists created from meal plans
+    // By list — the only breakdown still sourced from `shopping_list_items`,
+    // because purchases carry no link back to the list or recipe that asked
+    // for them. These are the *estimates* written when the list was drawn up,
+    // so this section does not reconcile with total_spent above and the
+    // frontend must label it as an estimate (same treatment as by_supplier).
     let mut rows = conn.query(
         r#"
         SELECT sl.name, COALESCE(SUM(sli.estimated_cost), 0.0) AS total
@@ -3976,13 +3981,8 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
         });
     }
 
-    // By supplier — sourced from `stock_purchases` (direct stock purchases,
-    // e.g. via the Stock page or the receipt scanner), NOT from
-    // `shopping_list_items` (which has no supplier link at all). This is a
-    // different data source from total_spent/by_category/by_recipe above,
-    // so its total won't necessarily reconcile with theirs — the frontend
-    // must label this section accordingly. See also the architecture note
-    // about unifying purchase sources.
+    // By supplier — same source as total_spent, but only the purchases that
+    // name a supplier, so it is a subset rather than a divergent total.
     let mut rows = conn.query(
         r#"
         SELECT s.name, COALESCE(SUM(sp.total_price), 0.0) AS total
