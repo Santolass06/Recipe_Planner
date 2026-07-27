@@ -510,6 +510,16 @@ pub struct ImportRecipeIngredient {
     pub unit: Unit,
 }
 
+/// What a backup restore put back. Counts only — the backup itself is a JSON
+/// document handled as text, not a typed structure (see db::backup_export).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct BackupRestoreResult {
+    pub tables_restored: u32,
+    pub rows_restored: u32,
+    pub images_restored: u32,
+}
+
 /// Import result
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]

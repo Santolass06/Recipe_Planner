@@ -365,6 +365,14 @@ impl AppDb {
         mise_core::db::import_data(&self.db, data).await.map_err(|e| e.to_string())
     }
 
+    pub async fn backup_export(&self) -> Result<String, String> {
+        mise_core::db::backup_export(&self.db, &self.data_dir).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn backup_restore(&self, json: String) -> Result<BackupRestoreResult, String> {
+        mise_core::db::backup_restore(&self.db, &self.data_dir, json).await.map_err(|e| e.to_string())
+    }
+
     // Meal Planner
     pub async fn meal_plans_list(&self) -> Result<Vec<MealPlan>, String> {
         mise_core::db::list_meal_plans(&self.db).await.map_err(|e| e.to_string())
@@ -1127,6 +1135,21 @@ pub mod commands {
         data: ImportData,
     ) -> Result<ImportResult, String> {
         db.import_data(data).await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn backup_export(
+        db: tauri::State<'_, crate::AppDb>,
+    ) -> Result<String, String> {
+        db.backup_export().await.map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn backup_restore(
+        db: tauri::State<'_, crate::AppDb>,
+        json: String,
+    ) -> Result<BackupRestoreResult, String> {
+        db.backup_restore(json).await.map_err(|e| e.to_string())
     }
 
     // Meal Planner

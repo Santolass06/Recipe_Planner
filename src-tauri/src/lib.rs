@@ -89,6 +89,8 @@ pub fn run() {
             // Import/Export
             mise_tauri::commands::export_data,
             mise_tauri::commands::import_data,
+            mise_tauri::commands::backup_export,
+            mise_tauri::commands::backup_restore,
             // Dashboard
             mise_tauri::commands::dashboard_stats,
             mise_tauri::commands::dashboard_recent_activity,

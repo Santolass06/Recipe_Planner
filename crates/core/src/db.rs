@@ -3082,15 +3082,194 @@ pub async fn price_quotes_all(db: &Database) -> LibsqlResult<Vec<PriceQuoteWithI
 }
 
 /// Export all data
+/// Every table that holds the user's data. A backup that forgets one is
+/// exactly the bug this replaces, so this list is the single thing to keep up
+/// to date — add a table here when you add a table.
+///
+/// `approximate_unit_weights` is seeded reference data, not the user's, and is
+/// rebuilt by the migrations on any database.
+const BACKUP_TABLES: &[&str] = &[
+    "settings", "categories", "ingredients", "recipes", "recipe_ingredients",
+    "stock", "stock_purchases", "suppliers", "price_quotes", "events",
+    "shopping_lists", "shopping_list_items", "meal_plans", "meal_plan_entries",
+    "images", "receipt_imports", "usage_events", "problem_reports",
+];
+
+const BACKUP_FORMAT_VERSION: u32 = 1;
+
+fn value_to_json(value: libsql::Value) -> serde_json::Value {
+    use libsql::Value;
+    match value {
+        Value::Null => serde_json::Value::Null,
+        Value::Integer(i) => serde_json::Value::from(i),
+        Value::Real(f) => serde_json::Value::from(f),
+        Value::Text(s) => serde_json::Value::from(s),
+        Value::Blob(b) => {
+            use base64::{Engine as _, engine::general_purpose::STANDARD};
+            serde_json::json!({ "__blob_b64": STANDARD.encode(b) })
+        }
+    }
+}
+
+fn json_to_value(value: &serde_json::Value) -> libsql::Value {
+    use libsql::Value;
+    match value {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Integer(*b as i64),
+        serde_json::Value::Number(n) => match n.as_i64() {
+            Some(i) => Value::Integer(i),
+            None => Value::Real(n.as_f64().unwrap_or(0.0)),
+        },
+        serde_json::Value::String(s) => Value::Text(s.clone()),
+        serde_json::Value::Object(map) => match map.get("__blob_b64").and_then(|v| v.as_str()) {
+            Some(b64) => {
+                use base64::{Engine as _, engine::general_purpose::STANDARD};
+                Value::Blob(STANDARD.decode(b64).unwrap_or_default())
+            }
+            None => Value::Text(value.to_string()),
+        },
+        other => Value::Text(other.to_string()),
+    }
+}
+
+/// A real backup: every user table row-for-row (ids included, so nothing has
+/// to be remapped on the way back) plus the image files, in one JSON document
+/// the user can carry off the machine.
+///
+/// Returned as text rather than a typed struct on purpose — a typed one would
+/// need a field per table, which is how `export_data` ended up covering two
+/// tables out of eighteen and calling itself a backup.
+pub async fn backup_export(db: &Database, data_dir: &std::path::Path) -> LibsqlResult<String> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    let conn = get_conn(db).await?;
+    let mut tables = serde_json::Map::new();
+
+    for table in BACKUP_TABLES {
+        let mut rows = conn.query(&format!("SELECT * FROM {table}"), ()).await?;
+        let column_count = rows.column_count();
+        let columns: Vec<String> = (0..column_count)
+            .map(|i| rows.column_name(i).unwrap_or_default().to_string())
+            .collect();
+
+        let mut table_rows = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let mut object = serde_json::Map::new();
+            for (i, name) in columns.iter().enumerate() {
+                object.insert(name.clone(), value_to_json(row.get_value(i as i32)?));
+            }
+            table_rows.push(serde_json::Value::Object(object));
+        }
+        tables.insert((*table).to_string(), serde_json::Value::Array(table_rows));
+    }
+
+    // Image files live next to the database, not in it, so a backup of the
+    // rows alone would restore recipes pointing at pictures that are gone.
+    let mut images = serde_json::Map::new();
+    let images_dir = data_dir.join("images");
+    if let Ok(entries) = std::fs::read_dir(&images_dir) {
+        for entry in entries.flatten() {
+            if !entry.path().is_file() {
+                continue;
+            }
+            let bytes = std::fs::read(entry.path()).map_err(|e| libsql::Error::Misuse(e.to_string()))?;
+            images.insert(entry.file_name().to_string_lossy().into_owned(), serde_json::Value::from(STANDARD.encode(bytes)));
+        }
+    }
+
+    let backup = serde_json::json!({
+        "backup_version": BACKUP_FORMAT_VERSION,
+        "created_at": Utc::now().to_rfc3339(),
+        "tables": serde_json::Value::Object(tables),
+        "images": serde_json::Value::Object(images),
+    });
+
+    serde_json::to_string(&backup).map_err(|e| libsql::Error::Misuse(e.to_string()))
+}
+
+/// Restore a backup, replacing everything. This is not the merge that
+/// `import_data` does — a backup is what the user reaches for when the current
+/// contents are wrong or gone.
+pub async fn backup_restore(db: &Database, data_dir: &std::path::Path, json: String) -> LibsqlResult<BackupRestoreResult> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    let backup: serde_json::Value = serde_json::from_str(&json)
+        .map_err(|e| libsql::Error::Misuse(format!("backup file is not valid JSON: {e}")))?;
+    let tables = backup.get("tables").and_then(|t| t.as_object())
+        .ok_or_else(|| libsql::Error::Misuse("backup file has no tables".to_string()))?;
+
+    let conn = get_conn(db).await?;
+    let tx = conn.transaction().await?;
+    let mut rows_restored = 0_u32;
+
+    // Children before parents on the way out, so no FK is left dangling
+    // mid-restore; the insert order below is the declared one, parents first.
+    for table in BACKUP_TABLES.iter().rev() {
+        tx.execute(&format!("DELETE FROM {table}"), ()).await?;
+    }
+
+    for table in BACKUP_TABLES {
+        let Some(table_rows) = tables.get(*table).and_then(|t| t.as_array()) else { continue };
+        for row in table_rows {
+            let Some(object) = row.as_object() else { continue };
+            let columns: Vec<&String> = object.keys().collect();
+            let placeholders: Vec<String> = (1..=columns.len()).map(|i| format!("?{i}")).collect();
+            let values: Vec<libsql::Value> = columns.iter().map(|c| json_to_value(&object[*c])).collect();
+            let column_list = columns.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(", ");
+
+            tx.execute(
+                &format!("INSERT INTO {table} ({column_list}) VALUES ({})", placeholders.join(", ")),
+                values,
+            ).await?;
+            rows_restored += 1;
+        }
+    }
+
+    tx.commit().await?;
+
+    let mut images_restored = 0_u32;
+    if let Some(images) = backup.get("images").and_then(|i| i.as_object()) {
+        let images_dir = data_dir.join("images");
+        std::fs::create_dir_all(&images_dir).map_err(|e| libsql::Error::Misuse(e.to_string()))?;
+        for (filename, contents) in images {
+            let Some(b64) = contents.as_str() else { continue };
+            let bytes = STANDARD.decode(b64).map_err(|e| libsql::Error::Misuse(e.to_string()))?;
+            // Backups only ever hold bare file names; anything else is a
+            // crafted file trying to write outside the images folder.
+            let name = std::path::Path::new(filename);
+            if name.file_name() != Some(name.as_os_str()) {
+                continue;
+            }
+            std::fs::write(images_dir.join(name), bytes).map_err(|e| libsql::Error::Misuse(e.to_string()))?;
+            images_restored += 1;
+        }
+    }
+
+    Ok(BackupRestoreResult { tables_restored: BACKUP_TABLES.len() as u32, rows_restored, images_restored })
+}
+
 pub async fn export_data(db: &Database) -> LibsqlResult<ImportData> {
     let ingredients = ingredients_list(db).await?;
     let recipes = recipes_list(db).await?;
+
+    // The category has to travel as a name: `import_data` matches categories
+    // by name, so exporting the numeric id (as text) produced a file that
+    // resolved to no category at all on the way back in.
+    let category_names: std::collections::HashMap<i64, String> = {
+        let conn = get_conn(db).await?;
+        let mut rows = conn.query("SELECT id, name FROM categories", ()).await?;
+        let mut map = std::collections::HashMap::new();
+        while let Some(row) = rows.next().await? {
+            map.insert(row.get(0)?, row.get(1)?);
+        }
+        map
+    };
 
     let import_ingredients: Vec<ImportIngredient> = ingredients.into_iter().map(|i| ImportIngredient {
         name: i.name,
         unit: i.unit,
         price_per_unit: i.price_per_unit,
-        category: i.category_id.map(|id| id.to_string()),
+        category: i.category_id.and_then(|id| category_names.get(&id).cloned()),
     }).collect();
 
     let import_recipes: Vec<ImportRecipe> = recipes.into_iter().map(|r| {
@@ -5879,26 +6058,59 @@ mod audit_2026_07 {
         }).await.unwrap()
     }
 
-    /// DOM-04: `export_data` only serialises ingredients and recipes. Stock,
-    /// purchases, suppliers, shopping lists, meal plans, events and settings
-    /// are absent, so "export" is not a backup of the user's data.
+    /// DOM-04: what the Settings page downloads as `mise-backup-<date>.json`
+    /// has to survive "formatted the machine, put it back" — the only reason
+    /// anyone makes a backup. `export_data` covered ingredients and recipes
+    /// and nothing else.
     #[tokio::test]
-    #[ignore = "prova de bug: falha de propósito até o achado ser corrigido — correr com `cargo test -- --ignored`"]
-    async fn export_must_round_trip_the_stock_it_was_given() {
+    async fn a_backup_must_restore_the_stock_and_purchases_it_was_given() {
         let db = test_db().await;
+        let dir = std::env::temp_dir();
         let f = flour(&db, Unit::Kilogram, 2.0).await;
         upsert_stock(&db, StockInput {
             ingredient_id: f.id, quantity: 7.0, min_quantity: 1.0,
         }).await.unwrap();
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 3.0, unit: Unit::Kilogram,
+            price_per_unit: 2.0, total_price: 6.0,
+            is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
 
-        let exported = export_data(&db).await.unwrap();
+        let backup = backup_export(&db, &dir).await.unwrap();
+
         let restored = test_db().await;
-        import_data(&restored, exported).await.unwrap();
+        backup_restore(&restored, &dir, backup).await.unwrap();
 
         let stock = stock_list(&restored).await.unwrap();
+        assert_eq!(stock.len(), 1, "the backup lost the user's stock entirely");
+        assert_eq!(stock[0].quantity, 10.0, "7 on the shelf plus 3 bought back must come back as 10");
         assert_eq!(
-            stock.len(), 1,
-            "exporting and re-importing lost the user's stock entirely"
+            stock_purchases_list(&restored, f.id).await.unwrap().len(), 1,
+            "the backup lost the purchase history"
+        );
+    }
+
+    /// DOM-04, second half: the category travelled as the numeric id rendered
+    /// as text, which matches no category name on the way back in.
+    #[tokio::test]
+    async fn export_must_carry_the_category_by_name() {
+        let db = test_db().await;
+        let conn = get_conn(&db).await.unwrap();
+        // Scoped: an open Rows keeps its read lock until it is dropped.
+        let (category_id, category_name): (i64, String) = {
+            let mut rows = conn.query("SELECT id, name FROM categories WHERE kind = 'ingredient' LIMIT 1", ()).await.unwrap();
+            let row = rows.next().await.unwrap().unwrap();
+            (row.get(0).unwrap(), row.get(1).unwrap())
+        };
+
+        let f = flour(&db, Unit::Kilogram, 2.0).await;
+        conn.execute("UPDATE ingredients SET category_id = ?1 WHERE id = ?2", params![category_id, f.id]).await.unwrap();
+
+        let exported = export_data(&db).await.unwrap();
+        assert_eq!(
+            exported.ingredients[0].category.as_deref(), Some(category_name.as_str()),
+            "the export carried something other than the category's name"
         );
     }
 
