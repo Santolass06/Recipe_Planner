@@ -888,6 +888,7 @@ export const pt = {
     purchaseError: "Erro ao registar compra",
   },
   reports: {
+    needsHistory: "Ainda não há histórico para mostrar aqui. A app regista as entradas de stock mas ainda não regista o consumo — quando passar a registar o que é usado, produzido, vendido e desperdiçado, este separador passa a ter dados.",
     title: "Relatórios",
     subtitle: "Análise de custos, desperdício, stock, refeições e preços",
     loading: "A carregar relatório...",

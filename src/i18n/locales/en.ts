@@ -888,6 +888,7 @@ export const en = {
     purchaseError: "Error recording purchase",
   },
   reports: {
+    needsHistory: "There is no history to show here yet. The app records stock coming in but not yet what goes out — once it records what is used, produced, sold and wasted, this tab will have data.",
     title: "Reports",
     subtitle: "Analysis of costs, waste, stock, meals and prices",
     loading: "Loading report...",

@@ -273,8 +273,22 @@ function CostsTab({ costReport, days, t }: { costReport: CostReport | null; days
   );
 }
 
+/** Shown by the two tabs whose data doesn't exist yet — the app records stock
+ *  going up and never going down, so waste and stock-over-time have nothing to
+ *  draw. "No data" reads like a bug; this says what is actually missing. */
+function NeedsHistory({ t }: { t: T }) {
+  return (
+    <div className="card" style={{ padding: 20, border: "1px solid var(--approx)" }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+        <span className="ms" style={{ fontSize: 19, color: "var(--approx)", flexShrink: 0 }}>info</span>
+        <span style={{ fontSize: "12.5px", color: "var(--ink-2)", lineHeight: 1.5 }}>{t("reports.needsHistory")}</span>
+      </div>
+    </div>
+  );
+}
+
 function WasteTab({ wasteReport, days, t }: { wasteReport: WasteReport | null; days: number; t: T }) {
-  if (!wasteReport || !wasteReport.total_wasted_value) return <div className="empty" style={{ minHeight: 200 }}>{t("reports.noData")}</div>;
+  if (!wasteReport || !wasteReport.total_wasted_value) return <NeedsHistory t={t} />;
 
   const byCategory = wasteReport.by_category ?? [];
   const byIngredient = wasteReport.by_ingredient ?? [];
@@ -342,6 +356,8 @@ function StockTrendsTab({ stockTrends, loading, t }: { stockTrends: StockSnapsho
   const topIngredients = Array.from(ingredientMap.entries())
     .sort((a, b) => b[1].data[b[1].data.length - 1]?.value - a[1].data[a[1].data.length - 1]?.value)
     .slice(0, 5);
+
+  if (topIngredients.length === 0) return <NeedsHistory t={t} />;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
