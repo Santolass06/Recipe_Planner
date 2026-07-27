@@ -49,15 +49,27 @@ pub async fn get_conn(db: &Database) -> LibsqlResult<Connection> {
     Ok(conn)
 }
 
+/// Must match `identifier` in `src-tauri/tauri.conf.json` — it is what Tauri
+/// namespaces `BaseDirectory::AppData` with.
+const APP_IDENTIFIER: &str = "com.recipe-planner.app";
+
 /// Resolve the app's data directory: `app_data_dir` if given (Tauri already
 /// resolves this to the app-identifier-namespaced path), otherwise a
 /// desktop fallback under the OS data dir. Single source of truth so the DB
 /// and the image storage (below) always agree on the same root.
+///
+/// Both branches have to land on the *same* directory. The fallback used to
+/// be a bare `mise` under the OS data dir, which is a second, different
+/// database for any non-Tauri consumer of `mise-core` — and on a machine that
+/// has the unrelated `mise` version manager installed, the same folder as its
+/// data. The `mise` level inside the app directory is deliberate: the webview
+/// dumps its own caches at the app directory root, so the app's actual data
+/// lives one level in, away from it.
 pub fn resolve_data_dir(app_data_dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
     if let Some(dir) = app_data_dir {
         Ok(dir)
     } else if let Some(data_dir) = dirs::data_dir() {
-        Ok(data_dir.join("mise"))
+        Ok(data_dir.join(APP_IDENTIFIER).join("mise"))
     } else {
         // Final fallback
         Ok(std::env::current_dir()?.join(".mise_data"))
