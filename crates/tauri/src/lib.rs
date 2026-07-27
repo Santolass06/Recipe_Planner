@@ -208,11 +208,6 @@ impl AppDb {
         mise_core::db::shopping_list_clear_purchased(&self.db, list_id).await.map_err(|e| e.to_string())
     }
 
-    // Suggester
-    pub async fn suggest_recipes(&self) -> Result<Vec<SuggestedRecipe>, String> {
-        mise_core::db::suggest_recipes(&self.db).await.map_err(|e| e.to_string())
-    }
-
     // Cost
     pub async fn calculate_cost(&self, recipe_id: i64) -> Result<CostBreakdown, String> {
         mise_core::db::calculate_cost(&self.db, recipe_id).await.map_err(|e| e.to_string())
@@ -490,10 +485,6 @@ impl AppDb {
 
     pub async fn image_read_base64(&self, id: i64) -> Result<String, String> {
         mise_core::db::image_read_base64(&self.db, id, &self.data_dir).await.map_err(|e| e.to_string())
-    }
-
-    pub async fn image_search_proxy(&self, query: String, per_page: Option<u32>) -> Result<Vec<ProxyImageResult>, String> {
-        mise_core::db::image_search_proxy(query, per_page).await.map_err(|e| e.to_string())
     }
 
     // ===== INSTRUMENTAÇÃO (Fase de Instrumentação, local-only) =====
@@ -848,14 +839,6 @@ pub mod commands {
         db.shopping_list_group_by_category(list_id)
             .await
             .map_err(|e| e.to_string())
-    }
-
-    // Suggester
-    #[tauri::command]
-    pub async fn suggester_suggest(
-        db: tauri::State<'_, crate::AppDb>,
-    ) -> Result<Vec<SuggestedRecipe>, String> {
-        db.suggest_recipes().await.map_err(|e| e.to_string())
     }
 
     // Cost
@@ -1363,15 +1346,6 @@ pub mod commands {
         id: i64,
     ) -> Result<String, String> {
         db.image_read_base64(id).await.map_err(|e| e.to_string())
-    }
-
-    #[tauri::command]
-    pub async fn image_search_proxy(
-        db: tauri::State<'_, crate::AppDb>,
-        query: String,
-        per_page: Option<u32>,
-    ) -> Result<Vec<ProxyImageResult>, String> {
-        db.image_search_proxy(query, per_page).await.map_err(|e| e.to_string())
     }
 
     // ===== INSTRUMENTAÇÃO =====

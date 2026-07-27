@@ -1724,11 +1724,6 @@ pub async fn shopping_list_clear_purchased(
     get_shopping_list(db, list_id).await
 }
 
-/// Suggest recipes based on stock
-pub async fn suggest_recipes(_db: &Database) -> LibsqlResult<Vec<SuggestedRecipe>> {
-    // Simplified implementation - return empty
-    Ok(Vec::new())
-}
 
 /// Weighted-average price per unit across an ingredient's purchase history
 /// (Fase 3.1: multiple brands/suppliers in stock, weighted by quantity
@@ -4500,103 +4495,6 @@ pub async fn image_get(db: &Database, entity_type: ImageEntityType, entity_id: i
     Ok(images)
 }
 
-/// Proxy search images from Unsplash
-async fn search_unsplash(query: &str, per_page: u32) -> Result<Vec<ProxyImageResult>, String> {
-    let client = reqwest::Client::new();
-    let url = format!(
-        "https://api.unsplash.com/search/photos?query={}&per_page={}&client_id={}",
-        urlencoding::encode(query),
-        per_page,
-        std::env::var("UNSPLASH_ACCESS_KEY").unwrap_or_default()
-    );
-    
-    if std::env::var("UNSPLASH_ACCESS_KEY").is_err() {
-        return Ok(Vec::new()); // No API key, return empty
-    }
-    
-    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
-    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    
-    let mut results = Vec::new();
-    if let Some(photos) = json["results"].as_array() {
-        for photo in photos {
-            results.push(ProxyImageResult {
-                id: photo["id"].as_str().unwrap_or("").to_string(),
-                url: photo["urls"]["regular"].as_str().unwrap_or("").to_string(),
-                thumb_url: photo["urls"]["thumb"].as_str().unwrap_or("").to_string(),
-                width: photo["width"].as_u64().unwrap_or(0) as u32,
-                height: photo["height"].as_u64().unwrap_or(0) as u32,
-                alt: photo["alt_description"].as_str().map(|s| s.to_string()),
-                photographer: photo["user"]["name"].as_str().map(|s| s.to_string()),
-                source: "unsplash".to_string(),
-            });
-        }
-    }
-    Ok(results)
-}
-
-/// Proxy search images from Pexels
-async fn search_pexels(query: &str, per_page: u32) -> Result<Vec<ProxyImageResult>, String> {
-    let client = reqwest::Client::new();
-    let url = format!(
-        "https://api.pexels.com/v1/search?query={}&per_page={}",
-        urlencoding::encode(query),
-        per_page
-    );
-    
-    let api_key = match std::env::var("PEXELS_API_KEY") {
-        Ok(k) => k,
-        Err(_) => return Ok(Vec::new()), // No API key, return empty
-    };
-    
-    let resp = client
-        .get(&url)
-        .header("Authorization", api_key)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    
-    let mut results = Vec::new();
-    if let Some(photos) = json["photos"].as_array() {
-        for photo in photos {
-            results.push(ProxyImageResult {
-                id: photo["id"].as_u64().unwrap_or(0).to_string(),
-                url: photo["src"]["large"].as_str().unwrap_or("").to_string(),
-                thumb_url: photo["src"]["medium"].as_str().unwrap_or("").to_string(),
-                width: photo["width"].as_u64().unwrap_or(0) as u32,
-                height: photo["height"].as_u64().unwrap_or(0) as u32,
-                alt: photo["alt"].as_str().map(|s| s.to_string()),
-                photographer: photo["photographer"].as_str().map(|s| s.to_string()),
-                source: "pexels".to_string(),
-            });
-        }
-    }
-    Ok(results)
-}
-
-/// Search images from free stock photo APIs
-pub async fn image_search_proxy(query: String, per_page: Option<u32>) -> Result<Vec<ProxyImageResult>, String> {
-    let per_page = per_page.unwrap_or(20).min(30);
-    let mut results = Vec::new();
-    
-    // Search both in parallel
-    let (unsplash_results, pexels_results) = tokio::join!(
-        search_unsplash(&query, per_page),
-        search_pexels(&query, per_page)
-    );
-    
-    results.extend(unsplash_results.unwrap_or_default());
-    results.extend(pexels_results.unwrap_or_default());
-    
-    // Shuffle to mix sources
-    use rand::seq::SliceRandom;
-    let mut rng = rand::rng();
-    results.shuffle(&mut rng);
-    
-    results.truncate(per_page as usize);
-    Ok(results)
-}
 
 // =====================================================================
 // STOCK PURCHASES

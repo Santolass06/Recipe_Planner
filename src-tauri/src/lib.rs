@@ -4,9 +4,6 @@ use mise_tauri;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             // Initialize database and state via mise-tauri.
             // Run SYNCHRONOUSLY and blocking via block_on (NOT spawn) so that
@@ -58,7 +55,6 @@ pub fn run() {
             mise_tauri::commands::shopping_list_update_item,
             mise_tauri::commands::shopping_list_delete,
             // Suggester
-            mise_tauri::commands::suggester_suggest,
             // Cost
             mise_tauri::commands::cost_calculate,
             mise_tauri::commands::cost_analyze,
@@ -144,7 +140,6 @@ pub fn run() {
             mise_tauri::commands::image_set_primary,
             mise_tauri::commands::image_get,
             mise_tauri::commands::image_read_base64,
-            mise_tauri::commands::image_search_proxy,
             // Instrumentação (local-only) — Fase de Instrumentação
             mise_tauri::commands::problem_report_create,
             mise_tauri::commands::export_usage_data,
