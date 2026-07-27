@@ -1110,7 +1110,13 @@ pub async fn update_recipe(db: &Database, id: i64, input: RecipeInput) -> Libsql
     let conn = get_conn(db).await?;
     let tags_json = serde_json::to_string(&input.tags).unwrap_or_else(|_| "[]".to_string());
 
-    conn.execute(
+    // The ingredient lines are replaced by DELETE-then-reinsert. Without a
+    // transaction, a line that fails to resolve mid-loop (stale form, retry
+    // with an old payload, any IPC caller) leaves the recipe with the lines
+    // that already went in and none of the rest — silently, and permanently.
+    let tx = conn.transaction().await?;
+
+    tx.execute(
         "UPDATE recipes SET name = ?1, category = ?2, portions = ?3, instructions = ?4,
          prep_time_minutes = ?5, cook_time_minutes = ?6, tags = ?7, image_path = ?8, updated_at = datetime('now')
          WHERE id = ?9",
@@ -1118,24 +1124,26 @@ pub async fn update_recipe(db: &Database, id: i64, input: RecipeInput) -> Libsql
     ).await?;
 
     // Delete existing recipe ingredients
-    conn.execute("DELETE FROM recipe_ingredients WHERE recipe_id = ?1", params![id]).await?;
+    tx.execute("DELETE FROM recipe_ingredients WHERE recipe_id = ?1", params![id]).await?;
 
     // Insert new recipe ingredients
     for ingredient_input in &input.ingredients {
         let unit_str = ingredient_input.unit.to_string();
 
-        let mut rows = conn.query(
+        let mut rows = tx.query(
             "SELECT name FROM ingredients WHERE id = ?1",
             params![ingredient_input.ingredient_id],
         ).await?;
         let ingredient_name: String = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO recipe_ingredients (recipe_id, ingredient_id, ingredient_name, quantity, unit)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![id, ingredient_input.ingredient_id, ingredient_name, ingredient_input.quantity, unit_str],
         ).await?;
     }
+
+    tx.commit().await?;
 
     let recipe = get_recipe(db, id).await?;
     row_to_recipe_with_ingredients(db, recipe).await
@@ -1494,13 +1502,17 @@ pub async fn shopping_list_mark_purchased(
     db: &Database,
     input: ShoppingListMarkPurchasedInput,
 ) -> LibsqlResult<ShoppingItem> {
-    // ponytail: a fresh short-lived connection per step (not one held across
-    // the stock_purchase_add call) — reusing one connection across another
-    // connection's writes hit SQLITE_BUSY_SNAPSHOT under WAL (see
-    // [[SQLite concurrency risk]]).
+    // The purchase and the "purchased" flag must land together: if the flag
+    // failed to stick after the stock went up, the user would click again and
+    // add the same stock twice. One connection, one transaction — which also
+    // retires the earlier two-connection dance (each write saw the other's
+    // committed state, so a shared connection hit SQLITE_BUSY_SNAPSHOT under
+    // WAL; inside a single transaction there is no second connection to race).
+    let conn = get_conn(db).await?;
+    let tx = conn.transaction().await?;
+
     let (ingredient_id, ingredient_unit_str) = {
-        let conn = get_conn(db).await?;
-        let mut rows = conn.query(
+        let mut rows = tx.query(
             "SELECT ingredient_id, ingredient_unit FROM shopping_list_items WHERE id = ?1 AND shopping_list_id = ?2",
             params![input.item_id, input.list_id],
         ).await?;
@@ -1511,7 +1523,7 @@ pub async fn shopping_list_mark_purchased(
     };
 
     if let Some(ingredient_id) = ingredient_id {
-        stock_purchase_add(db, StockPurchaseInput {
+        stock_purchase_add_tx(&tx, StockPurchaseInput {
             ingredient_id,
             quantity: input.quantity,
             unit: parse_unit_str(&ingredient_unit_str),
@@ -1527,19 +1539,23 @@ pub async fn shopping_list_mark_purchased(
     }
 
     let purchased_at = chrono::Utc::now().to_rfc3339();
-    let conn = get_conn(db).await?;
-    conn.execute(
+    tx.execute(
         "UPDATE shopping_list_items SET purchased = 1, purchased_at = ?1 WHERE id = ?2 AND shopping_list_id = ?3",
         params![purchased_at, input.item_id, input.list_id],
     ).await?;
 
-    let mut rows = conn.query(
-        "SELECT id, shopping_list_id, ingredient_id, ingredient_name, ingredient_unit, needed_quantity, stock_quantity, to_buy_quantity, category, estimated_cost, purchased, notes, purchased_at, created_at
-         FROM shopping_list_items WHERE id = ?1 AND shopping_list_id = ?2",
-        params![input.item_id, input.list_id],
-    ).await?;
-    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
-    row_to_shopping_item(&row)
+    let item = {
+        let mut rows = tx.query(
+            "SELECT id, shopping_list_id, ingredient_id, ingredient_name, ingredient_unit, needed_quantity, stock_quantity, to_buy_quantity, category, estimated_cost, purchased, notes, purchased_at, created_at
+             FROM shopping_list_items WHERE id = ?1 AND shopping_list_id = ?2",
+            params![input.item_id, input.list_id],
+        ).await?;
+        let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+        row_to_shopping_item(&row)?
+    };
+
+    tx.commit().await?;
+    Ok(item)
 }
 
 /// Remove item from shopping list
@@ -2428,23 +2444,27 @@ pub async fn update_event(db: &Database, id: i64, input: EventInput) -> LibsqlRe
 /// Delete event, and every recipe variant copied into it (manual cascade — see Migration 017).
 pub async fn delete_event(db: &Database, id: i64) -> LibsqlResult<()> {
     let conn = get_conn(db).await?;
-    conn.execute(
+    // Six dependent deletes: a failure halfway leaves an event whose recipes
+    // are gone but whose ingredients and stock are not (or the reverse).
+    let tx = conn.transaction().await?;
+    tx.execute(
         "DELETE FROM recipe_ingredients WHERE recipe_id IN (SELECT id FROM recipes WHERE event_id = ?1)",
         params![id],
     ).await?;
-    conn.execute("DELETE FROM recipes WHERE event_id = ?1", params![id]).await?;
+    tx.execute("DELETE FROM recipes WHERE event_id = ?1", params![id]).await?;
     // Fase 3.3: event-scoped ingredients — clear stock/purchases before the
     // ingredient rows themselves (stock_purchases.ingredient_id is RESTRICT).
-    conn.execute(
+    tx.execute(
         "DELETE FROM stock WHERE ingredient_id IN (SELECT id FROM ingredients WHERE event_id = ?1)",
         params![id],
     ).await?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM stock_purchases WHERE ingredient_id IN (SELECT id FROM ingredients WHERE event_id = ?1)",
         params![id],
     ).await?;
-    conn.execute("DELETE FROM ingredients WHERE event_id = ?1", params![id]).await?;
-    conn.execute("DELETE FROM events WHERE id = ?1", params![id]).await?;
+    tx.execute("DELETE FROM ingredients WHERE event_id = ?1", params![id]).await?;
+    tx.execute("DELETE FROM events WHERE id = ?1", params![id]).await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -4539,7 +4559,18 @@ fn row_to_stock_purchase(row: &Row) -> LibsqlResult<StockPurchase> {
 /// Add stock purchase (records purchase history, updates stock quantity only)
 pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> LibsqlResult<StockPurchase> {
     let conn = get_conn(db).await?;
-    
+    let tx = conn.transaction().await?;
+    let purchase = stock_purchase_add_tx(&tx, input).await?;
+    tx.commit().await?;
+    Ok(purchase)
+}
+
+/// The two writes of a purchase — the `stock_purchases` row and the `stock`
+/// balance it raises — on a caller-supplied connection, so callers that are
+/// already inside a transaction (`shopping_list_mark_purchased`) commit both
+/// together with their own writes instead of leaving a purchase without the
+/// stock it paid for.
+async fn stock_purchase_add_tx(conn: &Connection, input: StockPurchaseInput) -> LibsqlResult<StockPurchase> {
     let unit_str = input.unit.to_string();
     
     // Get ingredient name and unit for denormalization
@@ -4863,9 +4894,13 @@ pub async fn receipt_parse(_db: &Database, raw_text: String) -> LibsqlResult<Vec
 /// Confirm receipt import - creates stock purchases and ingredients
 pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> LibsqlResult<Vec<StockPurchase>> {
     let conn = get_conn(db).await?;
-    
+    // A receipt is all-or-nothing: applying some lines and then failing before
+    // the status flips leaves the import in a limbo the re-confirm guard below
+    // refuses to retry — stock raised, receipt still "parsed", no way forward.
+    let tx = conn.transaction().await?;
+
     // Get the import record
-    let mut rows = conn.query(
+    let mut rows = tx.query(
         "SELECT id, image_path, raw_text, parsed_json, status FROM receipt_imports WHERE id = ?1",
         params![input.import_id],
     ).await?;
@@ -4890,19 +4925,19 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
         // Find or create ingredient
         let ingredient_id = if let Some(matched_id) = item.matched_ingredient_id {
             // Verify ingredient exists
-            let mut rows = conn.query("SELECT id FROM ingredients WHERE id = ?1", params![matched_id]).await?;
+            let mut rows = tx.query("SELECT id FROM ingredients WHERE id = ?1", params![matched_id]).await?;
             if rows.next().await?.is_some() {
                 matched_id
             } else {
                 // Create new ingredient
-                create_or_find_ingredient(&conn, &item.ingredient_name, item.unit).await?
+                create_or_find_ingredient(&tx, &item.ingredient_name, item.unit).await?
             }
         } else {
-            create_or_find_ingredient(&conn, &item.ingredient_name, item.unit).await?
+            create_or_find_ingredient(&tx, &item.ingredient_name, item.unit).await?
         };
         
         // Get ingredient details
-        let mut rows = conn.query("SELECT name, unit FROM ingredients WHERE id = ?1", params![ingredient_id]).await?;
+        let mut rows = tx.query("SELECT name, unit FROM ingredients WHERE id = ?1", params![ingredient_id]).await?;
         let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
         let ingredient_name: String = row.get(0)?;
         let ingredient_unit_str: String = row.get(1)?;
@@ -4921,7 +4956,7 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
         
         // Insert stock purchase
         let purchase_date = chrono::Utc::now(); // Could parse from receipt but using now
-        conn.execute(
+        tx.execute(
             r#"
             INSERT INTO stock_purchases
             (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date, supplier_id, brand, notes)
@@ -4943,17 +4978,17 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
         ).await?;
         
         // Update stock quantity (in the ingredient's own unit, see conversion above)
-        conn.execute(
+        tx.execute(
             "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity, updated_at)
              VALUES (?1, ?2, ?3, ?4, 0, datetime('now'))
              ON CONFLICT(ingredient_id) DO UPDATE SET quantity = quantity + ?4, updated_at = datetime('now')",
             params![ingredient_id, ingredient_name, ingredient_unit_str, quantity_in_ingredient_unit],
         ).await?;
         
-        let purchase_id = conn.last_insert_rowid();
+        let purchase_id = tx.last_insert_rowid();
         
         // Return created purchase
-        let mut rows = conn.query(
+        let mut rows = tx.query(
             r#"
             SELECT sp.id, sp.ingredient_id, i.name, i.unit, sp.quantity, sp.unit, sp.price_per_unit, sp.total_price,
                    sp.is_discount, sp.discount_percent, sp.purchase_date, sp.supplier_id, s.name, sp.brand, sp.notes, sp.created_at
@@ -4969,11 +5004,12 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
     }
     
     // Mark import as confirmed
-    conn.execute(
+    tx.execute(
         "UPDATE receipt_imports SET status = 'confirmed' WHERE id = ?1",
         params![input.import_id],
     ).await?;
-    
+
+    tx.commit().await?;
     Ok(created_purchases)
 }
 
@@ -5757,5 +5793,161 @@ mod crud_base_tests {
 
         let stock = stock_list(&db).await.unwrap().into_iter().find(|s| s.ingredient_id == ingredient.id).unwrap();
         assert_eq!(stock.quantity, 1000.0, "1 kg confirmed against a gram-tracked ingredient must add 1000, not 1");
+    }
+}
+
+/// Executable evidence for the 2026-07-26 audit (see docs/AUDIT-2026-07.md).
+/// Every test in this module FAILS against the current code — each one asserts
+/// the behaviour the app should have, so it flips to green when the finding is
+/// fixed. Do not "fix" these by relaxing the assertions.
+#[cfg(test)]
+mod audit_2026_07 {
+    use super::*;
+
+    async fn test_db() -> Database {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("mise_audit_{unique}.db"));
+        let db = Builder::new_local(path.to_str().unwrap()).build().await.unwrap();
+        let _ = get_conn(&db).await.unwrap().query("PRAGMA journal_mode = WAL;", ()).await.unwrap();
+        run_migrations(&db).await.unwrap();
+        db
+    }
+
+    async fn flour(db: &Database, unit: Unit, price: f64) -> Ingredient {
+        create_ingredient(db, IngredientInput {
+            name: "Farinha".into(), unit, price_per_unit: price, category: None, event_id: None,
+        }).await.unwrap()
+    }
+
+    async fn cake(db: &Database, lines: Vec<RecipeIngredientInput>) -> RecipeWithIngredients {
+        create_recipe(db, RecipeInput {
+            name: "Bolo".into(), category: "Sobremesa".into(), portions: 4,
+            instructions: String::new(), ingredients: lines,
+            prep_time_minutes: None, cook_time_minutes: None,
+            tags: vec![], image_base64: None, event_id: None,
+        }).await.unwrap()
+    }
+
+    /// DOM-01: `export_data` only serialises ingredients and recipes. Stock,
+    /// purchases, suppliers, shopping lists, meal plans, events and settings
+    /// are absent, so "export" is not a backup of the user's data.
+    #[tokio::test]
+    #[ignore = "prova de bug: falha de propósito até o achado ser corrigido — correr com `cargo test -- --ignored`"]
+    async fn export_must_round_trip_the_stock_it_was_given() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Kilogram, 2.0).await;
+        upsert_stock(&db, StockInput {
+            ingredient_id: f.id, quantity: 7.0, min_quantity: 1.0,
+        }).await.unwrap();
+
+        let exported = export_data(&db).await.unwrap();
+        let restored = test_db().await;
+        import_data(&restored, exported).await.unwrap();
+
+        let stock = stock_list(&restored).await.unwrap();
+        assert_eq!(
+            stock.len(), 1,
+            "exporting and re-importing lost the user's stock entirely"
+        );
+    }
+
+    /// DOM-02: `receipt_confirm` converts the purchased quantity into the
+    /// ingredient's own unit; `stock_purchase_add` does not (it parses the
+    /// ingredient unit into `_ingredient_unit` and discards it).
+    #[tokio::test]
+    #[ignore = "prova de bug: falha de propósito até o achado ser corrigido — correr com `cargo test -- --ignored`"]
+    async fn stock_purchase_add_must_convert_into_the_ingredient_unit() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 1.0, unit: Unit::Kilogram,
+            price_per_unit: 2.0, total_price: 2.0,
+            is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        let stock = stock_list(&db).await.unwrap();
+        assert_eq!(
+            stock[0].quantity, 1000.0,
+            "1 kg bought into a gram-tracked stock must add 1000 g, not 1"
+        );
+    }
+
+    /// DOM-03: `weighted_avg_stock_price` sums `quantity` across purchases
+    /// without normalising units, so the same real price expressed in two
+    /// units produces a nonsense average that lands straight in recipe cost.
+    #[tokio::test]
+    #[ignore = "prova de bug: falha de propósito até o achado ser corrigido — correr com `cargo test -- --ignored`"]
+    async fn weighted_average_price_must_not_mix_units() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Kilogram, 2.0).await;
+
+        // The same flour at the same real price (2 €/kg), bought twice,
+        // recorded in two different units.
+        for (qty, unit, price) in [(1.0, Unit::Kilogram, 2.0), (1000.0, Unit::Gram, 0.002)] {
+            stock_purchase_add(&db, StockPurchaseInput {
+                ingredient_id: f.id, quantity: qty, unit,
+                price_per_unit: price, total_price: 2.0,
+                is_discount: false, discount_percent: 0.0,
+                purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            }).await.unwrap();
+        }
+
+        let recipe = cake(&db, vec![RecipeIngredientInput {
+            ingredient_id: f.id, quantity: 1.0, unit: Unit::Kilogram,
+        }]).await;
+
+        let cost = calculate_cost(&db, recipe.recipe.id).await.unwrap();
+        assert!(
+            (cost.total_cost - 2.0).abs() < 0.01,
+            "1 kg of flour bought at 2 €/kg twice costs {} €, not 2 €",
+            cost.total_cost
+        );
+    }
+
+    /// DOM-04: `update_recipe` deletes every `recipe_ingredients` row before
+    /// re-inserting them, with no transaction. Any failure inside the insert
+    /// loop leaves the recipe permanently stripped of ALL its ingredients.
+    #[tokio::test]
+    #[ignore = "prova de bug: falha de propósito até o achado ser corrigido — correr com `cargo test -- --ignored`"]
+    async fn a_failed_recipe_update_must_not_destroy_the_existing_ingredients() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Kilogram, 2.0).await;
+        let sugar = create_ingredient(&db, IngredientInput {
+            name: "Açúcar".into(), unit: Unit::Kilogram, price_per_unit: 1.0,
+            category: None, event_id: None,
+        }).await.unwrap();
+
+        let recipe = cake(&db, vec![
+            RecipeIngredientInput { ingredient_id: f.id, quantity: 1.0, unit: Unit::Kilogram },
+            RecipeIngredientInput { ingredient_id: sugar.id, quantity: 0.5, unit: Unit::Kilogram },
+        ]).await;
+
+        // The user renames the recipe, and one line carries an ingredient id
+        // that no longer resolves — a stale edit form, a client retrying with
+        // an old payload, or any IPC caller. `range(min = 1)` lets it through
+        // validation; the failure happens inside the re-insert loop, after
+        // every existing row has already been deleted.
+        let _ = update_recipe(&db, recipe.recipe.id, RecipeInput {
+            name: "Bolo de Domingo".into(), category: "Sobremesa".into(), portions: 4,
+            instructions: String::new(),
+            ingredients: vec![
+                RecipeIngredientInput { ingredient_id: f.id, quantity: 1.0, unit: Unit::Kilogram },
+                RecipeIngredientInput { ingredient_id: sugar.id + 9_999, quantity: 0.5, unit: Unit::Kilogram },
+            ],
+            prep_time_minutes: None, cook_time_minutes: None,
+            tags: vec![], image_base64: None, event_id: None,
+        }).await;
+
+        let all = recipes_list(&db).await.unwrap();
+        let after = all.iter().find(|r| r.recipe.id == recipe.recipe.id).unwrap();
+        assert_eq!(
+            after.ingredients.len(), 2,
+            "a failed recipe update left the recipe with {} of its 2 ingredients \
+             instead of rolling back",
+            after.ingredients.len()
+        );
     }
 }
