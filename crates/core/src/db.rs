@@ -456,6 +456,86 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
         (),
     ).await?;
 
+    run_data_migrations(&conn).await?;
+
+    Ok(())
+}
+
+/// Schema version of the *data* migrations — the ones that rewrite rows that
+/// are already on disk. Bump when adding a step to `run_data_migrations`.
+const SCHEMA_VERSION: i64 = 1;
+
+/// Everything above this point is idempotent by construction (`CREATE TABLE IF
+/// NOT EXISTS`, `add_column_if_missing`) and needs no bookkeeping. Anything
+/// that *transforms existing data* does: it has to run exactly once, and until
+/// now there was no way to know which version a database on disk was at.
+///
+/// `PRAGMA user_version` is SQLite's own slot for this — no extra table, no
+/// extra query on the hot path. Steps must still be safe on an empty database,
+/// because a fresh install starts at version 0 like everyone else.
+async fn run_data_migrations(conn: &Connection) -> LibsqlResult<()> {
+    let mut rows = conn.query("PRAGMA user_version", ()).await?;
+    let current: i64 = match rows.next().await? {
+        Some(row) => row.get(0)?,
+        None => 0,
+    };
+    if current >= SCHEMA_VERSION {
+        return Ok(());
+    }
+
+    if current < 1 {
+        normalize_stock_purchase_units(conn).await?;
+    }
+
+    // ponytail: PRAGMA takes no bind params; SCHEMA_VERSION is a const i64.
+    conn.execute(&format!("PRAGMA user_version = {SCHEMA_VERSION}"), ()).await?;
+    Ok(())
+}
+
+/// Data migration 1 — repair for DOM-01/DOM-02.
+///
+/// `stock_purchase_add` used to store the purchase in whatever unit was typed,
+/// while the stock balance and the weighted average both assume the
+/// ingredient's own unit. Rewrites the historical rows into that unit, keeping
+/// the line total exactly. Rows whose unit belongs to another dimension can't
+/// be converted and are left untouched — there is no right answer for "1 piece
+/// of flour" and inventing one would be the original bug again.
+///
+/// `stock.quantity` is deliberately *not* recomputed: purchases are only one
+/// of its inputs (manual corrections, receipts and seeds also write it), so a
+/// balance rebuilt from purchases alone would be a different lie.
+async fn normalize_stock_purchase_units(conn: &Connection) -> LibsqlResult<()> {
+    let mut rows = conn.query(
+        "SELECT sp.id, sp.quantity, sp.unit, sp.price_per_unit, i.unit
+         FROM stock_purchases sp
+         JOIN ingredients i ON i.id = sp.ingredient_id
+         WHERE sp.unit <> i.unit",
+        (),
+    ).await?;
+
+    let mut fixes: Vec<(i64, f64, f64, String)> = Vec::new();
+    while let Some(row) = rows.next().await? {
+        let id: i64 = row.get(0)?;
+        let quantity: f64 = row.get(1)?;
+        let from_str: String = row.get(2)?;
+        let price: f64 = row.get(3)?;
+        let to_str: String = row.get(4)?;
+        let (Ok(from), Ok(to)) = (from_str.parse::<Unit>(), to_str.parse::<Unit>()) else {
+            continue;
+        };
+        let Some(converted) = from.convert_to(to, quantity) else { continue };
+        if converted == 0.0 {
+            continue;
+        }
+        fixes.push((id, converted, quantity * price / converted, to_str));
+    }
+
+    for (id, quantity, price, unit) in fixes {
+        conn.execute(
+            "UPDATE stock_purchases SET quantity = ?1, price_per_unit = ?2, unit = ?3 WHERE id = ?4",
+            params![quantity, price, unit, id],
+        ).await?;
+    }
     Ok(())
 }
 
@@ -4557,6 +4637,34 @@ fn row_to_stock_purchase(row: &Row) -> LibsqlResult<StockPurchase> {
 }
 
 /// Add stock purchase (records purchase history, updates stock quantity only)
+/// Stock — and every `stock_purchases` row — is kept in the ingredient's own
+/// unit. Buying "1 kg" for an ingredient tracked in grams has to become 1000 g
+/// at 0.002 €/g before it is written: otherwise the balance is off by 1000×
+/// (DOM-01) and `weighted_avg_stock_price` silently sums kilos with grams,
+/// which is what made a recipe cost €0.004 instead of €2.00 (DOM-02).
+///
+/// The line total is preserved exactly — quantity × price is invariant.
+/// Units from a different dimension (kg into a piece-tracked ingredient) are a
+/// real disagreement between what was typed and how the ingredient is
+/// tracked, so they are rejected instead of guessed at.
+fn to_ingredient_unit(
+    from: Unit,
+    to: Unit,
+    quantity: f64,
+    price_per_unit: f64,
+    ingredient_name: &str,
+) -> LibsqlResult<(f64, f64)> {
+    let converted = from.convert_to(to, quantity).ok_or_else(|| {
+        libsql::Error::Misuse(format!(
+            "unit mismatch: '{ingredient_name}' is tracked in {to} and cannot be bought in {from}"
+        ))
+    })?;
+    if converted == 0.0 {
+        return Ok((converted, price_per_unit));
+    }
+    Ok((converted, quantity * price_per_unit / converted))
+}
+
 pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> LibsqlResult<StockPurchase> {
     let conn = get_conn(db).await?;
     let tx = conn.transaction().await?;
@@ -4571,8 +4679,6 @@ pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> Lib
 /// together with their own writes instead of leaving a purchase without the
 /// stock it paid for.
 async fn stock_purchase_add_tx(conn: &Connection, input: StockPurchaseInput) -> LibsqlResult<StockPurchase> {
-    let unit_str = input.unit.to_string();
-    
     // Get ingredient name and unit for denormalization
     let mut rows = conn.query(
         "SELECT name, unit FROM ingredients WHERE id = ?1",
@@ -4581,8 +4687,13 @@ async fn stock_purchase_add_tx(conn: &Connection, input: StockPurchaseInput) -> 
     let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
     let ingredient_name: String = row.get(0)?;
     let ingredient_unit_str: String = row.get(1)?;
-    let _ingredient_unit = ingredient_unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
-    
+    let ingredient_unit = ingredient_unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
+
+    let (quantity, price_per_unit) = to_ingredient_unit(
+        input.unit, ingredient_unit, input.quantity, input.price_per_unit, &ingredient_name,
+    )?;
+    let unit_str = ingredient_unit_str.clone();
+
     // Get supplier name if provided
     let _supplier_name = if let Some(supplier_id) = input.supplier_id {
         let mut rows = conn.query("SELECT name FROM suppliers WHERE id = ?1", params![supplier_id]).await?;
@@ -4600,9 +4711,9 @@ async fn stock_purchase_add_tx(conn: &Connection, input: StockPurchaseInput) -> 
         "#,
         params![
             input.ingredient_id,
-            input.quantity,
+            quantity,
             unit_str,
-            input.price_per_unit,
+            price_per_unit,
             input.total_price,
             input.is_discount as i32,
             input.discount_percent,
@@ -4612,13 +4723,13 @@ async fn stock_purchase_add_tx(conn: &Connection, input: StockPurchaseInput) -> 
             input.notes,
         ],
     ).await?;
-    
+
     // Update stock quantity (add purchased quantity)
     conn.execute(
         "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity, updated_at)
          VALUES (?1, ?2, ?3, ?4, 0, datetime('now'))
          ON CONFLICT(ingredient_id) DO UPDATE SET quantity = quantity + ?4, updated_at = datetime('now')",
-        params![input.ingredient_id, ingredient_name, ingredient_unit_str, input.quantity],
+        params![input.ingredient_id, ingredient_name, ingredient_unit_str, quantity],
     ).await?;
     
     let id = conn.last_insert_rowid();
@@ -4943,17 +5054,14 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
         let ingredient_unit_str: String = row.get(1)?;
         let ingredient_unit = ingredient_unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
 
-        // Convert unit string for purchase
-        let unit_str = item.unit.to_string();
+        // Stock and purchase rows are both kept in the ingredient's own unit
+        // (see to_ingredient_unit). The stock side was already converted here;
+        // the purchase row was not, which is what fed DOM-02 from this path.
+        let (quantity_in_ingredient_unit, price_in_ingredient_unit) = to_ingredient_unit(
+            item.unit, ingredient_unit, item.quantity, item.price_per_unit, &ingredient_name,
+        )?;
+        let unit_str = ingredient_unit_str.clone();
 
-        // Stock is always tracked in the ingredient's own unit; a receipt
-        // line quantified in a different (but compatible) unit must be
-        // converted before being added, or "1 kg" would add "1" to a
-        // stock tracked in grams instead of "1000".
-        let quantity_in_ingredient_unit = item.unit
-            .convert_to(ingredient_unit, item.quantity)
-            .unwrap_or(item.quantity);
-        
         // Insert stock purchase
         let purchase_date = chrono::Utc::now(); // Could parse from receipt but using now
         tx.execute(
@@ -4964,9 +5072,9 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
             "#,
             params![
                 ingredient_id,
-                item.quantity,
+                quantity_in_ingredient_unit,
                 unit_str,
-                item.price_per_unit,
+                price_in_ingredient_unit,
                 item.total_price,
                 item.is_discount as i32,
                 item.discount_percent,
