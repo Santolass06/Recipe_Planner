@@ -1266,7 +1266,7 @@ Estado por achado, não a gravidade original da auditoria às cegas:
 
 | ID | Título | Estado |
 |----|--------|--------|
-| SEC-001 | Keystore de release trackada no git | ✅ Corrigido 2026-07-20 (`830e1f2`) — untracked + `.gitignore`; **rotação da chave por decisão do utilizador, não feita aqui** |
+| SEC-001 | Keystore de release trackada no git | ✅ Fechado 2026-07-28 — chave rodada pelo utilizador: keystore novo em PKCS12 (o JKS antigo tinha a derivação de chave fraca), ficheiro antigo apagado, os três Secrets substituídos. O blob comprometido fica no histórico público e é irrelevante: nada foi assinado com ele |
 | DOM-002 | `receipt_confirm` sem conversão de unidade | ✅ Corrigido 2026-07-20 (`a908966`) + teste de regressão |
 | QA-001 | "quase zero testes automatizados" | ⚠️ **Achado errado** — 109 testes já passam (`cargo test --workspace`); a auditoria contou mal o agregado |
 | DOM-001 / BLD-001 | Path da BD aninha `mise` extra | ⚠️ **Parcialmente desatualizado** — o bug de double-nesting real (`mise/mise/mise.db`) já foi corrigido na Fase 4 (2026-07-10, `resolve_data_dir`); resta um nesting residual cosmético (`AppData` já namespaced pelo identifier + mais um `"mise"`). Baixo valor corrigir agora — implicaria mais uma migração manual nesta máquina de dev por um ganho pequeno. Fica registado, sem ação agendada. |
