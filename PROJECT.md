@@ -1378,12 +1378,12 @@ Estado por achado, não a gravidade original da auditoria às cegas:
 | DOM-002 | `receipt_confirm` sem conversão de unidade | ✅ Corrigido 2026-07-20 (`a908966`) + teste de regressão |
 | QA-001 | "quase zero testes automatizados" | ⚠️ **Achado errado** — 109 testes já passam (`cargo test --workspace`); a auditoria contou mal o agregado |
 | DOM-001 / BLD-001 | Path da BD aninha `mise` extra | ⚠️ **Parcialmente desatualizado** — o bug de double-nesting real (`mise/mise/mise.db`) já foi corrigido na Fase 4 (2026-07-10, `resolve_data_dir`); resta um nesting residual cosmético (`AppData` já namespaced pelo identifier + mais um `"mise"`). Baixo valor corrigir agora — implicaria mais uma migração manual nesta máquina de dev por um ganho pequeno. Fica registado, sem ação agendada. |
-| DOM-003 / FUN-002 | Export/import só cobre ingredientes+receitas | ✅ Corrigido 2026-07-27 (`36b2c3f`) — decidido pelo backup completo: `backup_export`/`backup_restore` cobrem 18 tabelas + imagens (DOM-04 da auditoria seguinte) |
+| DOM-003 / FUN-002 | Export/import só cobre ingredientes+receitas | ✅ Corrigido 2026-07-27 (`604afda`) — decidido pelo backup completo: `backup_export`/`backup_restore` cobrem 18 tabelas + imagens (DOM-04 da auditoria seguinte) |
 | FUN-001 / BLD-002 | Câmara do Scanner não verificada em máquina limpa | Já é o bug pendente da Fase 0 — preso ao teste em máquina limpa, agora no fim da Fase de Polishing. |
 | FUN-003 | OCR só validado numa cadeia (Pingo Doce) | Já é o item 3-bis (PRIORIDADE ALTA) — aberto, à espera de mais recibos. |
 | QA-002 | Sem CI (`cargo test`/`npm run build` em PR) | ✅ Corrigido 2026-07-20 (`d5e9b60`) — `.github/workflows/ci.yml` |
 | SEC-002 | Import de receita por URL sem allowlist/timeout/limite | ✅ Corrigido 2026-07-20 (`83f2696`) — allowlist http(s), timeout 10s, limite 5MB |
-| DOM-004 | `PRAGMA foreign_keys` nunca ligado | ⚠️ **Achado errado** — o libsql aplica FKs por omissão, verificado com teste na auditoria de 2026-07-26 (ARC-01). O comentário do código que dizia o contrário estava errado e foi corrigido (`4719696`). |
+| DOM-004 | `PRAGMA foreign_keys` nunca ligado | ⚠️ **Achado errado** — o libsql aplica FKs por omissão, verificado com teste na auditoria de 2026-07-26 (ARC-01). O comentário do código que dizia o contrário estava errado e foi corrigido (`ed1aba0`). |
 | DOM-005 | Sem `schema_version`/`user_version` | ✅ Corrigido 2026-07-27 (`8aced69`) — `PRAGMA user_version` + `run_data_migrations` (MIG-01) |
 | DOM-008 | `receipt_confirm` não transacional | ✅ Corrigido 2026-07-27 (`65619a6`) — junto com as outras quatro escritas multi-tabela (TRX-01) |
 | DOM-009 | Sem schema para waste/histórico de stock | ⏳ Aberto, e **subestimado aqui**: não é "feature nova se houver pedido", é metade do domínio em falta. Passou a [[#3.6 — Movimentos de stock]], o próximo trabalho estruturante. |
@@ -1392,10 +1392,10 @@ Estado por achado, não a gravidade original da auditoria às cegas:
 | ARC-004 | Conversão de unidades duplicada FE/BE | ⏳ Aberto, baixo risco. |
 | SEC-003 | `validator` derives nunca chamados (`.validate()`) | ✅ Corrigido 2026-07-20 (`19beefc`) — `input.validate()` ligado no funil único `AppDb`, todos os comandos passam por lá; teste de regressão |
 | SEC-004 | Upload de imagem base64 sem limite de tamanho | ✅ Corrigido 2026-07-20 (`6c12c8e`) — limite de 15MB |
-| SEC-007 | Plugins `dialog`/`fs`/`shell` sem capability correspondente | ✅ Corrigido 2026-07-27 (`eac7965`) — os três plugins tinham zero consumidores; apagados em vez de configurados (BLD-01) |
-| SEC-010 | Superfície de rede por documentar | ✅ Corrigido 2026-07-27 (`eac7965`) — o proxy Unsplash/Pexels era a superfície não documentada e também não tinha consumidores; apagado (SEC-02). Resta o import por URL, agora com guarda de rede local (2026-07-28) |
+| SEC-007 | Plugins `dialog`/`fs`/`shell` sem capability correspondente | ✅ Corrigido 2026-07-27 (`8bbc975`) — os três plugins tinham zero consumidores; apagados em vez de configurados (BLD-01) |
+| SEC-010 | Superfície de rede por documentar | ✅ Corrigido 2026-07-27 (`8bbc975`) — o proxy Unsplash/Pexels era a superfície não documentada e também não tinha consumidores; apagado (SEC-02). Resta o import por URL, agora com guarda de rede local (2026-07-28) |
 | UX-002/003/004 | Empty/error inconsistente; fluxos densos sem undo; a11y | Fica para Fase de Polishing / Multi-plataforma, como o resto de UX. |
-| FUN-004 | Rota `/sugestor` morta (stub) | ✅ Corrigido 2026-07-20 (`2e3868a`) — rota e `PlaceholderPage.tsx` removidos. O backend `suggester_suggest` foi apagado a 2026-07-27 (`eac7965`): era um stub sem base de decisão possível enquanto não houver consumo registado. Volta com [[#3.6 — Movimentos de stock]]. |
+| FUN-004 | Rota `/sugestor` morta (stub) | ✅ Corrigido 2026-07-20 (`2e3868a`) — rota e `PlaceholderPage.tsx` removidos. O backend `suggester_suggest` foi apagado a 2026-07-27 (`8bbc975`): era um stub sem base de decisão possível enquanto não houver consumo registado. Volta com [[#3.6 — Movimentos de stock]]. |
 | QA-004 / QA-006 | Seams por testar; validação ainda manual | ⏳ Aberto, acompanha QA-001/002. |
 | BLD-003/004/005/006 | README sobre-vende plataformas; bundle OCR 37MB; dev shell Nix-specific; mobile não iniciado | Já são decisões conhecidas e aceites (ver Fase 4/Multi-plataforma), não achados novos. |
 | Cluster P3 | Notas de polish e positivas (ARC-003/005/006/007, DOM-006/007/010, FUN-005/006/007, UX-001/005/006/007, SEC-005/006/008/009, QA-003, BLD-007) | Sem ação — ver `docs/AUDIT.md` para detalhe, nada aqui muda o roadmap. |
@@ -1435,11 +1435,11 @@ achado:
 | MIG-01 | Sem slot de versão de schema | ✅ `8aced69` — `PRAGMA user_version` + `run_data_migrations`, que normaliza as compras gravadas antes do fix |
 | MIG-02 | Dois caminhos de dados possíveis | ✅ `6fd0e18` |
 | DOM-06 | Relatório de custos somava estimativas de listas | ✅ `68400fb` — `total_spent`/`by_category` vêm de `stock_purchases`; o scanner de recibos passa a contar |
-| DOM-04 | «Exportar dados» não era backup | ✅ `36b2c3f` — `backup_export`/`backup_restore`, 18 tabelas + imagens, restauro com confirmação |
+| DOM-04 | «Exportar dados» não era backup | ✅ `604afda` — `backup_export`/`backup_restore`, 18 tabelas + imagens, restauro com confirmação |
 | QA-01 / QA-02 / BLD-02 | Métrica de testes enganadora; sem `tsc` no CI; `nix-shell` por documentar | ✅ `ac80611` — os 4 testes de prova passam a regressão, nenhum `#[ignore]` |
-| BLD-01 / SEC-02 | Plugins e proxy de imagens sem consumidores | ✅ `eac7965` — apagados, não configurados |
-| FUN-01 / ARC-01 / `minWidth` / `unwrap` do parser | Achados pequenos | ✅ `4719696` |
-| UX-01 / UX-02 | A causa real do erro desaparecia; tabs vazias sem explicação | ✅ `2946812`, `797e09d` |
+| BLD-01 / SEC-02 | Plugins e proxy de imagens sem consumidores | ✅ `8bbc975` — apagados, não configurados |
+| FUN-01 / ARC-01 / `minWidth` / `unwrap` do parser | Achados pequenos | ✅ `ed1aba0` |
+| UX-01 / UX-02 | A causa real do erro desaparecia; tabs vazias sem explicação | ✅ `800e37d`, `05aa941` |
 | SEC-01 | Keystore recuperável de repositório público | ✅ Fechado 2026-07-28 — ver SEC-001 na tabela acima |
 | SEC-002 (residual) | Allowlist de esquema não cobria a rede local | ✅ 2026-07-28 — `assert_safe_url` rejeita loopback/privado/link-local, e os redirects passam a ser seguidos à mão para que **cada hop** seja verificado |
 
