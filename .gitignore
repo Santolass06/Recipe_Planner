@@ -10,3 +10,10 @@ src-tauri/gen
 .playwright-mcp
 *.keystore
 *.jks
+
+# Artefactos de sessões de agentes antigas e de ferramentas locais — notas de
+# trabalho, não código do projeto (auditoria 2026-07-26, 2.6).
+.agents/
+.junie/
+opencode.json
+.release_build.log

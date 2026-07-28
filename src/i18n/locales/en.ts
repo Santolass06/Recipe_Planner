@@ -1,4 +1,7 @@
 export const en = {
+  errors: {
+    inUse: "This item is used somewhere else (a recipe, stock or a purchase), so it cannot be deleted.",
+  },
   app: {
     title: "mise",
     subtitle: "pro-kitchen",
@@ -106,8 +109,12 @@ export const en = {
     authToken: "Auth Token",
     syncInDevelopment: "Under development:",
     syncPlaceholder: "Sync is under development. Credentials will be saved locally for future use.",
-    exportDesc: "Download a JSON file with all your ingredients, recipes and settings.",
-    importDesc: "Load a previously exported JSON file. Existing data will not be deleted.",
+    exportDesc: "Download a full backup: ingredients, recipes, stock, purchases, suppliers, events, lists, plans, settings and images.",
+    importDesc: "Load a previously exported file. A backup replaces everything (after confirming); a recipes-and-ingredients file merges into what you have.",
+    restoreTitle: "Restore backup",
+    restoreDesc: "This replaces all current data with the backup's. Whatever is in the app now is lost.",
+    restoreBtn: "Replace everything",
+    restoreSuccess: "Backup restored ({rows} records).",
     reportProblem: "Report a problem",
     reportProblemDesc: "Describe what happened and, if you want, attach an image. Stored only on this machine — never sent automatically.",
     reportProblemBtn: "Report a problem",
@@ -881,6 +888,7 @@ export const en = {
     purchaseError: "Error recording purchase",
   },
   reports: {
+    needsHistory: "There is no history to show here yet. The app records stock coming in but not yet what goes out — once it records what is used, produced, sold and wasted, this tab will have data.",
     title: "Reports",
     subtitle: "Analysis of costs, waste, stock, meals and prices",
     loading: "Loading report...",
@@ -903,7 +911,7 @@ export const en = {
       spendByRecipe: "Spending by Recipe",
       lastDaysTopRecipes: "last {days} days · top {count} recipes",
       spendBySupplier: "Spending by Supplier",
-      differentSourceNote: "Different source: supplier invoice data, not recipe consumption. This total does not reconcile with the reports above.",
+      estimateSourceNote: "Estimate: figures calculated when the shopping list was drawn up. They do not reconcile with the total spent above, which uses the prices actually paid.",
       topRecipesTable: "Top Recipes by Cost",
       colRecipe: "Recipe",
       colTotalCost: "Total Cost",

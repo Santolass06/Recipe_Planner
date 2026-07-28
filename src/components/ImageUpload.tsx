@@ -4,6 +4,7 @@ import { useI18n } from "../i18n";
 import type { Image } from "../../crates/core/bindings/Image";
 import type { ImageUploadInput } from "../../crates/core/bindings/ImageUploadInput";
 import type { ImageEntityType as EntityType } from "../../crates/core/bindings/ImageEntityType";
+import { errKey } from "../lib/errors";
 
 interface ImageUploadProps {
   entityType: EntityType;
@@ -96,7 +97,7 @@ export default function ImageUpload({
         onImageChange?.(uploaded);
         showToast(t("imageUpload.uploaded"), "ok");
       } catch (e) {
-        showToast(t("imageUpload.uploadError"), "err");
+        showToast(t(errKey(e, "imageUpload.uploadError")), "err");
       } finally {
         setUploading(false);
       }
@@ -112,7 +113,7 @@ export default function ImageUpload({
       onImageChange?.(null);
       showToast(t("imageUpload.removed"), "ok");
     } catch (e) {
-      showToast(t("imageUpload.removeError"), "err");
+      showToast(t(errKey(e, "imageUpload.removeError")), "err");
     }
   };
 

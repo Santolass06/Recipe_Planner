@@ -4,6 +4,7 @@ import { invoke, openExternal } from "../lib/devInvoke";
 import { useI18n } from "../i18n";
 import { applyTheme } from "../theme";
 import type { ProblemReportInput } from "../../crates/core/bindings/ProblemReportInput";
+import { errKey } from "../lib/errors";
 
 type SettingsMap = Record<string, string>;
 
@@ -176,6 +177,7 @@ export default function SettingsPage() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showDeleteDataConfirm, setShowDeleteDataConfirm] = useState(false);
+  const [pendingRestore, setPendingRestore] = useState<string | null>(null);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportDescription, setReportDescription] = useState("");
   const [reportImage, setReportImage] = useState<{ base64: string; name: string } | null>(null);
@@ -188,7 +190,7 @@ export default function SettingsPage() {
       const data = await invoke<SettingsMap>("settings_get_all");
       setSettings(data);
     } catch (e) {
-      showToast(t("settings.loadError"), "err");
+      showToast(t(errKey(e, "settings.loadError")), "err");
     } finally {
       setLoading(false);
     }
@@ -248,7 +250,7 @@ export default function SettingsPage() {
 
       showToast(t("settings.saved"), "ok");
     } catch (e) {
-      showToast(t("settings.saveError"), "err");
+      showToast(t(errKey(e, "settings.saveError")), "err");
     } finally {
       setSaving(false);
     }
@@ -256,8 +258,11 @@ export default function SettingsPage() {
 
   const handleExport = async () => {
     try {
-      const data = await invoke<any>("export_data");
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      // backup_export, not export_data: the file is called a backup and has to
+      // hold everything (stock, purchases, suppliers, events, lists, plans,
+      // settings, images), not just ingredients and recipes.
+      const data = await invoke<string>("backup_export");
+      const blob = new Blob([data], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -266,7 +271,7 @@ export default function SettingsPage() {
       URL.revokeObjectURL(url);
       showToast(t("settings.exportSuccess"), "ok");
     } catch (e) {
-      showToast(t("settings.exportError"), "err");
+      showToast(t(errKey(e, "settings.exportError")), "err");
     }
   };
 
@@ -275,6 +280,15 @@ export default function SettingsPage() {
     try {
       const text = await importFile.text();
       const data = JSON.parse(text);
+
+      // A backup replaces everything; a recipe/ingredient export merges into
+      // what's there. Both are .json, so the file itself says which it is.
+      // Replacing everything is destructive, so it goes through a confirm.
+      if (data.backup_version && data.tables) {
+        setPendingRestore(text);
+        return;
+      }
+
       if (!data.version || !data.ingredients || !data.recipes) {
         showToast(t("settings.invalidFile"), "err");
         return;
@@ -286,7 +300,23 @@ export default function SettingsPage() {
       }
       setImportFile(null);
     } catch (e) {
-      showToast(t("settings.importError"), "err");
+      showToast(t(errKey(e, "settings.importError")), "err");
+    }
+  };
+
+  const handleRestore = async () => {
+    if (!pendingRestore) return;
+    setSaving(true);
+    try {
+      const result = await invoke<any>("backup_restore", { json: pendingRestore });
+      showToast(t("settings.restoreSuccess", { rows: result.rows_restored }), "ok");
+      setImportFile(null);
+      setPendingRestore(null);
+    } catch (e) {
+      console.error("backup_restore", e);
+      showToast(t(errKey(e, "settings.importError")), "err");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -297,7 +327,7 @@ export default function SettingsPage() {
       showToast(t("settings.resetSuccess"), "ok");
       setShowResetConfirm(false);
     } catch (e) {
-      showToast(t("settings.resetError"), "err");
+      showToast(t(errKey(e, "settings.resetError")), "err");
     }
   };
 
@@ -309,7 +339,7 @@ export default function SettingsPage() {
       showToast(t("settings.deleteAllDataSuccess"), "ok");
       setShowDeleteDataConfirm(false);
     } catch (e) {
-      showToast(t("settings.deleteAllDataError"), "err");
+      showToast(t(errKey(e, "settings.deleteAllDataError")), "err");
     } finally {
       setSaving(false);
     }
@@ -321,7 +351,7 @@ export default function SettingsPage() {
       await invoke("seed_demo_data");
       showToast(t("settings.demoDataSuccess"), "ok");
     } catch (e) {
-      showToast(t("settings.demoDataError"), "err");
+      showToast(t(errKey(e, "settings.demoDataError")), "err");
     } finally {
       setSaving(false);
     }
@@ -356,7 +386,7 @@ export default function SettingsPage() {
       setReportDescription("");
       setReportImage(null);
     } catch (e) {
-      showToast(t("settings.reportProblemError"), "err");
+      showToast(t(errKey(e, "settings.reportProblemError")), "err");
     } finally {
       setReportSubmitting(false);
     }
@@ -368,7 +398,7 @@ export default function SettingsPage() {
       const path = await invoke<string>("export_usage_data");
       showToast(t("settings.usageExportSuccess", { path: path ?? "" }), "ok");
     } catch (e) {
-      showToast(t("settings.usageExportError"), "err");
+      showToast(t(errKey(e, "settings.usageExportError")), "err");
     } finally {
       setExporting(false);
     }
@@ -772,6 +802,31 @@ export default function SettingsPage() {
               <button className="btn btn-secondary" onClick={() => setShowDeleteDataConfirm(false)}>{t("common.cancel")}</button>
               <button className="btn btn-danger" onClick={handleDeleteAllData} disabled={saving}>
                 {t("settings.deleteAllDataBtn")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Restore Backup Confirmation Modal */}
+      {pendingRestore && (
+        <div className="modal-backdrop" onClick={() => setPendingRestore(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">{t("settings.restoreTitle")}</h2>
+              <button className="modal-close" onClick={() => setPendingRestore(null)} aria-label={t("common.close")}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            <div className="modal-body">
+              <p style={{ color: "var(--text-2)", lineHeight: 1.6 }}>
+                {t("settings.restoreDesc")}
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setPendingRestore(null)}>{t("common.cancel")}</button>
+              <button className="btn btn-danger" onClick={handleRestore} disabled={saving}>
+                {t("settings.restoreBtn")}
               </button>
             </div>
           </div>

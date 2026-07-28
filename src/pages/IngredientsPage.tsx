@@ -7,6 +7,7 @@ import ImageUpload from "../components/ImageUpload";
 import { useI18n } from "../i18n";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import { UNIT_LABELS_FULL as UNIT_LABELS, UNIT_LABELS_SHORT as UNIT_SHORT } from "../lib/units";
+import { errKey } from "../lib/errors";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -35,7 +36,7 @@ export default function IngredientsPage() {
       const data = await invoke<Ingredient[]>("ingredients_list");
       setIngredients(data);
     } catch (e) {
-      showToast(t("ingredients.loadError"), "err");
+      showToast(t(errKey(e, "ingredients.loadError")), "err");
     }
   }, [showToast, t]);
 
@@ -82,7 +83,7 @@ export default function IngredientsPage() {
       closeModal();
       await load();
     } catch (e) {
-      showToast(t("ingredients.saveError"), "err");
+      showToast(t(errKey(e, "ingredients.saveError")), "err");
     } finally {
       setLoading(false);
     }
@@ -95,7 +96,7 @@ export default function IngredientsPage() {
       showToast(t("ingredients.deleted"), "ok");
       await load();
     } catch (e) {
-      showToast(t("ingredients.deleteError"), "err");
+      showToast(t(errKey(e, "ingredients.deleteError")), "err");
     }
   }
 

@@ -1,4 +1,7 @@
 export const pt = {
+  errors: {
+    inUse: "Este item está a ser usado noutro sítio (receita, stock ou compra) e por isso não pode ser eliminado.",
+  },
   app: {
     title: "mise",
     subtitle: "pro-kitchen",
@@ -106,8 +109,12 @@ export const pt = {
     authToken: "Token de autenticação",
     syncInDevelopment: "Em desenvolvimento:",
     syncPlaceholder: "A sincronização está em desenvolvimento. As credenciais serão guardadas localmente para uso futuro.",
-    exportDesc: "Baixa um ficheiro JSON com todos os teus ingredientes, receitas e definições.",
-    importDesc: "Carrega um ficheiro JSON exportado anteriormente. Os dados existentes não serão apagados.",
+    exportDesc: "Baixa uma cópia de segurança completa: ingredientes, receitas, stock, compras, fornecedores, eventos, listas, planos, definições e imagens.",
+    importDesc: "Carrega um ficheiro exportado anteriormente. Uma cópia de segurança substitui tudo (com confirmação); um ficheiro só de receitas e ingredientes junta-se ao que já tens.",
+    restoreTitle: "Restaurar cópia de segurança",
+    restoreDesc: "Isto substitui todos os dados atuais pelos da cópia de segurança. O que está agora na app perde-se.",
+    restoreBtn: "Substituir tudo",
+    restoreSuccess: "Cópia de segurança restaurada ({rows} registos).",
     reportProblem: "Reportar problema",
     reportProblemDesc: "Descreve o que aconteceu e, se quiseres, anexa uma imagem. Fica guardado só nesta máquina — nunca é enviado automaticamente.",
     reportProblemBtn: "Reportar um problema",
@@ -881,6 +888,7 @@ export const pt = {
     purchaseError: "Erro ao registar compra",
   },
   reports: {
+    needsHistory: "Ainda não há histórico para mostrar aqui. A app regista as entradas de stock mas ainda não regista o consumo — quando passar a registar o que é usado, produzido, vendido e desperdiçado, este separador passa a ter dados.",
     title: "Relatórios",
     subtitle: "Análise de custos, desperdício, stock, refeições e preços",
     loading: "A carregar relatório...",
@@ -903,7 +911,7 @@ export const pt = {
       spendByRecipe: "Gastos por receita",
       lastDaysTopRecipes: "últimos {days} dias · top {count} receitas",
       spendBySupplier: "Gastos por fornecedor",
-      differentSourceNote: "Fonte diferente: dados de faturas de fornecedores, não de consumo de receitas. Este total não reconcilia com os relatórios acima.",
+      estimateSourceNote: "Estimativa: valores calculados quando a lista de compras foi criada. Não reconciliam com o total gasto acima, que usa os preços realmente pagos.",
       topRecipesTable: "Top Receitas por Custo",
       colRecipe: "Receita",
       colTotalCost: "Custo Total",

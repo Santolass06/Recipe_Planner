@@ -7,6 +7,7 @@ import { useI18n } from "../i18n";
 import type { DayOfWeek } from "../../crates/core/bindings/DayOfWeek";
 import type { MealType } from "../../crates/core/bindings/MealType";
 import type { MealPlanEntryWithRecipe } from "../../crates/core/bindings/MealPlanEntryWithRecipe";
+import { errKey } from "../lib/errors";
 
 type ViewMode = "month" | "week";
 type T = (key: string, params?: Record<string, string | number>) => string;
@@ -51,7 +52,7 @@ export default function CalendarPage() {
       month: currentDate.getMonth() + 1,
     })
       .then(data => { setEntries(data ?? []); })
-      .catch(() => showToast(t("calendar.error"), "err"))
+      .catch(e => showToast(t(errKey(e, "calendar.error")), "err"))
       .finally(() => setLoading(false));
   }
 

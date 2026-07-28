@@ -30,4 +30,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      # Separate from the build so a type error is reported as a type error,
+      # and so it still runs if the build step is ever changed or split.
+      - run: npx tsc --noEmit
       - run: npm run build

@@ -7,9 +7,6 @@ version.workspace = true
 mise-core = { path = "../core" }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-fs = "2"
-tauri-plugin-shell = "2"
 libsql = { workspace = true }
 chrono = { workspace = true }
 validator = { workspace = true }

@@ -410,26 +410,7 @@ pub struct ShoppingListWithItems {
     // items is already part of ShoppingList
 }
 
-/// Suggested recipe (from stock)
-#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
-#[ts(export, export_to = "bindings/")]
-pub struct SuggestedRecipe {
-    pub recipe: Recipe,
-    pub missing_ingredients: Vec<MissingIngredient>,
-    pub can_make: bool,
-    pub match_percentage: u8,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
-#[ts(export, export_to = "bindings/")]
-pub struct MissingIngredient {
-    #[ts(type = "number")]
-    pub ingredient_id: i64,
-    pub ingredient_name: String,
-    pub needed: f64,
-    pub available: f64,
-    pub unit: Unit,
-}
 
 /// Cost breakdown
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
@@ -527,6 +508,16 @@ pub struct ImportRecipeIngredient {
     pub ingredient_name: String,
     pub quantity: f64,
     pub unit: Unit,
+}
+
+/// What a backup restore put back. Counts only — the backup itself is a JSON
+/// document handled as text, not a typed structure (see db::backup_export).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct BackupRestoreResult {
+    pub tables_restored: u32,
+    pub rows_restored: u32,
+    pub images_restored: u32,
 }
 
 /// Import result
@@ -1163,19 +1154,6 @@ pub struct ProblemReportInput {
     pub image_base64: Option<String>,
 }
 
-/// Proxy search result from Unsplash/Pexels
-#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
-#[ts(export, export_to = "bindings/")]
-pub struct ProxyImageResult {
-    pub id: String,
-    pub url: String,
-    pub thumb_url: String,
-    pub width: u32,
-    pub height: u32,
-    pub alt: Option<String>,
-    pub photographer: Option<String>,
-    pub source: String, // "unsplash" | "pexels"
-}
 
 /// =====================================================================
 /// STOCK PURCHASES

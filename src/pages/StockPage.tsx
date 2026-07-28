@@ -12,7 +12,8 @@ import type { StockItem } from "../../crates/core/bindings/StockItem";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import type { Supplier } from "../../crates/core/bindings/Supplier";
 import type { StockPurchase } from "../../crates/core/bindings/StockPurchase";
-import { UNIT_LABELS_FULL as UNIT_LABELS } from "../lib/units";
+import { UNIT_LABELS_FULL as UNIT_LABELS, convertUnit } from "../lib/units";
+import { errKey } from "../lib/errors";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -148,12 +149,19 @@ function StockModal({
 }
 
 function BrandBreakdown({ purchases, t }: { purchases: StockPurchase[]; t: T }) {
+  // Purchases are stored in the ingredient's own unit (see to_ingredient_unit
+  // in db.rs), so summing them is safe — except for legacy rows the unit
+  // migration couldn't convert, which would otherwise add grams to kilos and
+  // show an average price off by three orders of magnitude. Those are skipped.
   const byBrand = new Map<string, { quantity: number; weightedCost: number; unit: string }>();
   for (const p of purchases) {
+    const quantity = p.unit === p.ingredient_unit ? p.quantity : convertUnit(p.quantity, p.unit, p.ingredient_unit);
+    if (quantity === null) continue;
+    const pricePerUnit = quantity === 0 ? p.price_per_unit : (p.quantity * p.price_per_unit) / quantity;
     const key = p.brand ?? t("stock.purchaseModal.noBrand");
-    const entry = byBrand.get(key) ?? { quantity: 0, weightedCost: 0, unit: p.unit };
-    entry.quantity += p.quantity;
-    entry.weightedCost += p.quantity * p.price_per_unit;
+    const entry = byBrand.get(key) ?? { quantity: 0, weightedCost: 0, unit: p.ingredient_unit };
+    entry.quantity += quantity;
+    entry.weightedCost += quantity * pricePerUnit;
     byBrand.set(key, entry);
   }
   if (byBrand.size <= 1) return null;
@@ -358,7 +366,7 @@ export default function StockPage() {
       setStock(stockData);
       setIngredients(ingredientsData);
     } catch (e) {
-      showToast(t("stock.loadError"), "err");
+      showToast(t(errKey(e, "stock.loadError")), "err");
     }
   }, [showToast, t]);
 
@@ -369,7 +377,7 @@ export default function StockPage() {
       const data = await invoke<Supplier[]>("suppliers_list");
       setSuppliers(data);
     } catch (e) {
-      showToast(t("stock.suppliersLoadError"), "err");
+      showToast(t(errKey(e, "stock.suppliersLoadError")), "err");
     }
   }, [showToast, t]);
 
@@ -381,7 +389,7 @@ export default function StockPage() {
       const data = await invoke<StockPurchase[]>("stock_purchases_list", { ingredientId });
       setPurchases(data);
     } catch (e) {
-      showToast(t("stock.purchasesLoadError"), "err");
+      showToast(t(errKey(e, "stock.purchasesLoadError")), "err");
     } finally {
       setLoadingPurchases(false);
     }
@@ -443,7 +451,7 @@ export default function StockPage() {
       closeModal();
       await load();
     } catch (e) {
-      showToast(t("stock.saveError"), "err");
+      showToast(t(errKey(e, "stock.saveError")), "err");
     } finally {
       setLoading(false);
     }
@@ -456,7 +464,7 @@ export default function StockPage() {
       showToast(t("stock.deleted"), "ok");
       await load();
     } catch (e) {
-      showToast(t("stock.deleteError"), "err");
+      showToast(t(errKey(e, "stock.deleteError")), "err");
     } finally {
       setConfirmDelete(null);
     }
@@ -498,7 +506,7 @@ export default function StockPage() {
         await loadPurchases(selectedIngredientForPurchases.ingredient_id);
       }
     } catch (e) {
-      showToast(t("stock.purchaseError"), "err");
+      showToast(t(errKey(e, "stock.purchaseError")), "err");
     } finally {
       setLoading(false);
     }

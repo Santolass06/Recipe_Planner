@@ -49,15 +49,27 @@ pub async fn get_conn(db: &Database) -> LibsqlResult<Connection> {
     Ok(conn)
 }
 
+/// Must match `identifier` in `src-tauri/tauri.conf.json` — it is what Tauri
+/// namespaces `BaseDirectory::AppData` with.
+const APP_IDENTIFIER: &str = "com.recipe-planner.app";
+
 /// Resolve the app's data directory: `app_data_dir` if given (Tauri already
 /// resolves this to the app-identifier-namespaced path), otherwise a
 /// desktop fallback under the OS data dir. Single source of truth so the DB
 /// and the image storage (below) always agree on the same root.
+///
+/// Both branches have to land on the *same* directory. The fallback used to
+/// be a bare `mise` under the OS data dir, which is a second, different
+/// database for any non-Tauri consumer of `mise-core` — and on a machine that
+/// has the unrelated `mise` version manager installed, the same folder as its
+/// data. The `mise` level inside the app directory is deliberate: the webview
+/// dumps its own caches at the app directory root, so the app's actual data
+/// lives one level in, away from it.
 pub fn resolve_data_dir(app_data_dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
     if let Some(dir) = app_data_dir {
         Ok(dir)
     } else if let Some(data_dir) = dirs::data_dir() {
-        Ok(data_dir.join("mise"))
+        Ok(data_dir.join(APP_IDENTIFIER).join("mise"))
     } else {
         // Final fallback
         Ok(std::env::current_dir()?.join(".mise_data"))
@@ -419,8 +431,11 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
         "#,
         (),
     ).await?;
-    // ponytail: no FK/ON DELETE CASCADE — this codebase never enables
-    // `PRAGMA foreign_keys`, so cascades are handled manually (see delete_event).
+    // ponytail: no FK on these columns — not because cascades don't work
+    // (libsql *does* enforce foreign keys: deleting an ingredient used by a
+    // recipe fails with FOREIGN KEY constraint failed), but because deleting
+    // an event has to remove the recipes and ingredients copied into it,
+    // which is a fan-out no single ON DELETE expresses. See delete_event.
     add_column_if_missing(&conn, "recipes", "event_id", "INTEGER").await?;
     add_column_if_missing(&conn, "recipes", "base_recipe_id", "INTEGER").await?;
 
@@ -456,6 +471,86 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
         (),
     ).await?;
 
+    run_data_migrations(&conn).await?;
+
+    Ok(())
+}
+
+/// Schema version of the *data* migrations — the ones that rewrite rows that
+/// are already on disk. Bump when adding a step to `run_data_migrations`.
+const SCHEMA_VERSION: i64 = 1;
+
+/// Everything above this point is idempotent by construction (`CREATE TABLE IF
+/// NOT EXISTS`, `add_column_if_missing`) and needs no bookkeeping. Anything
+/// that *transforms existing data* does: it has to run exactly once, and until
+/// now there was no way to know which version a database on disk was at.
+///
+/// `PRAGMA user_version` is SQLite's own slot for this — no extra table, no
+/// extra query on the hot path. Steps must still be safe on an empty database,
+/// because a fresh install starts at version 0 like everyone else.
+async fn run_data_migrations(conn: &Connection) -> LibsqlResult<()> {
+    let mut rows = conn.query("PRAGMA user_version", ()).await?;
+    let current: i64 = match rows.next().await? {
+        Some(row) => row.get(0)?,
+        None => 0,
+    };
+    if current >= SCHEMA_VERSION {
+        return Ok(());
+    }
+
+    if current < 1 {
+        normalize_stock_purchase_units(conn).await?;
+    }
+
+    // ponytail: PRAGMA takes no bind params; SCHEMA_VERSION is a const i64.
+    conn.execute(&format!("PRAGMA user_version = {SCHEMA_VERSION}"), ()).await?;
+    Ok(())
+}
+
+/// Data migration 1 — repair for DOM-01/DOM-02.
+///
+/// `stock_purchase_add` used to store the purchase in whatever unit was typed,
+/// while the stock balance and the weighted average both assume the
+/// ingredient's own unit. Rewrites the historical rows into that unit, keeping
+/// the line total exactly. Rows whose unit belongs to another dimension can't
+/// be converted and are left untouched — there is no right answer for "1 piece
+/// of flour" and inventing one would be the original bug again.
+///
+/// `stock.quantity` is deliberately *not* recomputed: purchases are only one
+/// of its inputs (manual corrections, receipts and seeds also write it), so a
+/// balance rebuilt from purchases alone would be a different lie.
+async fn normalize_stock_purchase_units(conn: &Connection) -> LibsqlResult<()> {
+    let mut rows = conn.query(
+        "SELECT sp.id, sp.quantity, sp.unit, sp.price_per_unit, i.unit
+         FROM stock_purchases sp
+         JOIN ingredients i ON i.id = sp.ingredient_id
+         WHERE sp.unit <> i.unit",
+        (),
+    ).await?;
+
+    let mut fixes: Vec<(i64, f64, f64, String)> = Vec::new();
+    while let Some(row) = rows.next().await? {
+        let id: i64 = row.get(0)?;
+        let quantity: f64 = row.get(1)?;
+        let from_str: String = row.get(2)?;
+        let price: f64 = row.get(3)?;
+        let to_str: String = row.get(4)?;
+        let (Ok(from), Ok(to)) = (from_str.parse::<Unit>(), to_str.parse::<Unit>()) else {
+            continue;
+        };
+        let Some(converted) = from.convert_to(to, quantity) else { continue };
+        if converted == 0.0 {
+            continue;
+        }
+        fixes.push((id, converted, quantity * price / converted, to_str));
+    }
+
+    for (id, quantity, price, unit) in fixes {
+        conn.execute(
+            "UPDATE stock_purchases SET quantity = ?1, price_per_unit = ?2, unit = ?3 WHERE id = ?4",
+            params![quantity, price, unit, id],
+        ).await?;
+    }
     Ok(())
 }
 
@@ -520,6 +615,8 @@ async fn repair_shopping_list_items_nullable_ingredient(conn: &Connection) -> Li
     ).await?;
     conn.execute("INSERT INTO shopping_list_items SELECT * FROM shopping_list_items_old", ()).await?;
     conn.execute("DROP TABLE shopping_list_items_old", ()).await?;
+    // Not a duplicate of the CREATE INDEX in run_migrations: the table was
+    // just rebuilt, and its indexes went with the old one.
     conn.execute("CREATE INDEX IF NOT EXISTS idx_shopping_list_items_list ON shopping_list_items(shopping_list_id);", ()).await?;
 
     Ok(())
@@ -1110,7 +1207,13 @@ pub async fn update_recipe(db: &Database, id: i64, input: RecipeInput) -> Libsql
     let conn = get_conn(db).await?;
     let tags_json = serde_json::to_string(&input.tags).unwrap_or_else(|_| "[]".to_string());
 
-    conn.execute(
+    // The ingredient lines are replaced by DELETE-then-reinsert. Without a
+    // transaction, a line that fails to resolve mid-loop (stale form, retry
+    // with an old payload, any IPC caller) leaves the recipe with the lines
+    // that already went in and none of the rest — silently, and permanently.
+    let tx = conn.transaction().await?;
+
+    tx.execute(
         "UPDATE recipes SET name = ?1, category = ?2, portions = ?3, instructions = ?4,
          prep_time_minutes = ?5, cook_time_minutes = ?6, tags = ?7, image_path = ?8, updated_at = datetime('now')
          WHERE id = ?9",
@@ -1118,24 +1221,26 @@ pub async fn update_recipe(db: &Database, id: i64, input: RecipeInput) -> Libsql
     ).await?;
 
     // Delete existing recipe ingredients
-    conn.execute("DELETE FROM recipe_ingredients WHERE recipe_id = ?1", params![id]).await?;
+    tx.execute("DELETE FROM recipe_ingredients WHERE recipe_id = ?1", params![id]).await?;
 
     // Insert new recipe ingredients
     for ingredient_input in &input.ingredients {
         let unit_str = ingredient_input.unit.to_string();
 
-        let mut rows = conn.query(
+        let mut rows = tx.query(
             "SELECT name FROM ingredients WHERE id = ?1",
             params![ingredient_input.ingredient_id],
         ).await?;
         let ingredient_name: String = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO recipe_ingredients (recipe_id, ingredient_id, ingredient_name, quantity, unit)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![id, ingredient_input.ingredient_id, ingredient_name, ingredient_input.quantity, unit_str],
         ).await?;
     }
+
+    tx.commit().await?;
 
     let recipe = get_recipe(db, id).await?;
     row_to_recipe_with_ingredients(db, recipe).await
@@ -1166,35 +1271,56 @@ pub async fn clone_recipe(db: &Database, id: i64) -> LibsqlResult<RecipeWithIngr
     let conn = get_conn(db).await?;
     let original = get_recipe(db, id).await?;
 
+    // `Recipe` doesn't carry event_id but the column does, so the clone used
+    // to land in the catalog no matter where the original lived: duplicating
+    // a recipe inside an event quietly contaminated the main catalog with
+    // catering variants, which is precisely what event mode exists to avoid.
+    let event_id: Option<i64> = {
+        let mut rows = conn.query("SELECT event_id FROM recipes WHERE id = ?1", params![id]).await?;
+        rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?
+    };
+
     let tags_json = serde_json::to_string(&serde_json::from_str::<Vec<String>>(&original.tags).unwrap_or_default())
         .unwrap_or_else(|_| "[]".to_string());
 
-    conn.execute(
-        "INSERT INTO recipes (name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, image_path)
-         VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8)",
-        params![format!("{} (Cópia)", original.name), original.category, original.portions, original.instructions, original.prep_time_minutes, original.cook_time_minutes, tags_json, original.image_path],
+    // Recipe row plus one row per ingredient line: a failure halfway leaves a
+    // copy with some of the original's ingredients.
+    let tx = conn.transaction().await?;
+
+    tx.execute(
+        "INSERT INTO recipes (name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, image_path, event_id)
+         VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9)",
+        params![format!("{} (Cópia)", original.name), original.category, original.portions, original.instructions, original.prep_time_minutes, original.cook_time_minutes, tags_json, original.image_path, event_id],
     ).await?;
 
-    let new_id = conn.last_insert_rowid();
+    let new_id = tx.last_insert_rowid();
 
     // Copy recipe ingredients
-    let mut rows = conn.query(
-        "SELECT ingredient_id, ingredient_name, quantity, unit FROM recipe_ingredients WHERE recipe_id = ?1",
-        params![id],
-    ).await?;
+    let lines = {
+        let mut rows = tx.query(
+            "SELECT ingredient_id, ingredient_name, quantity, unit FROM recipe_ingredients WHERE recipe_id = ?1",
+            params![id],
+        ).await?;
+        let mut lines = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let ingredient_id: i64 = row.get(0)?;
+            let ingredient_name: String = row.get(1)?;
+            let quantity: f64 = row.get(2)?;
+            let unit: String = row.get(3)?;
+            lines.push((ingredient_id, ingredient_name, quantity, unit));
+        }
+        lines
+    };
 
-    while let Some(row) = rows.next().await? {
-        let ingredient_id: i64 = row.get(0)?;
-        let ingredient_name: String = row.get(1)?;
-        let quantity: f64 = row.get(2)?;
-        let unit: String = row.get(3)?;
-
-        conn.execute(
+    for (ingredient_id, ingredient_name, quantity, unit) in lines {
+        tx.execute(
             "INSERT INTO recipe_ingredients (recipe_id, ingredient_id, ingredient_name, quantity, unit)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![new_id, ingredient_id, ingredient_name, quantity, unit],
         ).await?;
     }
+
+    tx.commit().await?;
 
     let recipe = get_recipe(db, new_id).await?;
     row_to_recipe_with_ingredients(db, recipe).await
@@ -1494,13 +1620,17 @@ pub async fn shopping_list_mark_purchased(
     db: &Database,
     input: ShoppingListMarkPurchasedInput,
 ) -> LibsqlResult<ShoppingItem> {
-    // ponytail: a fresh short-lived connection per step (not one held across
-    // the stock_purchase_add call) — reusing one connection across another
-    // connection's writes hit SQLITE_BUSY_SNAPSHOT under WAL (see
-    // [[SQLite concurrency risk]]).
+    // The purchase and the "purchased" flag must land together: if the flag
+    // failed to stick after the stock went up, the user would click again and
+    // add the same stock twice. One connection, one transaction — which also
+    // retires the earlier two-connection dance (each write saw the other's
+    // committed state, so a shared connection hit SQLITE_BUSY_SNAPSHOT under
+    // WAL; inside a single transaction there is no second connection to race).
+    let conn = get_conn(db).await?;
+    let tx = conn.transaction().await?;
+
     let (ingredient_id, ingredient_unit_str) = {
-        let conn = get_conn(db).await?;
-        let mut rows = conn.query(
+        let mut rows = tx.query(
             "SELECT ingredient_id, ingredient_unit FROM shopping_list_items WHERE id = ?1 AND shopping_list_id = ?2",
             params![input.item_id, input.list_id],
         ).await?;
@@ -1511,7 +1641,7 @@ pub async fn shopping_list_mark_purchased(
     };
 
     if let Some(ingredient_id) = ingredient_id {
-        stock_purchase_add(db, StockPurchaseInput {
+        stock_purchase_add_tx(&tx, StockPurchaseInput {
             ingredient_id,
             quantity: input.quantity,
             unit: parse_unit_str(&ingredient_unit_str),
@@ -1527,19 +1657,23 @@ pub async fn shopping_list_mark_purchased(
     }
 
     let purchased_at = chrono::Utc::now().to_rfc3339();
-    let conn = get_conn(db).await?;
-    conn.execute(
+    tx.execute(
         "UPDATE shopping_list_items SET purchased = 1, purchased_at = ?1 WHERE id = ?2 AND shopping_list_id = ?3",
         params![purchased_at, input.item_id, input.list_id],
     ).await?;
 
-    let mut rows = conn.query(
-        "SELECT id, shopping_list_id, ingredient_id, ingredient_name, ingredient_unit, needed_quantity, stock_quantity, to_buy_quantity, category, estimated_cost, purchased, notes, purchased_at, created_at
-         FROM shopping_list_items WHERE id = ?1 AND shopping_list_id = ?2",
-        params![input.item_id, input.list_id],
-    ).await?;
-    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
-    row_to_shopping_item(&row)
+    let item = {
+        let mut rows = tx.query(
+            "SELECT id, shopping_list_id, ingredient_id, ingredient_name, ingredient_unit, needed_quantity, stock_quantity, to_buy_quantity, category, estimated_cost, purchased, notes, purchased_at, created_at
+             FROM shopping_list_items WHERE id = ?1 AND shopping_list_id = ?2",
+            params![input.item_id, input.list_id],
+        ).await?;
+        let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
+        row_to_shopping_item(&row)?
+    };
+
+    tx.commit().await?;
+    Ok(item)
 }
 
 /// Remove item from shopping list
@@ -1616,11 +1750,6 @@ pub async fn shopping_list_clear_purchased(
     get_shopping_list(db, list_id).await
 }
 
-/// Suggest recipes based on stock
-pub async fn suggest_recipes(_db: &Database) -> LibsqlResult<Vec<SuggestedRecipe>> {
-    // Simplified implementation - return empty
-    Ok(Vec::new())
-}
 
 /// Weighted-average price per unit across an ingredient's purchase history
 /// (Fase 3.1: multiple brands/suppliers in stock, weighted by quantity
@@ -2428,23 +2557,27 @@ pub async fn update_event(db: &Database, id: i64, input: EventInput) -> LibsqlRe
 /// Delete event, and every recipe variant copied into it (manual cascade — see Migration 017).
 pub async fn delete_event(db: &Database, id: i64) -> LibsqlResult<()> {
     let conn = get_conn(db).await?;
-    conn.execute(
+    // Six dependent deletes: a failure halfway leaves an event whose recipes
+    // are gone but whose ingredients and stock are not (or the reverse).
+    let tx = conn.transaction().await?;
+    tx.execute(
         "DELETE FROM recipe_ingredients WHERE recipe_id IN (SELECT id FROM recipes WHERE event_id = ?1)",
         params![id],
     ).await?;
-    conn.execute("DELETE FROM recipes WHERE event_id = ?1", params![id]).await?;
+    tx.execute("DELETE FROM recipes WHERE event_id = ?1", params![id]).await?;
     // Fase 3.3: event-scoped ingredients — clear stock/purchases before the
     // ingredient rows themselves (stock_purchases.ingredient_id is RESTRICT).
-    conn.execute(
+    tx.execute(
         "DELETE FROM stock WHERE ingredient_id IN (SELECT id FROM ingredients WHERE event_id = ?1)",
         params![id],
     ).await?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM stock_purchases WHERE ingredient_id IN (SELECT id FROM ingredients WHERE event_id = ?1)",
         params![id],
     ).await?;
-    conn.execute("DELETE FROM ingredients WHERE event_id = ?1", params![id]).await?;
-    conn.execute("DELETE FROM events WHERE id = ?1", params![id]).await?;
+    tx.execute("DELETE FROM ingredients WHERE event_id = ?1", params![id]).await?;
+    tx.execute("DELETE FROM events WHERE id = ?1", params![id]).await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -2717,9 +2850,12 @@ fn parse_ingredient_line(raw: &str) -> RecipeImportIngredient {
     let core = strip_descriptive_clauses(rest);
     let words: Vec<&str> = core.split_whitespace().collect();
 
-    let (unit, name_guess) = match words.iter().position(|w| unit_from_ingredient_word(w).is_some()) {
-        Some(idx) => {
-            let unit = unit_from_ingredient_word(words[idx]).unwrap();
+    // find_map instead of position + unwrap: the unwrap was covered by the
+    // predicate, but a parser is the last place to leave a panic that depends
+    // on two expressions staying in sync.
+    let found = words.iter().enumerate().find_map(|(i, w)| unit_from_ingredient_word(w).map(|u| (i, u)));
+    let (unit, name_guess) = match found {
+        Some((idx, unit)) => {
             let name = words.iter().enumerate()
                 .filter(|(i, _)| *i != idx)
                 .map(|(_, w)| *w)
@@ -2739,26 +2875,103 @@ fn parse_ingredient_line(raw: &str) -> RecipeImportIngredient {
     }
 }
 
+/// True for addresses that never belong to a public recipe site: this machine,
+/// the local network, and the link-local range that carries cloud metadata.
+fn is_local_address(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.octets()[0] == 0
+                // carrier-grade NAT, 100.64.0.0/10
+                || (v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]))
+        }
+        std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => is_local_address(&std::net::IpAddr::V4(v4)),
+            // unique-local (fc00::/7) and link-local (fe80::/10); the std helpers
+            // for both are still unstable, hence the prefix checks.
+            None => {
+                v6.is_loopback()
+                    || v6.is_unspecified()
+                    || (v6.segments()[0] & 0xfe00) == 0xfc00
+                    || (v6.segments()[0] & 0xffc0) == 0xfe80
+            }
+        },
+    }
+}
+
+/// Rejects anything that is not http(s) or that points at this machine or the local
+/// network. The user types these URLs, but a pasted link should not be able to reach
+/// the router's admin page or a service listening on localhost.
+///
+/// ponytail: resolving here and letting reqwest resolve again leaves a DNS-rebinding
+/// window. Closing it means a custom resolver holding the checked address; not worth
+/// it while the only source of URLs is the user's own paste.
+async fn assert_safe_url(url: &str) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(url).map_err(|_| "URL inválido.".to_string())?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err("Só são permitidos URLs http:// ou https://.".to_string());
+    }
+    let host = parsed.host_str().ok_or_else(|| "URL sem servidor.".to_string())?;
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    // Also parses bare IP literals, so hosts written as an address need no special case.
+    let addrs: Vec<std::net::IpAddr> = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|_| format!("Não foi possível resolver o servidor '{host}'."))?
+        .map(|addr| addr.ip())
+        .collect();
+    if addrs.is_empty() || addrs.iter().any(is_local_address) {
+        return Err("Este URL aponta para a rede local; só é possível importar de sites públicos.".to_string());
+    }
+    Ok(())
+}
+
 /// Import a recipe preview from a URL's schema.org/Recipe JSON-LD (Fase 3.4).
 /// Read-only: never writes to the DB, only looks up existing ingredients by exact
 /// name to pre-fill `matched_ingredient_id` where possible. Saving is a separate,
 /// explicit step the user takes after reviewing the preview.
 pub async fn recipe_import_from_url(db: &Database, url: String) -> Result<RecipeImportPreview, String> {
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err("Só são permitidos URLs http:// ou https://.".to_string());
-    }
     const MAX_BODY_BYTES: u64 = 5 * 1024 * 1024; // recipe pages are plain HTML, 5MB is generous
+    const MAX_REDIRECTS: usize = 5;
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
+        // Followed by hand below, so that every hop passes assert_safe_url — reqwest's
+        // own follower would only ever check the URL the user typed.
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| e.to_string())?;
-    let response = client
-        .get(&url)
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+
+    let mut current = url;
+    let mut hops = 0usize;
+    let response = loop {
+        assert_safe_url(&current).await?;
+        let res = client
+            .get(&current)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !res.status().is_redirection() {
+            break res;
+        }
+        hops += 1;
+        if hops > MAX_REDIRECTS {
+            return Err("A página redireciona demasiadas vezes.".to_string());
+        }
+        let location = res
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| "A página redireciona para um destino inválido.".to_string())?;
+        current = reqwest::Url::parse(&current)
+            .and_then(|base| base.join(location))
+            .map_err(|_| "A página redireciona para um destino inválido.".to_string())?
+            .to_string();
+    };
     if response.content_length().is_some_and(|len| len > MAX_BODY_BYTES) {
         return Err("A página é demasiado grande para importar.".to_string());
     }
@@ -2787,8 +3000,10 @@ pub async fn recipe_import_from_url(db: &Database, url: String) -> Result<Recipe
         for line in lines {
             let Some(text) = line.as_str() else { continue };
             let mut parsed = parse_ingredient_line(text);
+            // Catalogue only: this import has no event destination, so a match
+            // against an event-scoped ingredient would link the two silently.
             let mut rows = conn.query(
-                "SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?1) LIMIT 1",
+                "SELECT id FROM ingredients WHERE event_id IS NULL AND LOWER(name) = LOWER(?1) LIMIT 1",
                 params![parsed.name_guess.clone()],
             ).await.map_err(|e| e.to_string())?;
             if let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
@@ -2946,15 +3161,194 @@ pub async fn price_quotes_all(db: &Database) -> LibsqlResult<Vec<PriceQuoteWithI
 }
 
 /// Export all data
+/// Every table that holds the user's data. A backup that forgets one is
+/// exactly the bug this replaces, so this list is the single thing to keep up
+/// to date — add a table here when you add a table.
+///
+/// `approximate_unit_weights` is seeded reference data, not the user's, and is
+/// rebuilt by the migrations on any database.
+const BACKUP_TABLES: &[&str] = &[
+    "settings", "categories", "ingredients", "recipes", "recipe_ingredients",
+    "stock", "stock_purchases", "suppliers", "price_quotes", "events",
+    "shopping_lists", "shopping_list_items", "meal_plans", "meal_plan_entries",
+    "images", "receipt_imports", "usage_events", "problem_reports",
+];
+
+const BACKUP_FORMAT_VERSION: u32 = 1;
+
+fn value_to_json(value: libsql::Value) -> serde_json::Value {
+    use libsql::Value;
+    match value {
+        Value::Null => serde_json::Value::Null,
+        Value::Integer(i) => serde_json::Value::from(i),
+        Value::Real(f) => serde_json::Value::from(f),
+        Value::Text(s) => serde_json::Value::from(s),
+        Value::Blob(b) => {
+            use base64::{Engine as _, engine::general_purpose::STANDARD};
+            serde_json::json!({ "__blob_b64": STANDARD.encode(b) })
+        }
+    }
+}
+
+fn json_to_value(value: &serde_json::Value) -> libsql::Value {
+    use libsql::Value;
+    match value {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Integer(*b as i64),
+        serde_json::Value::Number(n) => match n.as_i64() {
+            Some(i) => Value::Integer(i),
+            None => Value::Real(n.as_f64().unwrap_or(0.0)),
+        },
+        serde_json::Value::String(s) => Value::Text(s.clone()),
+        serde_json::Value::Object(map) => match map.get("__blob_b64").and_then(|v| v.as_str()) {
+            Some(b64) => {
+                use base64::{Engine as _, engine::general_purpose::STANDARD};
+                Value::Blob(STANDARD.decode(b64).unwrap_or_default())
+            }
+            None => Value::Text(value.to_string()),
+        },
+        other => Value::Text(other.to_string()),
+    }
+}
+
+/// A real backup: every user table row-for-row (ids included, so nothing has
+/// to be remapped on the way back) plus the image files, in one JSON document
+/// the user can carry off the machine.
+///
+/// Returned as text rather than a typed struct on purpose — a typed one would
+/// need a field per table, which is how `export_data` ended up covering two
+/// tables out of eighteen and calling itself a backup.
+pub async fn backup_export(db: &Database, data_dir: &std::path::Path) -> LibsqlResult<String> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    let conn = get_conn(db).await?;
+    let mut tables = serde_json::Map::new();
+
+    for table in BACKUP_TABLES {
+        let mut rows = conn.query(&format!("SELECT * FROM {table}"), ()).await?;
+        let column_count = rows.column_count();
+        let columns: Vec<String> = (0..column_count)
+            .map(|i| rows.column_name(i).unwrap_or_default().to_string())
+            .collect();
+
+        let mut table_rows = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let mut object = serde_json::Map::new();
+            for (i, name) in columns.iter().enumerate() {
+                object.insert(name.clone(), value_to_json(row.get_value(i as i32)?));
+            }
+            table_rows.push(serde_json::Value::Object(object));
+        }
+        tables.insert((*table).to_string(), serde_json::Value::Array(table_rows));
+    }
+
+    // Image files live next to the database, not in it, so a backup of the
+    // rows alone would restore recipes pointing at pictures that are gone.
+    let mut images = serde_json::Map::new();
+    let images_dir = data_dir.join("images");
+    if let Ok(entries) = std::fs::read_dir(&images_dir) {
+        for entry in entries.flatten() {
+            if !entry.path().is_file() {
+                continue;
+            }
+            let bytes = std::fs::read(entry.path()).map_err(|e| libsql::Error::Misuse(e.to_string()))?;
+            images.insert(entry.file_name().to_string_lossy().into_owned(), serde_json::Value::from(STANDARD.encode(bytes)));
+        }
+    }
+
+    let backup = serde_json::json!({
+        "backup_version": BACKUP_FORMAT_VERSION,
+        "created_at": Utc::now().to_rfc3339(),
+        "tables": serde_json::Value::Object(tables),
+        "images": serde_json::Value::Object(images),
+    });
+
+    serde_json::to_string(&backup).map_err(|e| libsql::Error::Misuse(e.to_string()))
+}
+
+/// Restore a backup, replacing everything. This is not the merge that
+/// `import_data` does — a backup is what the user reaches for when the current
+/// contents are wrong or gone.
+pub async fn backup_restore(db: &Database, data_dir: &std::path::Path, json: String) -> LibsqlResult<BackupRestoreResult> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    let backup: serde_json::Value = serde_json::from_str(&json)
+        .map_err(|e| libsql::Error::Misuse(format!("backup file is not valid JSON: {e}")))?;
+    let tables = backup.get("tables").and_then(|t| t.as_object())
+        .ok_or_else(|| libsql::Error::Misuse("backup file has no tables".to_string()))?;
+
+    let conn = get_conn(db).await?;
+    let tx = conn.transaction().await?;
+    let mut rows_restored = 0_u32;
+
+    // Children before parents on the way out, so no FK is left dangling
+    // mid-restore; the insert order below is the declared one, parents first.
+    for table in BACKUP_TABLES.iter().rev() {
+        tx.execute(&format!("DELETE FROM {table}"), ()).await?;
+    }
+
+    for table in BACKUP_TABLES {
+        let Some(table_rows) = tables.get(*table).and_then(|t| t.as_array()) else { continue };
+        for row in table_rows {
+            let Some(object) = row.as_object() else { continue };
+            let columns: Vec<&String> = object.keys().collect();
+            let placeholders: Vec<String> = (1..=columns.len()).map(|i| format!("?{i}")).collect();
+            let values: Vec<libsql::Value> = columns.iter().map(|c| json_to_value(&object[*c])).collect();
+            let column_list = columns.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(", ");
+
+            tx.execute(
+                &format!("INSERT INTO {table} ({column_list}) VALUES ({})", placeholders.join(", ")),
+                values,
+            ).await?;
+            rows_restored += 1;
+        }
+    }
+
+    tx.commit().await?;
+
+    let mut images_restored = 0_u32;
+    if let Some(images) = backup.get("images").and_then(|i| i.as_object()) {
+        let images_dir = data_dir.join("images");
+        std::fs::create_dir_all(&images_dir).map_err(|e| libsql::Error::Misuse(e.to_string()))?;
+        for (filename, contents) in images {
+            let Some(b64) = contents.as_str() else { continue };
+            let bytes = STANDARD.decode(b64).map_err(|e| libsql::Error::Misuse(e.to_string()))?;
+            // Backups only ever hold bare file names; anything else is a
+            // crafted file trying to write outside the images folder.
+            let name = std::path::Path::new(filename);
+            if name.file_name() != Some(name.as_os_str()) {
+                continue;
+            }
+            std::fs::write(images_dir.join(name), bytes).map_err(|e| libsql::Error::Misuse(e.to_string()))?;
+            images_restored += 1;
+        }
+    }
+
+    Ok(BackupRestoreResult { tables_restored: BACKUP_TABLES.len() as u32, rows_restored, images_restored })
+}
+
 pub async fn export_data(db: &Database) -> LibsqlResult<ImportData> {
     let ingredients = ingredients_list(db).await?;
     let recipes = recipes_list(db).await?;
+
+    // The category has to travel as a name: `import_data` matches categories
+    // by name, so exporting the numeric id (as text) produced a file that
+    // resolved to no category at all on the way back in.
+    let category_names: std::collections::HashMap<i64, String> = {
+        let conn = get_conn(db).await?;
+        let mut rows = conn.query("SELECT id, name FROM categories", ()).await?;
+        let mut map = std::collections::HashMap::new();
+        while let Some(row) = rows.next().await? {
+            map.insert(row.get(0)?, row.get(1)?);
+        }
+        map
+    };
 
     let import_ingredients: Vec<ImportIngredient> = ingredients.into_iter().map(|i| ImportIngredient {
         name: i.name,
         unit: i.unit,
         price_per_unit: i.price_per_unit,
-        category: i.category_id.map(|id| id.to_string()),
+        category: i.category_id.and_then(|id| category_names.get(&id).cloned()),
     }).collect();
 
     let import_recipes: Vec<ImportRecipe> = recipes.into_iter().map(|r| {
@@ -3421,11 +3815,13 @@ pub async fn get_dashboard_stats(db: &Database) -> LibsqlResult<DashboardStats> 
     let total_stock_value: f64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
 
     // Total recipes
-    let mut rows = conn.query("SELECT COUNT(*) FROM recipes", ()).await?;
+    // Catalogue only, like recipes_list/ingredients_list — otherwise the dashboard
+    // total disagrees with the number of rows those pages actually show (3.3, passo 6).
+    let mut rows = conn.query("SELECT COUNT(*) FROM recipes WHERE event_id IS NULL", ()).await?;
     let total_recipes: i64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
 
     // Total ingredients
-    let mut rows = conn.query("SELECT COUNT(*) FROM ingredients", ()).await?;
+    let mut rows = conn.query("SELECT COUNT(*) FROM ingredients WHERE event_id IS NULL", ()).await?;
     let total_ingredients: i64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
 
     // Pending shopping items (not purchased)
@@ -3459,6 +3855,7 @@ pub async fn get_recent_activity(db: &Database, limit: u32) -> LibsqlResult<Vec<
         r#"
         SELECT id, name, created_at, 'recipe_created' as type, 'recipe' as entity_type
         FROM recipes
+        WHERE event_id IS NULL
         ORDER BY created_at DESC
         LIMIT ?1
         "#,
@@ -3794,29 +4191,31 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
     let start_date = Utc::now() - chrono::Duration::days(days as i64);
     let start_str = start_date.to_rfc3339();
 
-    // Total spent from purchased shopping list items
+    // Total spent — from `stock_purchases`, which is the money that was
+    // actually paid, on every path that spends it. This used to sum
+    // `shopping_list_items.estimated_cost`, i.e. the estimate written when the
+    // list was drawn up, and only for things bought through a list: the real
+    // price the user typed at the till never reached the report, and a month
+    // of scanned receipts showed €0.00.
     let mut rows = conn.query(
         r#"
-        SELECT COALESCE(SUM(sli.to_buy_quantity * sli.estimated_cost / NULLIF(sli.to_buy_quantity, 0)), 0.0)
-        FROM shopping_list_items sli
-        WHERE sli.purchased = 1
-          AND sli.purchased_at IS NOT NULL
-          AND date(sli.purchased_at) >= date(?1)
+        SELECT COALESCE(SUM(sp.total_price), 0.0)
+        FROM stock_purchases sp
+        JOIN ingredients i ON sp.ingredient_id = i.id
+        WHERE i.event_id IS NULL AND date(sp.purchase_date) >= date(?1)
         "#,
         params![start_str.clone()],
     ).await?;
     let total_spent: f64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
 
-    // By category (ingredient category)
+    // By category — same source as total_spent, so the parts add up to the whole.
     let mut rows = conn.query(
         r#"
-        SELECT c.name, COALESCE(SUM(sli.to_buy_quantity * sli.estimated_cost / NULLIF(sli.to_buy_quantity, 0)), 0.0) AS total
-        FROM shopping_list_items sli
-        LEFT JOIN ingredients i ON sli.ingredient_id = i.id
+        SELECT COALESCE(c.name, 'Sem categoria'), COALESCE(SUM(sp.total_price), 0.0) AS total
+        FROM stock_purchases sp
+        JOIN ingredients i ON sp.ingredient_id = i.id
         LEFT JOIN categories c ON i.category_id = c.id
-        WHERE sli.purchased = 1
-          AND sli.purchased_at IS NOT NULL
-          AND date(sli.purchased_at) >= date(?1)
+        WHERE i.event_id IS NULL AND date(sp.purchase_date) >= date(?1)
         GROUP BY c.name
         ORDER BY total DESC
         "#,
@@ -3833,8 +4232,11 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
         });
     }
 
-    // By recipe (from meal plan entries that generated shopping lists)
-    // This is a simplified version - we look at shopping lists created from meal plans
+    // By list — the only breakdown still sourced from `shopping_list_items`,
+    // because purchases carry no link back to the list or recipe that asked
+    // for them. These are the *estimates* written when the list was drawn up,
+    // so this section does not reconcile with total_spent above and the
+    // frontend must label it as an estimate (same treatment as by_supplier).
     let mut rows = conn.query(
         r#"
         SELECT sl.name, COALESCE(SUM(sli.estimated_cost), 0.0) AS total
@@ -3864,13 +4266,8 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
         });
     }
 
-    // By supplier — sourced from `stock_purchases` (direct stock purchases,
-    // e.g. via the Stock page or the receipt scanner), NOT from
-    // `shopping_list_items` (which has no supplier link at all). This is a
-    // different data source from total_spent/by_category/by_recipe above,
-    // so its total won't necessarily reconcile with theirs — the frontend
-    // must label this section accordingly. See also the architecture note
-    // about unifying purchase sources.
+    // By supplier — same source as total_spent, but only the purchases that
+    // name a supplier, so it is a subset rather than a divergent total.
     let mut rows = conn.query(
         r#"
         SELECT s.name, COALESCE(SUM(sp.total_price), 0.0) AS total
@@ -4388,103 +4785,6 @@ pub async fn image_get(db: &Database, entity_type: ImageEntityType, entity_id: i
     Ok(images)
 }
 
-/// Proxy search images from Unsplash
-async fn search_unsplash(query: &str, per_page: u32) -> Result<Vec<ProxyImageResult>, String> {
-    let client = reqwest::Client::new();
-    let url = format!(
-        "https://api.unsplash.com/search/photos?query={}&per_page={}&client_id={}",
-        urlencoding::encode(query),
-        per_page,
-        std::env::var("UNSPLASH_ACCESS_KEY").unwrap_or_default()
-    );
-    
-    if std::env::var("UNSPLASH_ACCESS_KEY").is_err() {
-        return Ok(Vec::new()); // No API key, return empty
-    }
-    
-    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
-    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    
-    let mut results = Vec::new();
-    if let Some(photos) = json["results"].as_array() {
-        for photo in photos {
-            results.push(ProxyImageResult {
-                id: photo["id"].as_str().unwrap_or("").to_string(),
-                url: photo["urls"]["regular"].as_str().unwrap_or("").to_string(),
-                thumb_url: photo["urls"]["thumb"].as_str().unwrap_or("").to_string(),
-                width: photo["width"].as_u64().unwrap_or(0) as u32,
-                height: photo["height"].as_u64().unwrap_or(0) as u32,
-                alt: photo["alt_description"].as_str().map(|s| s.to_string()),
-                photographer: photo["user"]["name"].as_str().map(|s| s.to_string()),
-                source: "unsplash".to_string(),
-            });
-        }
-    }
-    Ok(results)
-}
-
-/// Proxy search images from Pexels
-async fn search_pexels(query: &str, per_page: u32) -> Result<Vec<ProxyImageResult>, String> {
-    let client = reqwest::Client::new();
-    let url = format!(
-        "https://api.pexels.com/v1/search?query={}&per_page={}",
-        urlencoding::encode(query),
-        per_page
-    );
-    
-    let api_key = match std::env::var("PEXELS_API_KEY") {
-        Ok(k) => k,
-        Err(_) => return Ok(Vec::new()), // No API key, return empty
-    };
-    
-    let resp = client
-        .get(&url)
-        .header("Authorization", api_key)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    
-    let mut results = Vec::new();
-    if let Some(photos) = json["photos"].as_array() {
-        for photo in photos {
-            results.push(ProxyImageResult {
-                id: photo["id"].as_u64().unwrap_or(0).to_string(),
-                url: photo["src"]["large"].as_str().unwrap_or("").to_string(),
-                thumb_url: photo["src"]["medium"].as_str().unwrap_or("").to_string(),
-                width: photo["width"].as_u64().unwrap_or(0) as u32,
-                height: photo["height"].as_u64().unwrap_or(0) as u32,
-                alt: photo["alt"].as_str().map(|s| s.to_string()),
-                photographer: photo["photographer"].as_str().map(|s| s.to_string()),
-                source: "pexels".to_string(),
-            });
-        }
-    }
-    Ok(results)
-}
-
-/// Search images from free stock photo APIs
-pub async fn image_search_proxy(query: String, per_page: Option<u32>) -> Result<Vec<ProxyImageResult>, String> {
-    let per_page = per_page.unwrap_or(20).min(30);
-    let mut results = Vec::new();
-    
-    // Search both in parallel
-    let (unsplash_results, pexels_results) = tokio::join!(
-        search_unsplash(&query, per_page),
-        search_pexels(&query, per_page)
-    );
-    
-    results.extend(unsplash_results.unwrap_or_default());
-    results.extend(pexels_results.unwrap_or_default());
-    
-    // Shuffle to mix sources
-    use rand::seq::SliceRandom;
-    let mut rng = rand::rng();
-    results.shuffle(&mut rng);
-    
-    results.truncate(per_page as usize);
-    Ok(results)
-}
 
 // =====================================================================
 // STOCK PURCHASES
@@ -4537,11 +4837,48 @@ fn row_to_stock_purchase(row: &Row) -> LibsqlResult<StockPurchase> {
 }
 
 /// Add stock purchase (records purchase history, updates stock quantity only)
+/// Stock — and every `stock_purchases` row — is kept in the ingredient's own
+/// unit. Buying "1 kg" for an ingredient tracked in grams has to become 1000 g
+/// at 0.002 €/g before it is written: otherwise the balance is off by 1000×
+/// (DOM-01) and `weighted_avg_stock_price` silently sums kilos with grams,
+/// which is what made a recipe cost €0.004 instead of €2.00 (DOM-02).
+///
+/// The line total is preserved exactly — quantity × price is invariant.
+/// Units from a different dimension (kg into a piece-tracked ingredient) are a
+/// real disagreement between what was typed and how the ingredient is
+/// tracked, so they are rejected instead of guessed at.
+fn to_ingredient_unit(
+    from: Unit,
+    to: Unit,
+    quantity: f64,
+    price_per_unit: f64,
+    ingredient_name: &str,
+) -> LibsqlResult<(f64, f64)> {
+    let converted = from.convert_to(to, quantity).ok_or_else(|| {
+        libsql::Error::Misuse(format!(
+            "unit mismatch: '{ingredient_name}' is tracked in {to} and cannot be bought in {from}"
+        ))
+    })?;
+    if converted == 0.0 {
+        return Ok((converted, price_per_unit));
+    }
+    Ok((converted, quantity * price_per_unit / converted))
+}
+
 pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> LibsqlResult<StockPurchase> {
     let conn = get_conn(db).await?;
-    
-    let unit_str = input.unit.to_string();
-    
+    let tx = conn.transaction().await?;
+    let purchase = stock_purchase_add_tx(&tx, input).await?;
+    tx.commit().await?;
+    Ok(purchase)
+}
+
+/// The two writes of a purchase — the `stock_purchases` row and the `stock`
+/// balance it raises — on a caller-supplied connection, so callers that are
+/// already inside a transaction (`shopping_list_mark_purchased`) commit both
+/// together with their own writes instead of leaving a purchase without the
+/// stock it paid for.
+async fn stock_purchase_add_tx(conn: &Connection, input: StockPurchaseInput) -> LibsqlResult<StockPurchase> {
     // Get ingredient name and unit for denormalization
     let mut rows = conn.query(
         "SELECT name, unit FROM ingredients WHERE id = ?1",
@@ -4550,8 +4887,13 @@ pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> Lib
     let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
     let ingredient_name: String = row.get(0)?;
     let ingredient_unit_str: String = row.get(1)?;
-    let _ingredient_unit = ingredient_unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
-    
+    let ingredient_unit = ingredient_unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
+
+    let (quantity, price_per_unit) = to_ingredient_unit(
+        input.unit, ingredient_unit, input.quantity, input.price_per_unit, &ingredient_name,
+    )?;
+    let unit_str = ingredient_unit_str.clone();
+
     // Get supplier name if provided
     let _supplier_name = if let Some(supplier_id) = input.supplier_id {
         let mut rows = conn.query("SELECT name FROM suppliers WHERE id = ?1", params![supplier_id]).await?;
@@ -4569,9 +4911,9 @@ pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> Lib
         "#,
         params![
             input.ingredient_id,
-            input.quantity,
+            quantity,
             unit_str,
-            input.price_per_unit,
+            price_per_unit,
             input.total_price,
             input.is_discount as i32,
             input.discount_percent,
@@ -4581,13 +4923,13 @@ pub async fn stock_purchase_add(db: &Database, input: StockPurchaseInput) -> Lib
             input.notes,
         ],
     ).await?;
-    
+
     // Update stock quantity (add purchased quantity)
     conn.execute(
         "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity, updated_at)
          VALUES (?1, ?2, ?3, ?4, 0, datetime('now'))
          ON CONFLICT(ingredient_id) DO UPDATE SET quantity = quantity + ?4, updated_at = datetime('now')",
-        params![input.ingredient_id, ingredient_name, ingredient_unit_str, input.quantity],
+        params![input.ingredient_id, ingredient_name, ingredient_unit_str, quantity],
     ).await?;
     
     let id = conn.last_insert_rowid();
@@ -4855,17 +5197,23 @@ async fn parse_receipt_text(text: &str) -> Vec<ParsedReceiptItem> {
 }
 
 /// Parse raw receipt text (for re-parsing)
-pub async fn receipt_parse(_db: &Database, raw_text: String) -> LibsqlResult<Vec<ParsedReceiptItem>> {
-    let items = parse_receipt_text(&raw_text).await;
-    Ok(items)
+/// Pure text parsing — takes no database. Kept `async` and fallible to match
+/// the shape every other command has; the signature used to take a `&Database`
+/// it never touched, which read like it was querying something.
+pub async fn receipt_parse(raw_text: String) -> LibsqlResult<Vec<ParsedReceiptItem>> {
+    Ok(parse_receipt_text(&raw_text).await)
 }
 
 /// Confirm receipt import - creates stock purchases and ingredients
 pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> LibsqlResult<Vec<StockPurchase>> {
     let conn = get_conn(db).await?;
-    
+    // A receipt is all-or-nothing: applying some lines and then failing before
+    // the status flips leaves the import in a limbo the re-confirm guard below
+    // refuses to retry — stock raised, receipt still "parsed", no way forward.
+    let tx = conn.transaction().await?;
+
     // Get the import record
-    let mut rows = conn.query(
+    let mut rows = tx.query(
         "SELECT id, image_path, raw_text, parsed_json, status FROM receipt_imports WHERE id = ?1",
         params![input.import_id],
     ).await?;
@@ -4890,38 +5238,35 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
         // Find or create ingredient
         let ingredient_id = if let Some(matched_id) = item.matched_ingredient_id {
             // Verify ingredient exists
-            let mut rows = conn.query("SELECT id FROM ingredients WHERE id = ?1", params![matched_id]).await?;
+            let mut rows = tx.query("SELECT id FROM ingredients WHERE id = ?1", params![matched_id]).await?;
             if rows.next().await?.is_some() {
                 matched_id
             } else {
                 // Create new ingredient
-                create_or_find_ingredient(&conn, &item.ingredient_name, item.unit).await?
+                create_or_find_ingredient(&tx, &item.ingredient_name, item.unit).await?
             }
         } else {
-            create_or_find_ingredient(&conn, &item.ingredient_name, item.unit).await?
+            create_or_find_ingredient(&tx, &item.ingredient_name, item.unit).await?
         };
         
         // Get ingredient details
-        let mut rows = conn.query("SELECT name, unit FROM ingredients WHERE id = ?1", params![ingredient_id]).await?;
+        let mut rows = tx.query("SELECT name, unit FROM ingredients WHERE id = ?1", params![ingredient_id]).await?;
         let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
         let ingredient_name: String = row.get(0)?;
         let ingredient_unit_str: String = row.get(1)?;
         let ingredient_unit = ingredient_unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
 
-        // Convert unit string for purchase
-        let unit_str = item.unit.to_string();
+        // Stock and purchase rows are both kept in the ingredient's own unit
+        // (see to_ingredient_unit). The stock side was already converted here;
+        // the purchase row was not, which is what fed DOM-02 from this path.
+        let (quantity_in_ingredient_unit, price_in_ingredient_unit) = to_ingredient_unit(
+            item.unit, ingredient_unit, item.quantity, item.price_per_unit, &ingredient_name,
+        )?;
+        let unit_str = ingredient_unit_str.clone();
 
-        // Stock is always tracked in the ingredient's own unit; a receipt
-        // line quantified in a different (but compatible) unit must be
-        // converted before being added, or "1 kg" would add "1" to a
-        // stock tracked in grams instead of "1000".
-        let quantity_in_ingredient_unit = item.unit
-            .convert_to(ingredient_unit, item.quantity)
-            .unwrap_or(item.quantity);
-        
         // Insert stock purchase
         let purchase_date = chrono::Utc::now(); // Could parse from receipt but using now
-        conn.execute(
+        tx.execute(
             r#"
             INSERT INTO stock_purchases
             (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date, supplier_id, brand, notes)
@@ -4929,9 +5274,9 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
             "#,
             params![
                 ingredient_id,
-                item.quantity,
+                quantity_in_ingredient_unit,
                 unit_str,
-                item.price_per_unit,
+                price_in_ingredient_unit,
                 item.total_price,
                 item.is_discount as i32,
                 item.discount_percent,
@@ -4943,17 +5288,17 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
         ).await?;
         
         // Update stock quantity (in the ingredient's own unit, see conversion above)
-        conn.execute(
+        tx.execute(
             "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity, updated_at)
              VALUES (?1, ?2, ?3, ?4, 0, datetime('now'))
              ON CONFLICT(ingredient_id) DO UPDATE SET quantity = quantity + ?4, updated_at = datetime('now')",
             params![ingredient_id, ingredient_name, ingredient_unit_str, quantity_in_ingredient_unit],
         ).await?;
         
-        let purchase_id = conn.last_insert_rowid();
+        let purchase_id = tx.last_insert_rowid();
         
         // Return created purchase
-        let mut rows = conn.query(
+        let mut rows = tx.query(
             r#"
             SELECT sp.id, sp.ingredient_id, i.name, i.unit, sp.quantity, sp.unit, sp.price_per_unit, sp.total_price,
                    sp.is_discount, sp.discount_percent, sp.purchase_date, sp.supplier_id, s.name, sp.brand, sp.notes, sp.created_at
@@ -4969,11 +5314,12 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
     }
     
     // Mark import as confirmed
-    conn.execute(
+    tx.execute(
         "UPDATE receipt_imports SET status = 'confirmed' WHERE id = ?1",
         params![input.import_id],
     ).await?;
-    
+
+    tx.commit().await?;
     Ok(created_purchases)
 }
 
@@ -5757,5 +6103,347 @@ mod crud_base_tests {
 
         let stock = stock_list(&db).await.unwrap().into_iter().find(|s| s.ingredient_id == ingredient.id).unwrap();
         assert_eq!(stock.quantity, 1000.0, "1 kg confirmed against a gram-tracked ingredient must add 1000, not 1");
+    }
+}
+
+/// Regression tests for the findings of the 2026-07-26 audit (see
+/// docs/AUDIT-2026-07.md). Each one was written to fail against the code as it
+/// stood and asserts the behaviour the app should have. Anything still marked
+/// `#[ignore]` is a finding that has not been fixed yet — do not "fix" these by
+/// relaxing the assertions.
+#[cfg(test)]
+mod audit_2026_07 {
+    use super::*;
+
+    async fn test_db() -> Database {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("mise_audit_{unique}.db"));
+        let db = Builder::new_local(path.to_str().unwrap()).build().await.unwrap();
+        let _ = get_conn(&db).await.unwrap().query("PRAGMA journal_mode = WAL;", ()).await.unwrap();
+        run_migrations(&db).await.unwrap();
+        db
+    }
+
+    async fn flour(db: &Database, unit: Unit, price: f64) -> Ingredient {
+        create_ingredient(db, IngredientInput {
+            name: "Farinha".into(), unit, price_per_unit: price, category: None, event_id: None,
+        }).await.unwrap()
+    }
+
+    async fn cake(db: &Database, lines: Vec<RecipeIngredientInput>) -> RecipeWithIngredients {
+        create_recipe(db, RecipeInput {
+            name: "Bolo".into(), category: "Sobremesa".into(), portions: 4,
+            instructions: String::new(), ingredients: lines,
+            prep_time_minutes: None, cook_time_minutes: None,
+            tags: vec![], image_base64: None, event_id: None,
+        }).await.unwrap()
+    }
+
+    /// DOM-04: what the Settings page downloads as `mise-backup-<date>.json`
+    /// has to survive "formatted the machine, put it back" — the only reason
+    /// anyone makes a backup. `export_data` covered ingredients and recipes
+    /// and nothing else.
+    #[tokio::test]
+    async fn a_backup_must_restore_the_stock_and_purchases_it_was_given() {
+        let db = test_db().await;
+        let dir = std::env::temp_dir();
+        let f = flour(&db, Unit::Kilogram, 2.0).await;
+        upsert_stock(&db, StockInput {
+            ingredient_id: f.id, quantity: 7.0, min_quantity: 1.0,
+        }).await.unwrap();
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 3.0, unit: Unit::Kilogram,
+            price_per_unit: 2.0, total_price: 6.0,
+            is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        let backup = backup_export(&db, &dir).await.unwrap();
+
+        let restored = test_db().await;
+        backup_restore(&restored, &dir, backup).await.unwrap();
+
+        let stock = stock_list(&restored).await.unwrap();
+        assert_eq!(stock.len(), 1, "the backup lost the user's stock entirely");
+        assert_eq!(stock[0].quantity, 10.0, "7 on the shelf plus 3 bought back must come back as 10");
+        assert_eq!(
+            stock_purchases_list(&restored, f.id).await.unwrap().len(), 1,
+            "the backup lost the purchase history"
+        );
+    }
+
+    /// DOM-04, second half: the category travelled as the numeric id rendered
+    /// as text, which matches no category name on the way back in.
+    #[tokio::test]
+    async fn export_must_carry_the_category_by_name() {
+        let db = test_db().await;
+        let conn = get_conn(&db).await.unwrap();
+        // Scoped: an open Rows keeps its read lock until it is dropped.
+        let (category_id, category_name): (i64, String) = {
+            let mut rows = conn.query("SELECT id, name FROM categories WHERE kind = 'ingredient' LIMIT 1", ()).await.unwrap();
+            let row = rows.next().await.unwrap().unwrap();
+            (row.get(0).unwrap(), row.get(1).unwrap())
+        };
+
+        let f = flour(&db, Unit::Kilogram, 2.0).await;
+        conn.execute("UPDATE ingredients SET category_id = ?1 WHERE id = ?2", params![category_id, f.id]).await.unwrap();
+
+        let exported = export_data(&db).await.unwrap();
+        assert_eq!(
+            exported.ingredients[0].category.as_deref(), Some(category_name.as_str()),
+            "the export carried something other than the category's name"
+        );
+    }
+
+    /// 3.3 step 6 says every aggregate view of the catalogue filters out event
+    /// rows. The dashboard counts and the recent-activity feed did not, so the
+    /// totals disagreed with the pages they summarise.
+    #[tokio::test]
+    async fn the_dashboard_counts_the_catalogue_the_pages_actually_show() {
+        let db = test_db().await;
+        let ingredient = flour(&db, Unit::Gram, 0.002).await;
+        create_recipe(&db, RecipeInput {
+            name: "Pão".into(), category: "Pão".into(), portions: 10,
+            instructions: "Amassar".into(),
+            ingredients: vec![RecipeIngredientInput { ingredient_id: ingredient.id, quantity: 1.0, unit: Unit::Kilogram }],
+            prep_time_minutes: None, cook_time_minutes: None, tags: vec![], image_base64: None, event_id: None,
+        }).await.unwrap();
+
+        let before = get_dashboard_stats(&db).await.unwrap();
+
+        // An event with its own recipe and its own ingredient: neither belongs to
+        // the catalogue, so neither may move the catalogue's totals.
+        let event = create_event(&db, EventInput {
+            name: "Casamento".into(), event_date: Some("2026-08-01".into()), notes: None,
+        }).await.unwrap();
+        let event_ingredient = create_ingredient(&db, IngredientInput {
+            name: "Açúcar de evento".into(), unit: Unit::Gram, price_per_unit: 0.001,
+            category: Some("Doces".into()), event_id: Some(event.id),
+        }).await.unwrap();
+        create_recipe(&db, RecipeInput {
+            name: "Bolo do casamento".into(), category: "Doces".into(), portions: 40,
+            instructions: "Bater".into(),
+            ingredients: vec![RecipeIngredientInput { ingredient_id: event_ingredient.id, quantity: 2.0, unit: Unit::Kilogram }],
+            prep_time_minutes: None, cook_time_minutes: None, tags: vec![], image_base64: None,
+            event_id: Some(event.id),
+        }).await.unwrap();
+
+        let after = get_dashboard_stats(&db).await.unwrap();
+        assert_eq!(after.total_recipes, before.total_recipes, "an event recipe was counted as a catalogue recipe");
+        assert_eq!(after.total_ingredients, before.total_ingredients, "an event ingredient was counted as a catalogue ingredient");
+        assert_eq!(after.total_recipes as usize, recipes_list(&db).await.unwrap().len(), "the count disagrees with the recipes page");
+        assert_eq!(after.total_ingredients as usize, ingredients_list(&db).await.unwrap().len(), "the count disagrees with the ingredients page");
+
+        let activity = get_recent_activity(&db, 20).await.unwrap();
+        assert!(
+            activity.iter().all(|a| !a.description.contains("Bolo do casamento")),
+            "an event recipe showed up in the catalogue's recent activity"
+        );
+    }
+
+    /// SEC-002 residual: the scheme allowlist let a pasted link reach the local
+    /// network. No network needed — IP literals and `localhost` resolve offline.
+    #[tokio::test]
+    async fn importing_from_the_local_network_is_refused() {
+        for url in [
+            "http://127.0.0.1:8080/receita",
+            "http://localhost/receita",
+            "http://192.168.1.1/admin",
+            "http://169.254.169.254/latest/meta-data",
+            "http://[::1]/receita",
+            "file:///etc/passwd",
+        ] {
+            assert!(
+                assert_safe_url(url).await.is_err(),
+                "'{url}' was accepted as a public recipe site"
+            );
+        }
+    }
+
+    /// DOM-01: `receipt_confirm` converts the purchased quantity into the
+    /// ingredient's own unit; `stock_purchase_add` did not (it parsed the
+    /// ingredient unit into `_ingredient_unit` and discarded it).
+    #[tokio::test]
+    async fn stock_purchase_add_must_convert_into_the_ingredient_unit() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 1.0, unit: Unit::Kilogram,
+            price_per_unit: 2.0, total_price: 2.0,
+            is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        let stock = stock_list(&db).await.unwrap();
+        assert_eq!(
+            stock[0].quantity, 1000.0,
+            "1 kg bought into a gram-tracked stock must add 1000 g, not 1"
+        );
+    }
+
+    /// DOM-02: `weighted_avg_stock_price` sums `quantity` across purchases
+    /// without normalising units, so the same real price expressed in two
+    /// units produced a nonsense average that landed straight in recipe cost.
+    #[tokio::test]
+    async fn weighted_average_price_must_not_mix_units() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Kilogram, 2.0).await;
+
+        // The same flour at the same real price (2 €/kg), bought twice,
+        // recorded in two different units.
+        for (qty, unit, price) in [(1.0, Unit::Kilogram, 2.0), (1000.0, Unit::Gram, 0.002)] {
+            stock_purchase_add(&db, StockPurchaseInput {
+                ingredient_id: f.id, quantity: qty, unit,
+                price_per_unit: price, total_price: 2.0,
+                is_discount: false, discount_percent: 0.0,
+                purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            }).await.unwrap();
+        }
+
+        let recipe = cake(&db, vec![RecipeIngredientInput {
+            ingredient_id: f.id, quantity: 1.0, unit: Unit::Kilogram,
+        }]).await;
+
+        let cost = calculate_cost(&db, recipe.recipe.id).await.unwrap();
+        assert!(
+            (cost.total_cost - 2.0).abs() < 0.01,
+            "1 kg of flour bought at 2 €/kg twice costs {} €, not 2 €",
+            cost.total_cost
+        );
+    }
+
+    /// DOM-03: `update_recipe` deletes every `recipe_ingredients` row before
+    /// re-inserting them. Without a transaction, any failure inside the insert
+    /// loop left the recipe permanently stripped of the lines that hadn't gone
+    /// back in yet.
+    #[tokio::test]
+    async fn a_failed_recipe_update_must_not_destroy_the_existing_ingredients() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Kilogram, 2.0).await;
+        let sugar = create_ingredient(&db, IngredientInput {
+            name: "Açúcar".into(), unit: Unit::Kilogram, price_per_unit: 1.0,
+            category: None, event_id: None,
+        }).await.unwrap();
+
+        let recipe = cake(&db, vec![
+            RecipeIngredientInput { ingredient_id: f.id, quantity: 1.0, unit: Unit::Kilogram },
+            RecipeIngredientInput { ingredient_id: sugar.id, quantity: 0.5, unit: Unit::Kilogram },
+        ]).await;
+
+        // The user renames the recipe, and one line carries an ingredient id
+        // that no longer resolves — a stale edit form, a client retrying with
+        // an old payload, or any IPC caller. `range(min = 1)` lets it through
+        // validation; the failure happens inside the re-insert loop, after
+        // every existing row has already been deleted.
+        let _ = update_recipe(&db, recipe.recipe.id, RecipeInput {
+            name: "Bolo de Domingo".into(), category: "Sobremesa".into(), portions: 4,
+            instructions: String::new(),
+            ingredients: vec![
+                RecipeIngredientInput { ingredient_id: f.id, quantity: 1.0, unit: Unit::Kilogram },
+                RecipeIngredientInput { ingredient_id: sugar.id + 9_999, quantity: 0.5, unit: Unit::Kilogram },
+            ],
+            prep_time_minutes: None, cook_time_minutes: None,
+            tags: vec![], image_base64: None, event_id: None,
+        }).await;
+
+        let all = recipes_list(&db).await.unwrap();
+        let after = all.iter().find(|r| r.recipe.id == recipe.recipe.id).unwrap();
+        assert_eq!(
+            after.ingredients.len(), 2,
+            "a failed recipe update left the recipe with {} of its 2 ingredients \
+             instead of rolling back",
+            after.ingredients.len()
+        );
+    }
+
+    /// MIG-01 + DOM-01: databases written before the fix hold purchase rows in
+    /// whatever unit was typed. The data migration has to rewrite them into the
+    /// ingredient's unit without changing the amount that was actually paid.
+    #[tokio::test]
+    async fn the_unit_migration_rewrites_purchase_rows_written_before_the_fix() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let conn = get_conn(&db).await.unwrap();
+
+        // A pre-fix row: 1 kg at 2 €/kg against a gram-tracked ingredient.
+        conn.execute(
+            "INSERT INTO stock_purchases
+             (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date)
+             VALUES (?1, 1.0, 'kilogram', 2.0, 2.0, 0, 0.0, ?2)",
+            params![f.id, Utc::now().to_rfc3339()],
+        ).await.unwrap();
+        conn.execute("PRAGMA user_version = 0", ()).await.unwrap();
+
+        run_data_migrations(&conn).await.unwrap();
+
+        let mut rows = conn.query(
+            "SELECT quantity, unit, price_per_unit FROM stock_purchases WHERE ingredient_id = ?1",
+            params![f.id],
+        ).await.unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        let quantity: f64 = row.get(0).unwrap();
+        let unit: String = row.get(1).unwrap();
+        let price: f64 = row.get(2).unwrap();
+
+        assert_eq!(quantity, 1000.0, "1 kg must become 1000 g");
+        assert_eq!(unit, "gram", "the row must end up in the ingredient's unit");
+        assert!(
+            (quantity * price - 2.0).abs() < 1e-9,
+            "the migration changed what was paid: {} € instead of 2 €",
+            quantity * price
+        );
+    }
+
+    /// DOM-01: units from another dimension are a real disagreement between
+    /// what was typed and how the ingredient is tracked. Guessing produced the
+    /// original bug, so the write is rejected instead.
+    #[tokio::test]
+    async fn buying_in_an_unconvertible_unit_is_rejected_rather_than_guessed() {
+        let db = test_db().await;
+        let eggs = create_ingredient(&db, IngredientInput {
+            name: "Ovos".into(), unit: Unit::Piece, price_per_unit: 0.3,
+            category: None, event_id: None,
+        }).await.unwrap();
+
+        let result = stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: eggs.id, quantity: 1.0, unit: Unit::Kilogram,
+            price_per_unit: 2.0, total_price: 2.0,
+            is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await;
+
+        assert!(result.is_err(), "1 kg into a piece-tracked ingredient must not be accepted");
+        assert!(
+            stock_list(&db).await.unwrap().is_empty(),
+            "the rejected purchase must not have moved any stock"
+        );
+    }
+
+    /// DOM-06: the cost report used to sum shopping-list estimates, so money
+    /// spent anywhere else — the Stock page, and every scanned receipt —
+    /// showed as €0.00.
+    #[tokio::test]
+    async fn cost_report_counts_money_spent_outside_a_shopping_list() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Kilogram, 2.0).await;
+
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 3.0, unit: Unit::Kilogram,
+            price_per_unit: 2.0, total_price: 6.0,
+            is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        let report = get_cost_report(&db, 30).await.unwrap();
+        assert_eq!(
+            report.total_spent, 6.0,
+            "a purchase made outside a shopping list must count as money spent"
+        );
+        assert_eq!(
+            report.by_category.iter().map(|c| c.total).sum::<f64>(), 6.0,
+            "the category breakdown must add up to the total it is a breakdown of"
+        );
     }
 }

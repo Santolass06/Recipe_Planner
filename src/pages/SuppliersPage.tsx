@@ -12,6 +12,7 @@ import { useI18n } from "../i18n";
 import type { Supplier } from "../../crates/core/bindings/Supplier";
 import type { SupplierInput } from "../../crates/core/bindings/SupplierInput";
 import type { PriceQuoteWithIngredient as PriceQuote } from "../../crates/core/bindings/PriceQuoteWithIngredient";
+import { errKey } from "../lib/errors";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -84,7 +85,7 @@ export default function SuppliersPage() {
 
       setSuppliers(suppliersWithQuotes);
     } catch (e) {
-      showToast(t("suppliers.loadError"), "err");
+      showToast(t(errKey(e, "suppliers.loadError")), "err");
     }
   }, [showToast, t]);
 
@@ -133,7 +134,7 @@ export default function SuppliersPage() {
       closeSupplierModal();
       await loadSuppliers();
     } catch (e) {
-      showToast(t("suppliers.saveError"), "err");
+      showToast(t(errKey(e, "suppliers.saveError")), "err");
     } finally {
       setLoading(false);
     }
@@ -146,7 +147,7 @@ export default function SuppliersPage() {
       showToast(t("suppliers.deleted"), "ok");
       await loadSuppliers();
     } catch (e) {
-      showToast(t("suppliers.deleteError"), "err");
+      showToast(t(errKey(e, "suppliers.deleteError")), "err");
     }
   }
 
@@ -195,7 +196,7 @@ export default function SuppliersPage() {
       closeQuoteModal();
       await loadSuppliers();
     } catch (e) {
-      showToast(t("suppliers.quoteSaveError"), "err");
+      showToast(t(errKey(e, "suppliers.quoteSaveError")), "err");
     } finally {
       setLoading(false);
     }
@@ -208,7 +209,7 @@ export default function SuppliersPage() {
       showToast(t("suppliers.quoteDeleted"), "ok");
       await loadSuppliers();
     } catch (e) {
-      showToast(t("suppliers.quoteDeleteError"), "err");
+      showToast(t(errKey(e, "suppliers.quoteDeleteError")), "err");
     }
   }
 

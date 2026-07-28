@@ -14,6 +14,7 @@ import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import type { Supplier } from "../../crates/core/bindings/Supplier";
 import type { ShoppingListMarkPurchasedInput } from "../../crates/core/bindings/ShoppingListMarkPurchasedInput";
 import { UNIT_LABELS_SHORT as UNIT_LABELS, convertUnit } from "../lib/units";
+import { errKey } from "../lib/errors";
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -785,7 +786,7 @@ export default function ShoppingListPage() {
       const data = await invoke<ShoppingList[]>("shopping_lists_list");
       setLists(data);
     } catch (e) {
-      showToast(t("shoppingList.loadListsError"), "err");
+      showToast(t(errKey(e, "shoppingList.loadListsError")), "err");
     }
   }, [showToast, t]);
 
@@ -818,7 +819,7 @@ export default function ShoppingListPage() {
       const list = await invoke<ShoppingList>("shopping_list_get", { id });
       setSelectedList(list);
     } catch (e) {
-      showToast(t("shoppingList.loadListError"), "err");
+      showToast(t(errKey(e, "shoppingList.loadListError")), "err");
     }
   }, [showToast, t]);
 
@@ -837,7 +838,7 @@ export default function ShoppingListPage() {
       loadListDetail(list.id!);
       showToast(t("shoppingList.listCreated"), "ok");
     } catch (e) {
-      showToast(t("shoppingList.listCreateError"), "err");
+      showToast(t(errKey(e, "shoppingList.listCreateError")), "err");
     }
   };
 
@@ -850,7 +851,7 @@ export default function ShoppingListPage() {
       }
       showToast(t("shoppingList.listRenamed"), "ok");
     } catch (e) {
-      showToast(t("shoppingList.listRenameError"), "err");
+      showToast(t(errKey(e, "shoppingList.listRenameError")), "err");
     }
   };
 
@@ -865,7 +866,7 @@ export default function ShoppingListPage() {
       }
       showToast(t("shoppingList.listDeleted"), "ok");
     } catch (e) {
-      showToast(t("shoppingList.listDeleteError"), "err");
+      showToast(t(errKey(e, "shoppingList.listDeleteError")), "err");
     }
   };
 
@@ -881,7 +882,7 @@ export default function ShoppingListPage() {
         items: prev.items.map(i => i.id === itemId ? updatedItem : i)
       } : null);
     } catch (e) {
-      showToast(t("shoppingList.itemUpdateError"), "err");
+      showToast(t(errKey(e, "shoppingList.itemUpdateError")), "err");
     }
   };
 
@@ -896,7 +897,7 @@ export default function ShoppingListPage() {
       } : null);
       showToast(t("shoppingList.purchaseRecorded"), "ok");
     } catch (e) {
-      showToast(t("shoppingList.purchaseError"), "err");
+      showToast(t(errKey(e, "shoppingList.purchaseError")), "err");
       throw e;
     }
   };
@@ -910,7 +911,7 @@ export default function ShoppingListPage() {
       } : null);
       showToast(t("shoppingList.itemRemoved"), "ok");
     } catch (e) {
-      showToast(t("shoppingList.itemRemoveError"), "err");
+      showToast(t(errKey(e, "shoppingList.itemRemoveError")), "err");
     }
   };
 
@@ -922,7 +923,7 @@ export default function ShoppingListPage() {
       setSelectedList(list);
       showToast(t("shoppingList.purchasedCleared"), "ok");
     } catch (e) {
-      showToast(t("shoppingList.clearError"), "err");
+      showToast(t(errKey(e, "shoppingList.clearError")), "err");
     }
   };
 
