@@ -3000,8 +3000,10 @@ pub async fn recipe_import_from_url(db: &Database, url: String) -> Result<Recipe
         for line in lines {
             let Some(text) = line.as_str() else { continue };
             let mut parsed = parse_ingredient_line(text);
+            // Catalogue only: this import has no event destination, so a match
+            // against an event-scoped ingredient would link the two silently.
             let mut rows = conn.query(
-                "SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?1) LIMIT 1",
+                "SELECT id FROM ingredients WHERE event_id IS NULL AND LOWER(name) = LOWER(?1) LIMIT 1",
                 params![parsed.name_guess.clone()],
             ).await.map_err(|e| e.to_string())?;
             if let Some(row) = rows.next().await.map_err(|e| e.to_string())? {
@@ -3813,11 +3815,13 @@ pub async fn get_dashboard_stats(db: &Database) -> LibsqlResult<DashboardStats> 
     let total_stock_value: f64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
 
     // Total recipes
-    let mut rows = conn.query("SELECT COUNT(*) FROM recipes", ()).await?;
+    // Catalogue only, like recipes_list/ingredients_list — otherwise the dashboard
+    // total disagrees with the number of rows those pages actually show (3.3, passo 6).
+    let mut rows = conn.query("SELECT COUNT(*) FROM recipes WHERE event_id IS NULL", ()).await?;
     let total_recipes: i64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
 
     // Total ingredients
-    let mut rows = conn.query("SELECT COUNT(*) FROM ingredients", ()).await?;
+    let mut rows = conn.query("SELECT COUNT(*) FROM ingredients WHERE event_id IS NULL", ()).await?;
     let total_ingredients: i64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
 
     // Pending shopping items (not purchased)
@@ -3851,6 +3855,7 @@ pub async fn get_recent_activity(db: &Database, limit: u32) -> LibsqlResult<Vec<
         r#"
         SELECT id, name, created_at, 'recipe_created' as type, 'recipe' as entity_type
         FROM recipes
+        WHERE event_id IS NULL
         ORDER BY created_at DESC
         LIMIT ?1
         "#,
@@ -6188,6 +6193,52 @@ mod audit_2026_07 {
         assert_eq!(
             exported.ingredients[0].category.as_deref(), Some(category_name.as_str()),
             "the export carried something other than the category's name"
+        );
+    }
+
+    /// 3.3 step 6 says every aggregate view of the catalogue filters out event
+    /// rows. The dashboard counts and the recent-activity feed did not, so the
+    /// totals disagreed with the pages they summarise.
+    #[tokio::test]
+    async fn the_dashboard_counts_the_catalogue_the_pages_actually_show() {
+        let db = test_db().await;
+        let ingredient = flour(&db, Unit::Gram, 0.002).await;
+        create_recipe(&db, RecipeInput {
+            name: "Pão".into(), category: "Pão".into(), portions: 10,
+            instructions: "Amassar".into(),
+            ingredients: vec![RecipeIngredientInput { ingredient_id: ingredient.id, quantity: 1.0, unit: Unit::Kilogram }],
+            prep_time_minutes: None, cook_time_minutes: None, tags: vec![], image_base64: None, event_id: None,
+        }).await.unwrap();
+
+        let before = get_dashboard_stats(&db).await.unwrap();
+
+        // An event with its own recipe and its own ingredient: neither belongs to
+        // the catalogue, so neither may move the catalogue's totals.
+        let event = create_event(&db, EventInput {
+            name: "Casamento".into(), event_date: Some("2026-08-01".into()), notes: None,
+        }).await.unwrap();
+        let event_ingredient = create_ingredient(&db, IngredientInput {
+            name: "Açúcar de evento".into(), unit: Unit::Gram, price_per_unit: 0.001,
+            category: Some("Doces".into()), event_id: Some(event.id),
+        }).await.unwrap();
+        create_recipe(&db, RecipeInput {
+            name: "Bolo do casamento".into(), category: "Doces".into(), portions: 40,
+            instructions: "Bater".into(),
+            ingredients: vec![RecipeIngredientInput { ingredient_id: event_ingredient.id, quantity: 2.0, unit: Unit::Kilogram }],
+            prep_time_minutes: None, cook_time_minutes: None, tags: vec![], image_base64: None,
+            event_id: Some(event.id),
+        }).await.unwrap();
+
+        let after = get_dashboard_stats(&db).await.unwrap();
+        assert_eq!(after.total_recipes, before.total_recipes, "an event recipe was counted as a catalogue recipe");
+        assert_eq!(after.total_ingredients, before.total_ingredients, "an event ingredient was counted as a catalogue ingredient");
+        assert_eq!(after.total_recipes as usize, recipes_list(&db).await.unwrap().len(), "the count disagrees with the recipes page");
+        assert_eq!(after.total_ingredients as usize, ingredients_list(&db).await.unwrap().len(), "the count disagrees with the ingredients page");
+
+        let activity = get_recent_activity(&db, 20).await.unwrap();
+        assert!(
+            activity.iter().all(|a| !a.description.contains("Bolo do casamento")),
+            "an event recipe showed up in the catalogue's recent activity"
         );
     }
 

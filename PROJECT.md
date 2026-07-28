@@ -562,6 +562,20 @@ ingrediente do catálogo para o evento".** O modelo (b) foi descartado:
      queries ganharam `WHERE i.event_id IS NULL`, mesma convenção do
      `ingredients_list`. `calculate_cost`/`weighted_avg_stock_price`
      ficam intocados por já serem `ingredient_id`-scoped, como decidido.
+   - **Correção (2026-07-28) — este passo estava dado como concluído e
+     tinha três consumidores por filtrar.** `total_recipes` e
+     `total_ingredients` do `get_dashboard_stats`, e o ramo de receitas do
+     `get_recent_activity` — o ramo de stock imediatamente ao lado *tinha*
+     o filtro, o que mostra omissão e não decisão. O dashboard contava
+     receitas e ingredientes de evento que as páginas de Receitas e
+     Ingredientes não mostram, portanto os totais não batiam com o que
+     estava no ecrã. Corrigido com teste de regressão
+     (`the_dashboard_counts_the_catalogue_the_pages_actually_show`), que
+     compara os contadores com o comprimento de `recipes_list`/
+     `ingredients_list` em vez de com um número fixo — assim continua a
+     valer quando os dados de teste mudarem. No mesmo varrimento: o
+     matching por nome do `recipe_import_from_url` também não filtrava, e
+     podia ligar uma receita de catálogo a um ingrediente de evento.
 7. **Comandos Tauri** — registar `event_ingredients_list`,
    `ingredient_copy_to_event` e `ingredient_promote_to_catalog` em
    `crates/tauri/src/lib.rs` E no launcher `src-tauri` (lembrar o bug da
@@ -836,10 +850,10 @@ evento (previsto vs. real) e alerta de validade com ação directa.
 ao frontend) **é um stub**: aceita `recipe_ids` e `portions_multiplier`,
 ignora ambos e cria uma lista vazia chamada «Compras \<data\>». O comentário
 no corpo — `// This is a complex query - simplified implementation` — diz
-exatamente isso. A auditoria de 2026-07-26
-classificou-o como código morto a apagar; **é o contrário — é uma feature
-por implementar**, e o nome já diz qual. Fica registada aqui para não ser
-apagada por engano numa próxima limpeza.
+exatamente isso. A auditoria classificou-o corretamente como
+**«Prometido» — provavelmente a feature mais pedida** (§2.1); fui eu que
+depois o confundi com o `suggest_recipes` e propus apagá-lo. Fica
+registado aqui para não ser apagado por engano numa próxima limpeza.
 
 Comportamento pretendido: expandir as receitas escolhidas em linhas de
 ingrediente (quantidade × `portions_multiplier`, convertida para a unidade
