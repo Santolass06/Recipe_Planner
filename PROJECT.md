@@ -23,71 +23,167 @@ log histórico técnico, ver banner no topo desse ficheiro).
 
 ---
 
-## Ordem de execução (revisão de 2026-07-10)
+## Como ler este documento
 
-Sequência decidida após rever o plano contra o estado real do código:
+Três blocos, e só o primeiro é preciso ler para saber o que fazer a seguir:
 
-1. ~~**3.3 — Stock isolado por evento**~~ ✅ concluída, fundida em `main`
-   (inclui fix do bug de conversão de unidades no custo por porção).
-2. **3.5 — Segregação de artigos do recibo por código de IVA** (secção
-   nova, ver 3.5 abaixo) — construída sobre o motor OCR atual
-   (`tesseract.js`), não depende da decisão de motor nativo. Validada com
-   recibos reais (ver [[OCR — Digitalização de recibos]]).
-3. ~~**Decisão de motor OCR nativo** mantém o acoplamento de segurança que
-   sobe a prioridade~~ **revertido (2026-07-10):** self-hospedar os assets
-   do `tesseract.js` (✅ concluído, ver Fase 4) já fecha o buraco de CSP
-   `cdn.jsdelivr.net` sem depender de trocar de motor. A escolha
-   nativo-vs-`tesseract.js` volta a ser só qualidade de OCR, sem urgência
-   de segurança — mas ver item 3.5-bis abaixo, que sobe de prioridade por
-   outra razão.
-3-bis. **PRIORIDADE ALTA (nova, 2026-07-10): validar precisão do OCR atual
-   em múltiplas cadeias portuguesas.** Hoje só está validado com 2 recibos
-   reais de **uma cadeia** (Pingo Doce, ver 3.5 e [[OCR — Digitalização de
-   recibos]]) — Continente, Lidl, Auchan, etc. nunca foram testados.
-   "Aceitável em quase todos os casos" não está provado nem para
-   `tesseract.js` nem para o nativo. Isto não depende de utilizadores
-   reais nem do Polishing — só de reunir mais recibos de teste — por isso
-   sobe para **antes** da Fase de Polishing, não fica à espera dela.
-4. **Fase 4 — Distribuição** (secção abaixo) — empacotamento (✅), fix do
-   path `mise/mise/mise.db` com migração de dados (✅). **Teste em máquina
-   limpa adiado indefinidamente (revisão 2026-07-20):** movido para o
-   último item da Fase de Polishing, ver lá — não bloqueia o resto da
-   sequência abaixo.
-   **Bug da câmara (Fase 0) sobe de prioridade (2026-07-10):** deixa de
-   ser "resolve-se ou descarta-se sozinho na Fase 4" — a câmara é a
-   interação principal do Scanner e "câmara funciona" passa a checkpoint
-   obrigatório em cada alvo, desktop incluído. **Correção (2026-07-10,
-   diagnóstico adicional):** mobile usa um plugin de câmara nativo, não
-   `getUserMedia`/WebKitGTK — código diferente do bug de desktop — por
-   isso este bug **não bloqueia o arranque** da Fase Multi-plataforma, só
-   fica marcado como PRIORIDADE ALTA por não poder fechar-se em silêncio
-   como antes. **Diagnóstico também adiado (2026-07-20):** dependia do
-   mesmo teste em máquina limpa, agora no fim da Fase de Polishing — fica
-   sem fix nem descarte até lá, não é uma reabertura do debugging.
-5. **Fase de Instrumentação de uso** (nova, ver secção abaixo) — regista
-   dados de uso reais desde o início, para alimentar as decisões da Fase
-   de Polishing.
-6. **Fase Multi-plataforma** — Android/iOS constroem e validam a própria
-   implementação de câmara nativa, independente do bug de desktop (ver
-   item 4).
-7. **Utilizadores reais a testar** → só depois, **Fase de Polishing**.
-8. **Fase de experimentação** (nova, pós-Polishing) — Vision LLM local
-   para OCR de recibos, e outras ideias que dependam de IA local pesada,
-   só depois de haver sinal real de utilização a justificar o custo.
+1. **[[#Onde estamos]]** e **[[#O que falta, por ordem]]**, já a seguir — o
+   estado real e a sequência. É a única parte que se lê para decidir trabalho.
+2. **Secções «Fase …» e «3.x»** (a seguir) — o registo histórico de cada
+   trabalho já feito, com as decisões e o porquê. Consulta-se quando é preciso
+   saber *porque* é que uma coisa ficou como ficou. Não é uma lista de tarefas.
+3. **Auditorias** (no fim) — o estado por achado de cada auditoria externa e
+   interna.
 
-**Revisão de 2026-07-28 (auditoria interna de 2026-07-26, ver secção
-abaixo):** as fundações de dados que a auditoria apontou estão fechadas
-(transações, unidades, `user_version`, backup real), o que desbloqueia
-**3.6 — Movimentos de stock**. Passa a ser o próximo trabalho
-estruturante, **antes** de Instrumentação e de Multi-plataforma: é dele
-que dependem as duas tabs vazias dos relatórios, o Recipe Suggester e o
-mise Pro inteiro. A **3.7 — Lista de compras a partir de receitas** é
-independente e mais pequena, entra quando houver espaço. As decisões
-adiadas (`f64`→cêntimos, DOM-05, PERF-01) resolvem-se dentro de 3.6, que é
-onde passam a ter motivo concreto e migração barata.
+**Aviso sobre a numeração, que é a maior fonte de confusão neste documento:**
+existem dois esquemas de «fases» diferentes e não se referem ao mesmo.
+As **«Fases 0–4» deste documento** são etapas do projeto (Estabilização,
+Redesign, Higiene, Features, Distribuição). As **«fases 1–4» da auditoria de
+2026-07-26** eram lotes de correções, e já estão todas fechadas. Quando estas
+notas dizem «Fase 4» sem mais nada, é a Fase 4 **deste** documento —
+Distribuição. Nenhuma fase nova será numerada; daqui para a frente usa-se a
+lista ordenada abaixo.
 
-God-components (adiado na Fase 2) e i18n de vocabulário só entram se o
-feedback de utilização real apontar para lá.
+---
+
+## Onde estamos
+
+**2026-07-28.** A app funciona de ponta a ponta em Linux nativo. Depois da
+auditoria de 2026-07-26 (ver secção própria), as fundações de dados estão
+sãs: as escritas multi-tabela são transacionais, as compras ficam sempre
+gravadas na unidade do ingrediente, há slot de versão de schema com
+migrações que transformam dados, o backup é mesmo um backup, e o relatório de
+custos soma dinheiro realmente pago. 117 testes, 0 ignorados.
+
+**O que a app faz hoje:** ingredientes, receitas, stock com marca e
+fornecedor, compras, listas de compras, planeamento de refeições, eventos com
+receitas e stock isolados, scanner de recibos com segregação por código de
+IVA, importação de receita por URL, relatórios de custo, e backup/restauro.
+
+**A lacuna estrutural, numa frase:** a app modela **aquisição** e nunca modela
+**consumo**. Todos os caminhos que escrevem em `stock` são de entrada; o único
+que desce é o utilizador a corrigir o número à mão. É a causa única das duas
+tabs de relatório vazias, do Recipe Suggester sem base de decisão, e de o
+stock divergir da realidade ao fim de uma semana de uso. É o item 3 da lista
+abaixo.
+
+**Alvos de distribuição decididos (2026-07-28):** Linux nativo, Linux host
+(acedido por outros dispositivos pela internet, com autenticação), Android
+nativo e Windows nativo. macOS e iOS/iPad saem do âmbito por agora — ver
+[[#Alvos de distribuição]].
+
+---
+
+## O que falta, por ordem
+
+A ordem é por **dependência**, não por importância. Onde não há dependência,
+está dito que o item é livre.
+
+### Bloqueados em ti, não em código
+
+Estes três não têm trabalho de código pendente. Ficam à cabeça porque o
+primeiro é pré-requisito de metade da lista.
+
+**A. Confirmar o `.deb` numa máquina limpa.** Os dois bugs que impediam isto
+já estão corrigidos: o build passou a correr em runner limpo sem Nix
+(`release.yml`) e o `max-width: 1320px` do `.content` saiu. Falta instalar os
+assets reconstruídos e correr o essencial de ponta a ponta. **Fecha dois
+itens de uma vez:** se a câmara do Scanner funcionar, o bug pendente da Fase 0
+fecha-se como «ambiente de dev, sem fix»; se não funcionar, ganha finalmente
+diagnóstico num ambiente representativo em vez de morrer no Ubuntu+Nix
+misturados da máquina de desenvolvimento. **Pré-requisito dos itens 5, 6 e 7**
+— Linux é o alvo de referência de que os outros herdam.
+
+**B. Validar o OCR noutras cadeias (item 3-bis, PRIORIDADE ALTA).** Só está
+validado com 2 recibos do Pingo Doce. Continente, Lidl e Auchan nunca foram
+testados. Não precisa de código, precisa de recibos — e corre-se na mesma
+sessão que o A. **Livre:** não bloqueia nada e nada o bloqueia, mas é o item
+mais antigo em aberto e o que mais afasta o produto do que promete.
+
+**C. Rodar o PAT do GitHub** que ficou exposto num commit local a 2026-07-28
+(ver [[#Auditoria interna (2026-07-26)]]). Minutos.
+
+### O trabalho de código, por ordem de dependência
+
+**1. Matriz de edições — Family e Pro.** Ver [[#Edições — Family e Pro]].
+Meia hora de escrita, sem código. **Tem de vir antes do item 3**, e a razão é
+concreta: é a edição Pro que exige contar produtos vendidos e perdidos, logo é
+ela que decide se `stock_movements` precisa dos tipos `sale` e `production`
+desde o primeiro dia. Decidir isto depois obriga a desenhar a tabela duas
+vezes — e o princípio deste projeto é fechar modelação de dados em desenho,
+antes do código.
+
+**2. Lista de compras a partir de receitas** — [[#3.7 — Lista de compras a partir de receitas]].
+**Livre**, e a mais pequena que resta. É a única funcionalidade prometida na
+superfície da app (comando registado, exposto ao frontend) que não faz o que o
+nome diz. Boa candidata a vitória rápida antes do item 3.
+
+**3. Movimentos de stock** — [[#3.6 — Movimentos de stock]]. **O item
+estruturante.** Fecha a metade em falta do domínio. Depende do 1 (matriz de
+edições) e dos pré-requisitos de dados, esses já fechados. Traz para dentro
+dele três decisões adiadas que só aqui ganham motivo concreto e migração
+barata: `f64`→cêntimos, DOM-05 (janela temporal vs. FIFO) e PERF-01.
+**Desbloqueia:** tab de desperdício, tendências de stock, Recipe Suggester,
+contagem de vendidos/perdidos, orçamento por evento (previsto vs. real), e
+alerta de validade com ação directa.
+
+**4. Instrumentação — emissores automáticos.** A tabela `usage_events` existe
+e está vazia de propósito. Passa a fazer sentido **depois do 3**, porque é aí
+que passa a haver eventos com significado para registar (o que se cozinhou,
+o que se perdeu). Antes disso registaria só navegação.
+
+**5. Windows nativo.** Mesma API desktop do Tauri que o Linux já usa: build e
+teste por SO, sem UI nova. **Depende do A.** É o alvo de menor custo
+incremental dos que faltam.
+
+**6. Android nativo.** Aqui há trabalho real, não só build — ver
+[[#Alvos de distribuição]]. **Depende do A** e beneficia de o 3 estar fechado
+(não vale a pena desenhar ecrãs touch para relatórios que ainda estão vazios).
+
+**7. Linux host, com autenticação.** A maior mudança arquitetural do plano —
+ver [[#Alvos de distribuição]] para o desenho e a decisão que falta fechar.
+**Depende do 3**: multi-utilizador muda a quem pertence um movimento de stock,
+e construir o servidor antes de os movimentos existirem obriga a mexer no
+schema outra vez.
+
+### Sem ordem, sem data
+
+Entram se e quando houver sinal real de utilização a justificá-los. Estão
+listados para não voltarem a ser redescobertos como «gaps»: motor de OCR
+nativo vs. `tesseract.js`, refatoração dos god-components, onboarding de
+língua na primeira execução, políticas de custo alternativas, tradução de
+vocabulário, e o [[#Backlog / Deferido (sem data)]].
+
+---
+
+## Edições — Family e Pro
+
+**Estado: por decidir.** Esta secção existe porque a divisão em edições é
+citada de passagem em várias partes do documento e da auditoria, mas nunca foi
+escrita — e é pré-requisito do item 3 da lista acima.
+
+**A intenção conhecida:** duas edições sobre o mesmo codebase. **Family**, uso
+pessoal/doméstico — planear refeições, gerir despensa, controlar quanto se
+gasta. **Pro**, uso de negócio — produzir para vender, saber o custo real do
+que se produz, contar o que se vendeu e o que se perdeu.
+
+**A pergunta que tem de ser respondida antes do item 3**, e só ela:
+**a edição Pro faz parte do plano a sério, ou é uma ideia para «um dia»?**
+
+- **Se sim:** `stock_movements` nasce com os seis tipos (`purchase`,
+  `production`, `consumption`, `sale`, `loss`, `adjustment`) e com preço de
+  venda gravado no movimento. O custo extra hoje é pequeno — são colunas e
+  variantes de enum, não features. A UI de venda/produção pode ficar atrás de
+  uma flag e ser construída mais tarde, sem tocar no schema.
+- **Se não:** `stock_movements` nasce com `consumption`, `loss` e
+  `adjustment`, e acrescentar `sale`/`production` depois é uma migração de
+  dados numa tabela já grande, com histórico a reinterpretar.
+
+Escrever a matriz completa de gating (que ecrã, que relatório, que comando
+pertence a que edição) **não é preciso agora** — só a resposta acima é. A
+matriz constrói-se sozinha à medida que as features aparecem, desde que o
+schema tenha nascido certo. Marcar aqui a decisão quando for tomada.
+
 
 ---
 
@@ -195,7 +291,7 @@ bloqueantes, antes de qualquer feature nova.
   funcionar, ganha finalmente um diagnóstico num ambiente representativo.
   **PRIORIDADE ALTA (revisão 2026-07-10):** deixa de ser um item que se
   fecha por omissão se o teste de máquina limpa não o apanhar — a app vai
-  ser portada para Android/iOS (Fase Multi-plataforma), onde a câmara é a
+  ser portada para Android ([[#Alvos de distribuição]]), onde a câmara é a
   interação principal do Scanner, não uma opção com fallback natural para
   upload manual como no desktop. Nota: o mecanismo em mobile é outro
   (câmara nativa via plugin Tauri, não `getUserMedia`/WebKitGTK) — o
@@ -224,7 +320,7 @@ bloqueantes, antes de qualquer feature nova.
   (`clique direito → Inspecionar`, requer sessão gráfica interativa, fora
   do alcance desta sessão). **Correção ao roadmap:** dado que mobile usa
   um plugin de câmara nativo e não `getUserMedia`/WebKitGTK, este bug de
-  desktop **não bloqueia o arranque da Fase Multi-plataforma** — as duas
+  desktop **não bloqueia o arranque dos [[#Alvos de distribuição]]** — as duas
   implementações de câmara são código diferente. O que continua verdade é
   que "câmara funciona" é um checkpoint obrigatório e independente em
   cada alvo (desktop Linux, Android, iOS), não que resolver este bug é
@@ -794,9 +890,9 @@ Auchan, etc.) — só verificado com Pingo Doce até agora.
 
 ---
 
-### 3.6 — Movimentos de stock (2026-07-28) — POR IMPLEMENTAR
+### 3.6 — Movimentos de stock
 
-Origem: PRD-01 da auditoria de 2026-07-26. **Desenho completo em
+**POR IMPLEMENTAR** — item 3 de [[#O que falta, por ordem]]. Origem: PRD-01 da auditoria de 2026-07-26. **Desenho completo em
 `docs/AUDIT-2026-07.md` §2.4** — não repetido aqui para não haver duas
 versões a divergir.
 
@@ -844,7 +940,9 @@ Desbloqueia, quando existir: tabs de desperdício e tendências, Recipe
 Suggester, contagem de vendidos/perdidos do mise Pro, orçamento por
 evento (previsto vs. real) e alerta de validade com ação directa.
 
-### 3.7 — Lista de compras a partir de receitas — POR IMPLEMENTAR
+### 3.7 — Lista de compras a partir de receitas
+
+**POR IMPLEMENTAR** — item 2 de [[#O que falta, por ordem]].
 
 `create_shopping_list_from_recipes` (`db.rs`, comando registado e exposto
 ao frontend) **é um stub**: aceita `recipe_ids` e `portions_multiplier`,
@@ -1008,7 +1106,7 @@ buraco e é pré-requisito do Polishing.
   tamanhos que o Linux/`.deb` pede — só existia `32x32.png`, faltava
   `128x128.png`/`128x128@2x.png`). Regenerado o conjunto completo a partir
   de `icons/icon.svg` via `cargo tauri icon` (inclui, de bónus, os
-  conjuntos Android/iOS já prontos para a Fase Multi-plataforma). Adicionado
+  conjuntos Android/iOS já prontos para os [[#Alvos de distribuição]]). Adicionado
   `bundle.icon` (todos os tamanhos), `bundle.category` (`"Lifestyle"`),
   `bundle.shortDescription`/`longDescription`. **Testado nesta máquina**
   (não substitui o teste em máquina limpa, só apanha erros de config
@@ -1318,39 +1416,165 @@ heurística. Não é trabalho novo — é validar/comparar decisões já tomadas
 
 ---
 
-## Fase Multi-plataforma (nova, 2026-07-10)
+## Alvos de distribuição
 
-Objetivo do projeto: correr em Android, iOS/iPad, Mac, Linux e Windows.
-Tauri v2 (já em uso, ver `src-tauri/Cargo.toml`) suporta todos estes alvos a
-partir do mesmo codebase — não vale a pena branch por SO (diverge o código,
-merges dolorosos); cada alvo é um `cargo tauri build`/`android init`/
-`ios init` novo sobre o mesmo `main`, com diferenças tratadas por
-config/conditional compilation pontual quando surgirem, não por branch
-permanente. Ordem recomendada, por custo incremental crescente:
+Substitui a antiga secção «Fase Multi-plataforma» (2026-07-10), que listava
+Android/iOS/Mac/Linux/Windows como um conjunto indistinto. **Âmbito revisto a
+2026-07-28**, com quatro alvos e um deles arquiteturalmente diferente dos
+outros três.
 
-- [ ] **Linux** — já em curso (Fase 4 acima: empacotamento `.deb`/AppImage +
-  teste em máquina limpa). Fica como alvo de referência.
-- [ ] **Windows/macOS (desktop)** — mesma API desktop do Tauri que o Linux já
-  usa; custo incremental baixo, essencialmente build + teste por SO (`.msi`/
-  `.exe` no Windows, `.dmg`/notarização no Mac). Sem UI nova a desenhar.
-- [ ] **Android/iOS/iPad (mobile)** — `cargo tauri android/ios init`, SDKs
-  próprios (Android SDK/NDK, Xcode) instalados numa máquina capaz de os
-  correr. Aqui há trabalho real novo, não só build: UI/UX pensada para touch
-  e ecrãs pequenos (os componentes atuais assumem desktop), permissões de
-  câmara mobile (Android/iOS têm modelo diferente do desktop — relacionado
-  com o bug de câmara pendente da Fase 0), e confirmar suporte mobile de
-  cada plugin Tauri usado (`dialog`, `fs`, etc.) caso a caso. **Android
-  cobre telemóvel e tablet, não só telemóvel** — layout responsivo tem de
-  ser validado nas duas classes de ecrã (o iPad já força este cuidado do
-  lado iOS; do lado Android não pode ficar de fora, é um alvo à parte, não
-  o mesmo layout de telemóvel esticado). Só depois do Polishing, com o
-  essencial validado em desktop primeiro.
+Tauri v2 suporta todos estes alvos a partir do mesmo `main` — **não há branch
+por SO**. Branch por SO diverge o código e torna os merges dolorosos; cada
+alvo é um `cargo tauri build`/`android init` novo sobre o mesmo tronco, com
+diferenças tratadas por config e compilação condicional pontual quando
+surgirem.
+
+| Alvo | Natureza | Custo | Depende de |
+|---|---|---|---|
+| **Linux nativo** | Local-first, é o que existe hoje | Feito, falta confirmar | — |
+| **Windows nativo** | Local-first, mesma API desktop | Baixo — build e teste | Linux confirmado |
+| **Android nativo** | Local-first, UI nova para touch | Médio — trabalho real de UI | Linux confirmado |
+| **Linux host** | **Cliente-servidor, com autenticação** | Alto — arquitetura nova | Movimentos de stock |
+
+**Fora de âmbito (2026-07-28):** macOS e iOS/iPad. Saem não por
+impossibilidade técnica — o Tauri suporta ambos — mas porque exigem hardware
+Apple e uma conta de developer paga para assinar e notarizar, e nada no uso
+atual os pede. Ficam no [[#Backlog / Deferido (sem data)]], reabríveis com
+pedido concreto.
+
+### Linux nativo — alvo de referência
+
+Feito: bundles `.deb` e AppImage construídos por `release.yml` em runner
+`ubuntu-latest` limpo (sem Nix, depois de o build local gravar caminhos
+`/nix/store/...` no binário e o tornar inutilizável fora dessa máquina).
+**Falta a confirmação de ponta a ponta na máquina limpa** — item A da lista de
+execução. Tudo o resto herda deste: enquanto não estiver confirmado, os outros
+alvos estão a construir sobre uma base não verificada.
+
+### Windows nativo
+
+Mesma API desktop do Tauri que o Linux já usa. Sem UI nova a desenhar. O
+trabalho é: runner Windows no `release.yml`, bundle `.msi`/`.exe`, e teste
+numa máquina Windows real. Dois pontos a verificar por serem onde o Linux e o
+Windows divergem de facto:
+
+- **`resolve_data_dir`** — o caminho de dados é `AppData` no Windows, com
+  regras de permissões diferentes. Já está namespaced pelo identifier
+  (`com.recipe-planner.app`), mas nunca foi corrido lá.
+- **Câmara do Scanner** — o WebView2 do Windows não é o WebKitGTK do Linux; o
+  bug pendente da Fase 0 é específico do WebKitGTK e provavelmente não existe
+  aqui. Confirmar, não assumir.
+
+### Android nativo
+
+Aqui há trabalho real, não só build.
+
+- **UI para touch e ecrãs pequenos.** Os componentes atuais assumem desktop —
+  o `minWidth` da janela era 1200 px até esta semana. Não é «esticar o layout»:
+  tabelas de stock, formulários de compra e o revisor de recibos precisam de
+  desenho próprio.
+- **Telemóvel e tablet são duas classes de ecrã, não uma.** Um layout de
+  telemóvel esticado num tablet é um mau tablet. Validar nas duas.
+- **Permissões de câmara.** Modelo diferente do desktop, e o Android usa um
+  plugin de câmara nativo em vez de `getUserMedia` — código diferente do bug
+  de desktop, por isso esse bug **não bloqueia** este alvo.
+- **Plugins Tauri.** Confirmar suporte mobile de cada um caso a caso. Hoje
+  restam `core` e `opener`: os três plugins mortos (`dialog`, `fs`, `shell`)
+  foram apagados na auditoria de 2026-07-26, o que reduziu esta verificação a
+  quase nada.
+- **Assinatura.** Keystore rodado a 2026-07-28 (PKCS12, Secrets no GitHub).
+  O `signingConfig` no `tauri.conf.json` e o workflow Android foram removidos
+  em `99ef5d1` e têm de ser repostos a apontar para o ficheiro novo.
+- **Peso.** O bundle leva ~37 MB de assets do `tesseract.js` self-hospedados.
+  Aceitável em desktop; num APK é uma decisão a tomar conscientemente
+  (descarregar em runtime na primeira utilização é a alternativa óbvia).
+
+### Linux host — cliente-servidor com autenticação
+
+**O alvo que muda a arquitetura.** Os outros três são a mesma app local-first
+empacotada de forma diferente. Este não é: uma máquina Linux corre o mise como
+serviço, e outros dispositivos acedem-lhe pela internet.
+
+**O que já joga a favor, e não é pouco:** `crates/core` não tem uma única
+dependência de Tauri. Toda a lógica de domínio e de base de dados já está
+separada do shell. Um servidor não é uma reescrita — é um segundo consumidor
+do mesmo crate, ao lado de `crates/tauri`.
+
+#### Forma proposta
+
+```
+crates/core      ← domínio + libSQL, já existe, intocado
+  ├── crates/tauri   ← comandos IPC (existe)
+  └── crates/server  ← HTTP + sessões (novo)
+```
+
+O frontend é a **mesma SPA**, servida pelo servidor em vez de embebida no
+binário. A camada que hoje chama `invoke()` ganha uma implementação HTTP —
+é o único ponto do frontend que precisa de saber em que modo está a correr.
+
+#### A decisão que falta fechar, antes de qualquer código
+
+**As apps nativas tornam-se clientes do host, ou continuam independentes?**
+
+- **(a) Independentes — recomendado.** As apps nativas continuam local-first,
+  cada uma com a sua base de dados. O cliente do host é o **browser**: quem
+  tem host acede de qualquer dispositivo sem instalar nada. Nenhuma mudança
+  nos clientes nativos. Sem sincronização, sem resolução de conflitos, sem
+  estado por dispositivo. O utilizador escolhe um modo e vive nele.
+- **(b) Clientes do host.** As apps nativas ganham «ligar a um host» e passam
+  a falar HTTP em vez de IPC. Uma base de dados só. Modesto em código, mas
+  mata o offline: sem rede, a app não abre.
+- **(c) Local-first com sincronização.** Cada dispositivo mantém a sua base de
+  dados e sincroniza com o host. É o que os utilizadores querem quando o
+  descrevem em voz alta, e é **de longe** o mais caro: exige política de
+  resolução de conflitos para cada tabela, e um `stock` que duas pessoas
+  alteram offline não tem resposta óbvia. O libSQL tem réplicas embebidas com
+  sync, o que reduz o custo mas não elimina a questão de conflitos.
+
+**Recomendação: (a).** É a única que não obriga a inventar semântica de
+conflitos, e mantém intacto o que já funciona. Se mais tarde alguém quiser um
+cliente nativo apontado a um host, a abstração de `invoke()` do ponto anterior
+já lá está — (b) passa a ser uma opção de configuração, não uma reescrita.
+
+#### Autenticação — requisitos não negociáveis
+
+Isto é uma fronteira de confiança exposta à internet. Nada aqui é candidato a
+simplificação:
+
+- **HTTPS obrigatório.** Sem TLS não se expõe. O caminho barato é um reverse
+  proxy com certificado automático (Caddy faz isto em duas linhas de config),
+  não TLS implementado no servidor.
+- **Passwords com hash lento** (argon2 ou bcrypt), nunca em claro, nunca com
+  hash rápido.
+- **Sessões em cookie `HttpOnly` + `Secure` + `SameSite=Lax`**, com expiração.
+  Não guardar tokens em `localStorage`.
+- **Rate limiting no login.** Um formulário de login exposto à internet sem
+  limite de tentativas é um convite.
+- **CSP a rever.** A atual assume Tauri (`connect-src 'self' ipc:
+  http://ipc.localhost`); a versão web precisa da sua.
+- **Um conjunto de dados, N utilizadores — não multi-tenant.** O caso real é
+  «a minha família acede aos dados da minha cozinha», não «servir N cozinhas
+  independentes». Multi-tenancy triplica a complexidade de cada query por um
+  requisito que ninguém pediu. Se um dia for preciso, é uma coluna nova.
+
+**Papéis:** por agora, nenhum. Todos os utilizadores autenticados veem tudo.
+Papéis (quem pode apagar, quem só regista consumo) são uma decisão para quando
+houver mais de uma pessoa a usar e uma queixa concreta.
+
+#### Porque depende dos movimentos de stock
+
+Multi-utilizador muda **a quem pertence** um movimento. Um consumo registado
+por duas pessoas ao mesmo tempo precisa de saber quem o registou, e uma tabela
+`stock_movements` desenhada para um único utilizador não tem essa coluna.
+Construir o servidor antes dos movimentos existirem obriga a mexer no schema
+outra vez, com dados reais lá dentro — exatamente o erro que a auditoria de
+2026-07-26 apanhou e que custou uma migração.
 
 ---
 
 ## Fase de experimentação (nova, 2026-07-10)
 
-Depois do Polishing e da Fase Multi-plataforma, com sinal real de
+Depois do Polishing e dos [[#Alvos de distribuição]], com sinal real de
 utilização a validar que vale a pena investir em infraestrutura de IA
 local mais pesada:
 
@@ -1450,7 +1674,7 @@ Não corrigidos, com motivo:
 | PRD-01 | Não é um fix — é [[#3.6 — Movimentos de stock]], o próximo trabalho estruturante |
 | DOM-05, `f64`→cêntimos, PERF-01 | Adiados **para dentro de 3.6**, onde ganham motivo concreto e migração barata. Hoje nenhum produz erro observável |
 | ARC-004 (duplicação de unidades FE/BE) | Sem ação — o risco é de divergência futura, não há defeito atual |
-| `create_shopping_list_from_recipes` | A auditoria classificou-o como código morto a apagar. **Errado** — é feature por implementar, ver [[#3.7 — Lista de compras a partir de receitas]] |
+| `create_shopping_list_from_recipes` | §2.1 da auditoria classificou-o bem («Prometido»); a proposta de o apagar foi minha, e estava errada. É feature por implementar, ver [[#3.7 — Lista de compras a partir de receitas]] |
 | «Índice duplicado» em `shopping_list_items` | **Achado errado** — a reparação reconstrói a tabela e os índices vão com a antiga. Ficou um comentário no código |
 
 Estado no fim: `cargo test --workspace` 117 a passar, 0 ignorados — **39
@@ -1511,11 +1735,13 @@ Nunca trabalhar diretamente em `main`.
 - Recipe Suggester — backend e UI. O `suggester_suggest` que existia era um
   stub e foi apagado (2026-07-27); sem consumo registado não há base de
   decisão para sugerir nada. Depende de [[#3.6 — Movimentos de stock]].
-- Suporte macOS desktop (build/assinatura/notarização Apple).
-- Suporte iPad/iOS (Tauri iOS) — decisão de arquitetura adiada até Fase 0
-  estar concluída.
-- Modo servidor / multi-user (branch `origin/project/hermes/pi-server`
-  preservado, não integrado).
+- Suporte macOS desktop e iPad/iOS — fora de âmbito desde 2026-07-28: exigem
+  hardware Apple e conta de developer paga, e nada no uso atual os pede. Ver
+  [[#Alvos de distribuição]].
+- ~~Modo servidor / multi-user (branch `origin/project/hermes/pi-server`)~~ —
+  **saiu do backlog a 2026-07-28**: passou a alvo planeado, ver
+  [[#Alvos de distribuição]]. A branch citada já não existe no remoto; o que
+  torna isto viável não é código antigo, é `crates/core` não depender de Tauri.
 - Supplier price comparison — pode tornar-se redundante com 3.1, reavaliar
   depois de 3.1 estar desenhada.
 
