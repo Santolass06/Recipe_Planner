@@ -111,9 +111,11 @@ A ordem é por dependência. Onde não há dependência, está dito.
 Linux é o alvo de referência de que os outros herdam, e enquanto não estiver
 confirmado, empacotar para Windows e Android é construir sobre não-verificado.
 
-- **S0.1** Instalar o `.deb`/AppImage reconstruído numa máquina sem Nix e
-  correr o essencial de ponta a ponta: criar ingrediente e receita, compra de
-  stock, scanner por upload, criar evento, exportar e restaurar backup.
+- **S0.1** **Cortar release nova de `main` primeiro** — o `.deb` publicado é
+  de 2026-07-22 15:42 e o fix do `max-width` entrou às 16:35, 53 minutos
+  depois; além disso é anterior a toda a auditoria. Depois instalar numa
+  máquina sem Nix e correr o essencial de ponta a ponta. Checklist completa no
+  [issue #47](https://github.com/Santolass06/Recipe_Planner/issues/47).
 - **S0.2** Veredicto sobre a câmara do Scanner. Se funcionar na máquina limpa,
   fecha-se como «ambiente de dev, sem fix». Se não, ganha diagnóstico num
   ambiente representativo — que é tudo o que falta há três semanas.

@@ -1176,8 +1176,13 @@ heurística. Não é trabalho novo — é validar/comparar decisões já tomadas
   `.content`; verificado visualmente com Playwright a 2560×1440 no dev
   server, a dashboard preenche agora a largura toda. `on_window_event`
   removido de `src-tauri/src/lib.rs` por ser código morto da teoria
-  errada. Assets da v0.1.12 a reconstruir com este fix; **falta o
-  utilizador confirmar na máquina limpa** que o essencial de ponta a ponta
+  errada. **Correção (2026-08-05):** esta secção dizia
+  «assets da v0.1.12 a reconstruir com este fix». **Não foram.** O build
+  correu às 15:42 de 2026-07-22 e o `e060a79` entrou às 16:35 — 53 minutos
+  depois. O `.deb` publicado tem o bug do `max-width`, e além disso é anterior
+  a toda a auditoria de 2026-07-26. O teste em máquina limpa exige **cortar
+  release nova de `main` primeiro**; sem isso testa-se código de três semanas
+  atrás. Ver issue S0.1. **Falta o utilizador confirmar na máquina limpa** que o essencial de ponta a ponta
   (incl. câmara do Scanner) agora funciona. À espera também de acumular
   recibos de mais cadeias portuguesas para correr, na mesma sessão de
   teste real, a validação multi-cadeia do OCR (item 3-bis, [[OCR —
