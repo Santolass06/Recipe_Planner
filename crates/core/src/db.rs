@@ -2,6 +2,7 @@
 
 use libsql::{Builder, Connection, Database, Result as LibsqlResult, params, Row};
 use crate::domain::*;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use dirs;
 use chrono::{DateTime, Utc, TimeZone};
@@ -1453,26 +1454,177 @@ pub async fn get_shopping_list(db: &Database, id: i64) -> LibsqlResult<ShoppingL
 /// Create shopping list
 pub async fn create_shopping_list(db: &Database, name: String, items: Vec<ShoppingItem>) -> LibsqlResult<ShoppingList> {
     let conn = get_conn(db).await?;
-    conn.execute("INSERT INTO shopping_lists (name) VALUES (?1)", params![name]).await?;
-    let list_id = conn.last_insert_rowid();
+    // The list and its items land together: a list that half-wrote its items
+    // looks complete and is wrong, and the user has no way to tell.
+    let tx = conn.transaction().await?;
+    tx.execute("INSERT INTO shopping_lists (name) VALUES (?1)", params![name]).await?;
+    let list_id = tx.last_insert_rowid();
 
     for item in items {
         let unit_str = item.ingredient_unit.to_string();
-        conn.execute(
+        tx.execute(
             "INSERT INTO shopping_list_items (shopping_list_id, ingredient_id, ingredient_name, ingredient_unit, needed_quantity, stock_quantity, to_buy_quantity, category, estimated_cost, purchased, notes)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![list_id, item.ingredient_id, item.ingredient_name, unit_str, item.needed_quantity, item.stock_quantity, item.to_buy_quantity, item.category, item.estimated_cost, item.purchased as i32, item.notes],
         ).await?;
     }
+    tx.commit().await?;
 
     get_shopping_list(db, list_id).await
 }
 
-/// Create shopping list from recipes
-pub async fn create_shopping_list_from_recipes(db: &Database, _recipe_ids: Vec<i64>, _portions_multiplier: u32) -> LibsqlResult<ShoppingList> {
-    // This is a complex query - simplified implementation
-    let name = format!("Compras {}", chrono::Local::now().format("%d/%m/%Y %H:%M"));
-    create_shopping_list(db, name, Vec::new()).await
+/// One aggregated line, before stock is taken off it.
+struct NeededIngredient {
+    ingredient_id: i64,
+    name: String,
+    unit_str: String,
+    price_per_unit: f64,
+    category: String,
+    /// Already in the ingredient's own unit, summed across every recipe line.
+    quantity: f64,
+}
+
+/// Expand recipes into what they need, in each ingredient's own unit.
+///
+/// `weights` is `(recipe_id, how many times that recipe is being made)` — a
+/// plain multiplier when the caller picked recipes by hand, `portions ×
+/// multiplier` when it came from a meal plan. Returned in the order the
+/// ingredients were first met, so the finished list follows the order the
+/// recipes were given in.
+///
+/// Converting here is the whole point: a recipe line may ask for kilograms of
+/// a flour tracked in grams, and summing those two numbers raw is DOM-01 all
+/// over again — with the added twist that comparing the total against stock
+/// would then be comparing two different units.
+async fn needed_ingredients_for(
+    conn: &Connection,
+    weights: &[(i64, f64)],
+) -> LibsqlResult<Vec<NeededIngredient>> {
+    let mut order: Vec<i64> = Vec::new();
+    let mut needed: HashMap<i64, NeededIngredient> = HashMap::new();
+
+    for (recipe_id, weight) in weights {
+        let mut rows = conn
+            .query(
+                r#"SELECT ri.ingredient_id, ri.quantity, ri.unit,
+                          i.name, i.unit, i.price_per_unit,
+                          COALESCE(c.name, '')
+                   FROM recipe_ingredients ri
+                   JOIN ingredients i ON ri.ingredient_id = i.id
+                   LEFT JOIN categories c ON i.category_id = c.id
+                   WHERE ri.recipe_id = ?1"#,
+                params![*recipe_id],
+            )
+            .await?;
+
+        while let Some(row) = rows.next().await? {
+            let ingredient_id: i64 = row.get(0)?;
+            let line_quantity: f64 = row.get(1)?;
+            let line_unit: String = row.get(2)?;
+            let name: String = row.get(3)?;
+            let ingredient_unit_str: String = row.get(4)?;
+            let price_per_unit: f64 = row.get(5)?;
+            let category: String = row.get(6)?;
+
+            // Reused so an unconvertible pair fails with the same message the
+            // purchase paths already give, naming the ingredient.
+            let (quantity, _) = to_ingredient_unit(
+                parse_unit_str(&line_unit),
+                parse_unit_str(&ingredient_unit_str),
+                line_quantity * weight,
+                price_per_unit,
+                &name,
+            )?;
+
+            needed
+                .entry(ingredient_id)
+                .and_modify(|line| line.quantity += quantity)
+                .or_insert_with(|| {
+                    order.push(ingredient_id);
+                    NeededIngredient {
+                        ingredient_id,
+                        name,
+                        unit_str: ingredient_unit_str,
+                        price_per_unit,
+                        category,
+                        quantity,
+                    }
+                });
+        }
+    }
+
+    Ok(order.into_iter().map(|id| needed.remove(&id).expect("id came from the map")).collect())
+}
+
+/// Turn needed quantities into shopping lines: take off what is already in
+/// stock and drop whatever is fully covered — the list is what is missing, not
+/// what is used.
+///
+/// An ingredient with no `stock` row counts as zero, same as one whose row says
+/// zero. The distinction ("never bought" vs "ran out") is not one a shopping
+/// list has any use for.
+async fn to_shopping_items(
+    conn: &Connection,
+    needed: Vec<NeededIngredient>,
+) -> LibsqlResult<Vec<ShoppingItem>> {
+    let mut items = Vec::new();
+    for line in needed {
+        let in_stock: f64 = {
+            let mut rows = conn
+                .query(
+                    "SELECT quantity FROM stock WHERE ingredient_id = ?1",
+                    params![line.ingredient_id],
+                )
+                .await?;
+            match rows.next().await? {
+                Some(row) => row.get(0)?,
+                None => 0.0,
+            }
+        };
+
+        let to_buy = (line.quantity - in_stock).max(0.0);
+        if to_buy == 0.0 {
+            continue;
+        }
+
+        items.push(ShoppingItem {
+            id: 0, // assigned on insert
+            ingredient_id: Some(line.ingredient_id),
+            ingredient_name: line.name,
+            ingredient_unit: parse_unit_str(&line.unit_str),
+            needed_quantity: line.quantity,
+            stock_quantity: in_stock,
+            to_buy_quantity: to_buy,
+            category: line.category,
+            estimated_cost: to_buy * line.price_per_unit,
+            purchased: false,
+            notes: None,
+            purchased_at: None,
+            created_at: Utc::now(),
+        });
+    }
+    Ok(items)
+}
+
+/// Build a shopping list out of recipes picked by hand (Sprint S1).
+pub async fn create_shopping_list_from_recipes(
+    db: &Database,
+    input: ShoppingListFromRecipesInput,
+) -> LibsqlResult<ShoppingList> {
+    let conn = get_conn(db).await?;
+    let weights: Vec<(i64, f64)> = input
+        .recipe_ids
+        .iter()
+        .map(|id| (*id, input.portions_multiplier))
+        .collect();
+
+    let needed = needed_ingredients_for(&conn, &weights).await?;
+    let items = to_shopping_items(&conn, needed).await?;
+
+    let name = input.name.unwrap_or_else(|| {
+        format!("Compras {}", chrono::Local::now().format("%d/%m/%Y %H:%M"))
+    });
+    create_shopping_list(db, name, items).await
 }
 
 /// Update shopping list item
@@ -3674,92 +3826,39 @@ pub async fn delete_meal_entry(db: &Database, id: i64) -> LibsqlResult<()> {
     Ok(())
 }
 
-/// Generate shopping list from meal plan
-pub async fn generate_shopping_list_from_meal_plan(db: &Database, plan_id: i64, portions_multiplier: u32) -> LibsqlResult<MealPlanShoppingList> {
+/// Generate a shopping list from a meal plan.
+///
+/// Shares `needed_ingredients_for` with the hand-picked path (S1). Before that
+/// it aggregated on its own and **never converted the recipe line's unit**:
+/// a recipe asking for 1 kg of a flour tracked in grams contributed `1`, which
+/// was then compared against a stock of `500` grams and came out as "nothing to
+/// buy". Same defect family as DOM-01, in a feature that shipped.
+pub async fn generate_shopping_list_from_meal_plan(db: &Database, plan_id: i64, portions_multiplier: f64) -> LibsqlResult<MealPlanShoppingList> {
     let plan = get_meal_plan(db, plan_id).await?;
-
-    // Aggregate ingredients from all entries
-    let mut ingredient_map: std::collections::HashMap<i64, (String, Unit, f64, String, f64)> = std::collections::HashMap::new(); // ingredient_id -> (name, unit, total_qty, category, price)
-    let mut recipes_used = Vec::new();
-
-    for entry in &plan.entries {
-        if !recipes_used.contains(&entry.recipe_id) {
-            recipes_used.push(entry.recipe_id);
-        }
-
-        // Get recipe ingredients
-        let conn = get_conn(db).await?;
-        let mut rows = conn.query(
-            "SELECT ri.ingredient_id, ri.ingredient_name, ri.quantity, ri.unit, i.price_per_unit, i.category_id
-             FROM recipe_ingredients ri
-             JOIN ingredients i ON ri.ingredient_id = i.id
-             WHERE ri.recipe_id = ?1",
-            params![entry.recipe_id],
-        ).await?;
-
-        while let Some(row) = rows.next().await? {
-            let ingredient_id: i64 = row.get(0)?;
-            let ingredient_name: String = row.get(1)?;
-            let quantity: f64 = row.get(2)?;
-            let unit_str: String = row.get(3)?;
-            let price_per_unit: f64 = row.get(4)?;
-            let category_id: Option<i64> = row.get(5)?;
-
-            let unit = unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
-
-            // Get category name
-            let category = if let Some(cat_id) = category_id {
-                let mut cat_rows = conn.query("SELECT name FROM categories WHERE id = ?1", params![cat_id]).await?;
-                cat_rows.next().await?.map(|r| r.get::<String>(0).unwrap_or_default()).unwrap_or_default()
-            } else {
-                "Outros".to_string()
-            };
-
-            let total_qty = quantity * entry.portions as f64 * portions_multiplier as f64;
-
-            ingredient_map.entry(ingredient_id)
-                .and_modify(|e| e.2 += total_qty)
-                .or_insert((ingredient_name, unit, total_qty, category, price_per_unit));
-        }
-    }
-
-    // Get stock quantities
     let conn = get_conn(db).await?;
-    let mut shopping_items = Vec::new();
 
-    for (ingredient_id, (name, unit, needed_qty, category, price)) in ingredient_map {
-        let mut rows = conn.query(
-            "SELECT quantity FROM stock WHERE ingredient_id = ?1",
-            params![ingredient_id],
-        ).await?;
-        let stock_qty = rows.next().await?.map(|r| r.get::<f64>(0).unwrap_or(0.0)).unwrap_or(0.0);
+    let weights: Vec<(i64, f64)> = plan
+        .entries
+        .iter()
+        .map(|entry| (entry.recipe_id, entry.portions as f64 * portions_multiplier))
+        .collect();
 
-        let to_buy_qty = (needed_qty - stock_qty).max(0.0);
-        let estimated_cost = to_buy_qty * price;
-
-        shopping_items.push(ShoppingItem {
-            id: 0, // Will be assigned on insert
-            ingredient_id: Some(ingredient_id),
-            ingredient_name: name,
-            ingredient_unit: unit,
-            needed_quantity: needed_qty,
-            stock_quantity: stock_qty,
-            to_buy_quantity: to_buy_qty,
-            category,
-            estimated_cost,
-            purchased: false,
-            notes: None,
-            purchased_at: None,
-            created_at: Utc::now(),
-        });
+    let mut recipes_used = Vec::new();
+    for (recipe_id, _) in &weights {
+        if !recipes_used.contains(recipe_id) {
+            recipes_used.push(*recipe_id);
+        }
     }
+
+    let needed = needed_ingredients_for(&conn, &weights).await?;
+    let items = to_shopping_items(&conn, needed).await?;
 
     let list_name = format!("{} - Compras", plan.meal_plan.name);
-    let shopping_list = create_shopping_list(db, list_name, shopping_items).await?;
+    let shopping_list = create_shopping_list(db, list_name, items).await?;
 
     Ok(MealPlanShoppingList {
         shopping_list,
-        total_portions: plan.entries.iter().map(|e| e.portions).sum::<u32>() * portions_multiplier,
+        total_portions: (plan.entries.iter().map(|e| e.portions).sum::<u32>() as f64 * portions_multiplier).round() as u32,
         recipes_used,
     })
 }
@@ -6194,6 +6293,147 @@ mod audit_2026_07 {
             exported.ingredients[0].category.as_deref(), Some(category_name.as_str()),
             "the export carried something other than the category's name"
         );
+    }
+
+    /// S1: the same ingredient asked for by two recipes must become one line,
+    /// not two. Two recipes × 300 g of the same flour is 600 g to buy once.
+    #[tokio::test]
+    async fn an_ingredient_in_two_recipes_becomes_one_summed_line() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let a = cake(&db, vec![RecipeIngredientInput { ingredient_id: f.id, quantity: 300.0, unit: Unit::Gram }]).await;
+        let b = cake(&db, vec![RecipeIngredientInput { ingredient_id: f.id, quantity: 300.0, unit: Unit::Gram }]).await;
+
+        let list = create_shopping_list_from_recipes(&db, ShoppingListFromRecipesInput {
+            recipe_ids: vec![a.recipe.id, b.recipe.id], portions_multiplier: 1.0, name: None,
+        }).await.unwrap();
+
+        assert_eq!(list.items.len(), 1, "the same ingredient produced more than one line");
+        assert_eq!(list.items[0].needed_quantity, 600.0);
+        assert_eq!(list.items[0].to_buy_quantity, 600.0);
+        assert!((list.total_estimated_cost - 1.2).abs() < 1e-9, "cost was {}", list.total_estimated_cost);
+    }
+
+    /// S1: recipe lines carry their own unit. 1 kg asked for by a recipe against
+    /// a flour tracked in grams is 1000 g, not 1 — the same class of bug as DOM-01.
+    #[tokio::test]
+    async fn recipe_lines_are_converted_into_the_ingredient_unit() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let r = cake(&db, vec![RecipeIngredientInput { ingredient_id: f.id, quantity: 1.0, unit: Unit::Kilogram }]).await;
+
+        let list = create_shopping_list_from_recipes(&db, ShoppingListFromRecipesInput {
+            recipe_ids: vec![r.recipe.id], portions_multiplier: 1.0, name: None,
+        }).await.unwrap();
+
+        assert_eq!(list.items[0].needed_quantity, 1000.0, "the recipe's kilogram was not converted into grams");
+        assert_eq!(list.items[0].ingredient_unit, Unit::Gram);
+    }
+
+    /// S1: the list is what is missing, not what is used. Stock already held
+    /// comes off the top, and an ingredient fully covered does not appear.
+    #[tokio::test]
+    async fn stock_already_held_is_taken_off_and_covered_ingredients_drop_out() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let sugar = create_ingredient(&db, IngredientInput {
+            name: "Açúcar".into(), unit: Unit::Gram, price_per_unit: 0.001,
+            category: None, event_id: None,
+        }).await.unwrap();
+        let r = cake(&db, vec![
+            RecipeIngredientInput { ingredient_id: f.id, quantity: 500.0, unit: Unit::Gram },
+            RecipeIngredientInput { ingredient_id: sugar.id, quantity: 200.0, unit: Unit::Gram },
+        ]).await;
+
+        // 200 g of flour in the pantry, and enough sugar to cover the recipe.
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 200.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 0.4, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: sugar.id, quantity: 500.0, unit: Unit::Gram,
+            price_per_unit: 0.001, total_price: 0.5, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        let list = create_shopping_list_from_recipes(&db, ShoppingListFromRecipesInput {
+            recipe_ids: vec![r.recipe.id], portions_multiplier: 1.0, name: None,
+        }).await.unwrap();
+
+        assert_eq!(list.items.len(), 1, "the fully covered ingredient still made it onto the list");
+        assert_eq!(list.items[0].ingredient_name, "Farinha");
+        assert_eq!(list.items[0].stock_quantity, 200.0);
+        assert_eq!(list.items[0].to_buy_quantity, 300.0, "stock was not taken off what has to be bought");
+    }
+
+    /// S1.4: half a batch has to be expressible, which is why the multiplier
+    /// stopped being a u32.
+    #[tokio::test]
+    async fn a_fractional_multiplier_halves_the_quantities() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let r = cake(&db, vec![RecipeIngredientInput { ingredient_id: f.id, quantity: 500.0, unit: Unit::Gram }]).await;
+
+        let list = create_shopping_list_from_recipes(&db, ShoppingListFromRecipesInput {
+            recipe_ids: vec![r.recipe.id], portions_multiplier: 0.5, name: None,
+        }).await.unwrap();
+
+        assert_eq!(list.items[0].to_buy_quantity, 250.0);
+    }
+
+    /// S1.3: an unconvertible pair is refused by name, never guessed — and the
+    /// refusal must leave no half-written list behind.
+    #[tokio::test]
+    async fn an_unconvertible_recipe_line_is_refused_and_writes_nothing() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let r = cake(&db, vec![RecipeIngredientInput { ingredient_id: f.id, quantity: 2.0, unit: Unit::Liter }]).await;
+
+        let before = shopping_lists_list(&db).await.unwrap().len();
+        let err = create_shopping_list_from_recipes(&db, ShoppingListFromRecipesInput {
+            recipe_ids: vec![r.recipe.id], portions_multiplier: 1.0, name: None,
+        }).await.unwrap_err().to_string();
+
+        assert!(err.contains("Farinha"), "the error did not name the ingredient: {err}");
+        assert_eq!(shopping_lists_list(&db).await.unwrap().len(), before, "a list was created despite the failure");
+    }
+
+    /// Found while doing S1: the meal-plan shopping list aggregated recipe
+    /// lines without converting their unit, then compared the total against a
+    /// stock held in a different unit. A recipe wanting 1 kg of a flour tracked
+    /// in grams contributed `1`, was compared against `500`, and came out as
+    /// "nothing to buy" — the list silently omitted an ingredient the user
+    /// needed. Same defect family as DOM-01, in a feature that shipped.
+    #[tokio::test]
+    async fn the_meal_plan_list_converts_units_before_comparing_against_stock() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let r = cake(&db, vec![RecipeIngredientInput { ingredient_id: f.id, quantity: 1.0, unit: Unit::Kilogram }]).await;
+
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 500.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 1.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        let plan = create_meal_plan(&db, MealPlanInput {
+            name: "Semana".into(),
+            start_date: Utc::now(),
+            end_date: Utc::now(),
+        }).await.unwrap();
+        add_meal_entry(&db, plan.id, MealEntryInput {
+            recipe_id: r.recipe.id, day_of_week: DayOfWeek::Monday,
+            meal_type: MealType::Lunch, portions: 1,
+        }).await.unwrap();
+
+        let generated = generate_shopping_list_from_meal_plan(&db, plan.id, 1.0).await.unwrap();
+        let item = generated.shopping_list.items.first()
+            .expect("the list came out empty — 1kg was compared against 500g as if both were the same unit");
+
+        assert_eq!(item.needed_quantity, 1000.0, "the recipe's kilogram was not converted into grams");
+        assert_eq!(item.stock_quantity, 500.0);
+        assert_eq!(item.to_buy_quantity, 500.0);
     }
 
     /// 3.3 step 6 says every aggregate view of the catalogue filters out event

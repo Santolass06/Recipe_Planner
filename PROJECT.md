@@ -94,7 +94,7 @@ A ordem é por dependência. Onde não há dependência, está dito.
 | | Sprint | Estado | Depende de |
 |---|---|---|---|
 | **S0** | Confirmar a base | ⏳ Em ti | — |
-| **S1** | Lista de compras a partir de receitas | ⬜ | — (livre) |
+| **S1** | Lista de compras a partir de receitas | ✅ `a087dfc` | — |
 | **S2** | Movimentos de stock — schema e registo | ⬜ | — |
 | **S3** | Movimentos de stock — consumo, produção, perda, venda | ⬜ | S2 |
 | **S4** | Os relatórios que os movimentos desbloqueiam | ⬜ | S3 |
@@ -128,7 +128,26 @@ fechado ou diagnosticado.
 
 ---
 
-### S1 — Lista de compras a partir de receitas ⬜
+### S1 — Lista de compras a partir de receitas ✅
+
+**Fechado em `a087dfc`.** Sete issues (#7–#13), mais um oitavo (#55) que não
+estava previsto: o `generate_shopping_list_from_meal_plan` já fazia 90 % do
+mesmo trabalho e tinha o defeito do DOM-01 — agregava linhas de receita sem
+converter a unidade e comparava o total contra um stock guardado noutra
+unidade. Uma receita a pedir 1 kg contra 500 g em stock saía como «não falta
+nada», e a lista omitia o ingrediente em silêncio. Numa feature já em uso.
+
+Em vez de uma segunda agregação ao lado, os dois caminhos passaram a partilhar
+`needed_ingredients_for` + `to_shopping_items`. O `create_shopping_list` ficou
+transacional, o que cobriu os três produtores de listas de uma vez.
+
+124 testes, 0 ignorados. Falta o teste manual, acumulado no
+[#47](https://github.com/Santolass06/Recipe_Planner/issues/47) até haver acesso
+à outra máquina.
+
+<details>
+<summary>Âmbito original</summary>
+
 
 **Livre** — não depende de nada nem bloqueia nada. É a única funcionalidade
 prometida na superfície da app que não faz o que o nome diz, e é a mais
@@ -155,6 +174,8 @@ pequena que resta. Desenho em [[#Desenho — Lista de compras a partir de receit
 
 **Feito quando:** escolher duas receitas com um ingrediente comum produz uma
 lista com esse ingrediente somado uma só vez e já descontado do stock.
+
+</details>
 
 ---
 

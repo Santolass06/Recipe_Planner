@@ -388,6 +388,23 @@ pub struct ShoppingItem {
     pub created_at: DateTime<Utc>,
 }
 
+/// Input for building a shopping list out of recipes (Sprint S1).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS, Validate)]
+#[ts(export, export_to = "bindings/")]
+pub struct ShoppingListFromRecipesInput {
+    #[validate(length(min = 1))]
+    #[ts(type = "number[]")]
+    pub recipe_ids: Vec<i64>,
+    /// Fractional on purpose: half a batch is 0.5. Kept in step with the
+    /// production multiplier that stock movements will use.
+    #[validate(range(min = 0.0))]
+    pub portions_multiplier: f64,
+    /// Localised by the caller; falls back to a Portuguese default so the
+    /// command stays usable without a frontend.
+    #[validate(length(max = 200))]
+    pub name: Option<String>,
+}
+
 /// Shopping list
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
