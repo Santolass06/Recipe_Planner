@@ -67,10 +67,16 @@ tabs de relatório vazias, do Recipe Suggester sem base de decisão, e de o
 stock divergir da realidade ao fim de uma semana de uso. É o item 3 da lista
 abaixo.
 
-**Alvos de distribuição decididos (2026-07-28):** Linux nativo, Linux host
-(acedido por outros dispositivos pela internet, com autenticação), Android
-nativo e Windows nativo. macOS e iOS/iPad saem do âmbito por agora — ver
+**Alvos de distribuição decididos (2026-07-28):** Linux nativo, Windows
+nativo, Android nativo, e **Linux host** — um Raspberry Pi ou equivalente a
+correr o mise como serviço, acedido por browser a partir de outros
+dispositivos. macOS e iOS/iPad saem do âmbito. Ver
 [[#Alvos de distribuição]].
+
+**Edições decididas (2026-07-28):** constrói-se a funcionalidade toda e a flag
+que separa Family de Pro é a última camada, não a primeira. Ver
+[[#Edições — Family e Pro]] — a consequência prática é que `stock_movements`
+nasce com os seis tipos de movimento.
 
 ---
 
@@ -91,7 +97,7 @@ assets reconstruídos e correr o essencial de ponta a ponta. **Fecha dois
 itens de uma vez:** se a câmara do Scanner funcionar, o bug pendente da Fase 0
 fecha-se como «ambiente de dev, sem fix»; se não funcionar, ganha finalmente
 diagnóstico num ambiente representativo em vez de morrer no Ubuntu+Nix
-misturados da máquina de desenvolvimento. **Pré-requisito dos itens 5, 6 e 7**
+misturados da máquina de desenvolvimento. **Pré-requisito dos itens 4, 5 e 6**
 — Linux é o alvo de referência de que os outros herdam.
 
 **B. Validar o OCR noutras cadeias (item 3-bis, PRIORIDADE ALTA).** Só está
@@ -105,46 +111,48 @@ mais antigo em aberto e o que mais afasta o produto do que promete.
 
 ### O trabalho de código, por ordem de dependência
 
-**1. Matriz de edições — Family e Pro.** Ver [[#Edições — Family e Pro]].
-Meia hora de escrita, sem código. **Tem de vir antes do item 3**, e a razão é
-concreta: é a edição Pro que exige contar produtos vendidos e perdidos, logo é
-ela que decide se `stock_movements` precisa dos tipos `sale` e `production`
-desde o primeiro dia. Decidir isto depois obriga a desenhar a tabela duas
-vezes — e o princípio deste projeto é fechar modelação de dados em desenho,
-antes do código.
+A matriz de edições era o item 1 desta lista até 2026-07-28. **Saiu**: a
+decisão está tomada (ver [[#Edições — Family e Pro]]) e o que dela resulta —
+`stock_movements` nascer com os seis tipos — já está escrito no item 2. Não
+há trabalho pendente antes dele.
 
-**2. Lista de compras a partir de receitas** — [[#3.7 — Lista de compras a partir de receitas]].
+**1. Lista de compras a partir de receitas** — [[#3.7 — Lista de compras a partir de receitas]].
 **Livre**, e a mais pequena que resta. É a única funcionalidade prometida na
 superfície da app (comando registado, exposto ao frontend) que não faz o que o
-nome diz. Boa candidata a vitória rápida antes do item 3.
+nome diz. Boa candidata a vitória rápida antes do item 2.
 
-**3. Movimentos de stock** — [[#3.6 — Movimentos de stock]]. **O item
-estruturante.** Fecha a metade em falta do domínio. Depende do 1 (matriz de
-edições) e dos pré-requisitos de dados, esses já fechados. Traz para dentro
-dele três decisões adiadas que só aqui ganham motivo concreto e migração
-barata: `f64`→cêntimos, DOM-05 (janela temporal vs. FIFO) e PERF-01.
+**2. Movimentos de stock** — [[#3.6 — Movimentos de stock]]. **O item
+estruturante.** Fecha a metade em falta do domínio. Os pré-requisitos de dados
+estão todos fechados. Nasce com os seis tipos de movimento, incluindo
+`sale` e `production`, por decisão de edições. Traz para dentro dele três
+decisões adiadas que só aqui ganham motivo concreto e migração barata:
+`f64`→cêntimos, DOM-05 (janela temporal vs. FIFO) e PERF-01.
 **Desbloqueia:** tab de desperdício, tendências de stock, Recipe Suggester,
 contagem de vendidos/perdidos, orçamento por evento (previsto vs. real), e
 alerta de validade com ação directa.
 
-**4. Instrumentação — emissores automáticos.** A tabela `usage_events` existe
-e está vazia de propósito. Passa a fazer sentido **depois do 3**, porque é aí
+**3. Instrumentação — emissores automáticos.** A tabela `usage_events` existe
+e está vazia de propósito. Passa a fazer sentido **depois do 2**, porque é aí
 que passa a haver eventos com significado para registar (o que se cozinhou,
 o que se perdeu). Antes disso registaria só navegação.
 
-**5. Windows nativo.** Mesma API desktop do Tauri que o Linux já usa: build e
+**4. Windows nativo.** Mesma API desktop do Tauri que o Linux já usa: build e
 teste por SO, sem UI nova. **Depende do A.** É o alvo de menor custo
 incremental dos que faltam.
 
-**6. Android nativo.** Aqui há trabalho real, não só build — ver
-[[#Alvos de distribuição]]. **Depende do A** e beneficia de o 3 estar fechado
+**5. Android nativo.** Aqui há trabalho real, não só build — ver
+[[#Alvos de distribuição]]. **Depende do A** e beneficia de o 2 estar fechado
 (não vale a pena desenhar ecrãs touch para relatórios que ainda estão vazios).
 
-**7. Linux host, com autenticação.** A maior mudança arquitetural do plano —
-ver [[#Alvos de distribuição]] para o desenho e a decisão que falta fechar.
-**Depende do 3**: multi-utilizador muda a quem pertence um movimento de stock,
-e construir o servidor antes de os movimentos existirem obriga a mexer no
-schema outra vez.
+**6. Linux host num Pi, com autenticação.** A maior mudança arquitetural do
+plano — ver [[#Alvos de distribuição]] para o desenho, o que o Pi acrescenta
+de trabalho, e a decisão de rede que falta fechar. **Depende do 2**:
+multi-utilizador muda a quem pertence um movimento de stock, e construir o
+servidor antes de os movimentos existirem obriga a mexer no schema outra vez.
+
+**7. Flag de edição Family/Pro.** Última camada, por decisão: constrói-se
+tudo e só no fim se separa. Depende de haver o que separar — na prática, do 2
+e da UI de venda/produção que vier com ele.
 
 ### Sem ordem, sem data
 
@@ -158,31 +166,44 @@ vocabulário, e o [[#Backlog / Deferido (sem data)]].
 
 ## Edições — Family e Pro
 
-**Estado: por decidir.** Esta secção existe porque a divisão em edições é
-citada de passagem em várias partes do documento e da auditoria, mas nunca foi
-escrita — e é pré-requisito do item 3 da lista acima.
+**Decidido (2026-07-28): construir tudo primeiro, separar por flag depois.**
 
-**A intenção conhecida:** duas edições sobre o mesmo codebase. **Family**, uso
-pessoal/doméstico — planear refeições, gerir despensa, controlar quanto se
-gasta. **Pro**, uso de negócio — produzir para vender, saber o custo real do
-que se produz, contar o que se vendeu e o que se perdeu.
+Duas edições sobre o mesmo codebase. **Family**, uso pessoal/doméstico —
+planear refeições, gerir despensa, controlar quanto se gasta. **Pro**, uso de
+negócio — produzir para vender, saber o custo real do que se produz, contar o
+que se vendeu e o que se perdeu.
 
-**A pergunta que tem de ser respondida antes do item 3**, e só ela:
-**a edição Pro faz parte do plano a sério, ou é uma ideia para «um dia»?**
+A ordem decidida é **construir a funcionalidade toda, e só no fim introduzir
+a flag que distingue as versões**. Não se constrói contra a divisão; constrói-
+se o produto e a divisão é a última camada.
 
-- **Se sim:** `stock_movements` nasce com os seis tipos (`purchase`,
-  `production`, `consumption`, `sale`, `loss`, `adjustment`) e com preço de
-  venda gravado no movimento. O custo extra hoje é pequeno — são colunas e
-  variantes de enum, não features. A UI de venda/produção pode ficar atrás de
-  uma flag e ser construída mais tarde, sem tocar no schema.
-- **Se não:** `stock_movements` nasce com `consumption`, `loss` e
-  `adjustment`, e acrescentar `sale`/`production` depois é uma migração de
-  dados numa tabela já grande, com histórico a reinterpretar.
+**A consequência que importa, e é a razão de esta secção vir antes do item 3:**
+`stock_movements` nasce com **os seis tipos** — `purchase`, `production`,
+`consumption`, `sale`, `loss`, `adjustment` — e com preço de venda gravado no
+movimento, desde a primeira migração. Não fica nada para acrescentar depois.
+Era esta a pergunta em aberto, e está respondida.
 
-Escrever a matriz completa de gating (que ecrã, que relatório, que comando
-pertence a que edição) **não é preciso agora** — só a resposta acima é. A
-matriz constrói-se sozinha à medida que as features aparecem, desde que o
-schema tenha nascido certo. Marcar aqui a decisão quando for tomada.
+### Como a flag deve funcionar, quando chegar a altura
+
+Não é preciso decidir agora, mas fica registado para não se decidir mal à
+pressa no fim:
+
+**Definição em runtime, não em build.** A edição é um valor em `settings`,
+lido pela UI para esconder ou mostrar. A alternativa — duas compilações
+diferentes por feature de Cargo — multiplicaria a matriz de builds por dois,
+e a matriz já tem quatro alvos (Linux, Windows, Android, host). Oito builds
+para separar ecrãs é um preço que não se justifica.
+
+**O que isso implica, dito com clareza:** o código do Pro vai dentro do
+binário do Family. Quem souber mexer consegue ligar a flag. Para um produto
+que não é vendido com DRM isto não é um problema — é a diferença entre
+esconder e proibir, e esconder chega. Se um dia houver licenciamento a sério,
+aí sim é outra conversa, e o custo de a ter adiado é zero.
+
+**A matriz de gating** (que ecrã, que relatório, que comando pertence a que
+edição) escreve-se quando a flag for introduzida, não antes. Constrói-se
+sozinha à medida que as features aparecem — desde que o schema tenha nascido
+certo, e agora vai nascer.
 
 
 ---
@@ -892,7 +913,7 @@ Auchan, etc.) — só verificado com Pingo Doce até agora.
 
 ### 3.6 — Movimentos de stock
 
-**POR IMPLEMENTAR** — item 3 de [[#O que falta, por ordem]]. Origem: PRD-01 da auditoria de 2026-07-26. **Desenho completo em
+**POR IMPLEMENTAR** — item 2 de [[#O que falta, por ordem]]. Origem: PRD-01 da auditoria de 2026-07-26. **Desenho completo em
 `docs/AUDIT-2026-07.md` §2.4** — não repetido aqui para não haver duas
 versões a divergir.
 
@@ -913,6 +934,13 @@ pagaria dez vezes o preço pelo mesmo resultado.
 
 Decisões já fechadas no desenho, para não serem reabertas na
 implementação:
+
+- **Os seis tipos de movimento entram desde a primeira migração**, incluindo
+  `sale` e `production`, e o preço de venda é gravado no movimento. Decorre da
+  decisão de edições de 2026-07-28 ([[#Edições — Family e Pro]]): constrói-se
+  tudo e a flag é a última camada, portanto não há aqui um subconjunto
+  «Family» a acrescentar depois. A UI de venda e produção pode chegar mais
+  tarde — o schema não pode.
 
 - **Multiplicador, não porções fracionárias.** A receita continua canónica
   («rende 40 bolachas»); meia fornada é `0.5`. Não é preciso tornar
@@ -942,7 +970,7 @@ evento (previsto vs. real) e alerta de validade com ação directa.
 
 ### 3.7 — Lista de compras a partir de receitas
 
-**POR IMPLEMENTAR** — item 2 de [[#O que falta, por ordem]].
+**POR IMPLEMENTAR** — item 1 de [[#O que falta, por ordem]].
 
 `create_shopping_list_from_recipes` (`db.rs`, comando registado e exposto
 ao frontend) **é um stub**: aceita `recipe_ids` e `portions_multiplier`,
@@ -1434,7 +1462,7 @@ surgirem.
 | **Linux nativo** | Local-first, é o que existe hoje | Feito, falta confirmar | — |
 | **Windows nativo** | Local-first, mesma API desktop | Baixo — build e teste | Linux confirmado |
 | **Android nativo** | Local-first, UI nova para touch | Médio — trabalho real de UI | Linux confirmado |
-| **Linux host** | **Cliente-servidor, com autenticação** | Alto — arquitetura nova | Movimentos de stock |
+| **Linux host** | **Cliente-servidor num Pi dedicado, com autenticação** | Alto — arquitetura nova + build ARM | Movimentos de stock |
 
 **Fora de âmbito (2026-07-28):** macOS e iOS/iPad. Saem não por
 impossibilidade técnica — o Tauri suporta ambos — mas porque exigem hardware
@@ -1489,16 +1517,36 @@ Aqui há trabalho real, não só build.
   Aceitável em desktop; num APK é uma decisão a tomar conscientemente
   (descarregar em runtime na primeira utilização é a alternativa óbvia).
 
-### Linux host — cliente-servidor com autenticação
+### Linux host — cliente-servidor, num aparelho dedicado
 
 **O alvo que muda a arquitetura.** Os outros três são a mesma app local-first
-empacotada de forma diferente. Este não é: uma máquina Linux corre o mise como
-serviço, e outros dispositivos acedem-lhe pela internet.
+empacotada de forma diferente. Este não é: uma máquina Linux dedicada — um
+Raspberry Pi ou equivalente — corre o mise como serviço, e outros dispositivos
+acedem-lhe pelo browser.
 
 **O que já joga a favor, e não é pouco:** `crates/core` não tem uma única
 dependência de Tauri. Toda a lógica de domínio e de base de dados já está
 separada do shell. Um servidor não é uma reescrita — é um segundo consumidor
 do mesmo crate, ao lado de `crates/tauri`.
+
+#### Decisões fechadas (2026-07-28)
+
+**As apps nativas não são clientes do host.** Continuam local-first, cada uma
+com a sua base de dados. O cliente do host é o **browser** — quem tem host
+acede de qualquer dispositivo sem instalar nada. Sem sincronização, sem
+resolução de conflitos, sem estado por dispositivo. O utilizador escolhe um
+modo e vive nele.
+
+Ficam assim descartadas, e vale a pena dizer porquê para não voltarem por
+inércia: apps nativas a falar HTTP com o host matariam o offline (sem rede, a
+app não abre); e local-first com sincronização — que é o que soa melhor
+quando se descreve em voz alta — obriga a inventar semântica de conflitos
+para um `stock` que duas pessoas alteram offline ao mesmo tempo, e não há
+resposta óbvia para isso.
+
+**O host é um aparelho dedicado, não a máquina de trabalho.** Raspberry Pi ou
+equivalente, ligado permanentemente, com a logística de segurança à volta
+tratada como parte do produto e não como problema do utilizador.
 
 #### Forma proposta
 
@@ -1509,57 +1557,72 @@ crates/core      ← domínio + libSQL, já existe, intocado
 ```
 
 O frontend é a **mesma SPA**, servida pelo servidor em vez de embebida no
-binário. A camada que hoje chama `invoke()` ganha uma implementação HTTP —
-é o único ponto do frontend que precisa de saber em que modo está a correr.
+binário. A camada que hoje chama `invoke()` ganha uma implementação HTTP — é o
+único ponto do frontend que precisa de saber em que modo está a correr.
 
-#### A decisão que falta fechar, antes de qualquer código
+#### A decisão de rede, que é a que define quanta segurança a app tem de carregar
 
-**As apps nativas tornam-se clientes do host, ou continuam independentes?**
+Esta é a decisão que falta, e vem **antes** de escrever o servidor, porque
+muda o que o servidor tem de saber defender.
 
-- **(a) Independentes — recomendado.** As apps nativas continuam local-first,
-  cada uma com a sua base de dados. O cliente do host é o **browser**: quem
-  tem host acede de qualquer dispositivo sem instalar nada. Nenhuma mudança
-  nos clientes nativos. Sem sincronização, sem resolução de conflitos, sem
-  estado por dispositivo. O utilizador escolhe um modo e vive nele.
-- **(b) Clientes do host.** As apps nativas ganham «ligar a um host» e passam
-  a falar HTTP em vez de IPC. Uma base de dados só. Modesto em código, mas
-  mata o offline: sem rede, a app não abre.
-- **(c) Local-first com sincronização.** Cada dispositivo mantém a sua base de
-  dados e sincroniza com o host. É o que os utilizadores querem quando o
-  descrevem em voz alta, e é **de longe** o mais caro: exige política de
-  resolução de conflitos para cada tabela, e um `stock` que duas pessoas
-  alteram offline não tem resposta óbvia. O libSQL tem réplicas embebidas com
-  sync, o que reduz o custo mas não elimina a questão de conflitos.
+- **(1) Rede privada — recomendado.** O host nunca fica no exterior. Os
+  dispositivos entram numa rede privada (WireGuard, ou Tailscale se se quiser
+  evitar configurar NAT e DNS à mão) e falam com o Pi lá dentro. Elimina de
+  uma vez: formulário de login exposto ao mundo, ataques de força bruta,
+  gestão de certificados, e a maior parte da superfície. «Pela internet»
+  continua a ser verdade — o dispositivo está onde estiver, entra na rede e
+  usa a app.
+- **(2) Exposto publicamente com proxy à frente.** Só se for mesmo preciso dar
+  acesso a alguém que não pode instalar cliente de VPN. Exige reverse proxy
+  com TLS automático (Caddy resolve em duas linhas), rate limiting, fail2ban,
+  e manter o Pi atualizado como tarefa contínua e não como setup único.
 
-**Recomendação: (a).** É a única que não obriga a inventar semântica de
-conflitos, e mantém intacto o que já funciona. Se mais tarde alguém quiser um
-cliente nativo apontado a um host, a abstração de `invoke()` do ponto anterior
-já lá está — (b) passa a ser uma opção de configuração, não uma reescrita.
+**Recomendação: (1).** É simultaneamente menos trabalho e mais seguro, o que
+é raro. E a diferença é grande: em (1) a autenticação da app é defesa em
+profundidade e serve para saber *quem* fez o quê; em (2) a autenticação da app
+é a única coisa entre os dados e a internet.
 
 #### Autenticação — requisitos não negociáveis
 
-Isto é uma fronteira de confiança exposta à internet. Nada aqui é candidato a
-simplificação:
+Independentemente da decisão de rede acima. É fronteira de confiança, nada
+aqui é candidato a simplificação:
 
-- **HTTPS obrigatório.** Sem TLS não se expõe. O caminho barato é um reverse
-  proxy com certificado automático (Caddy faz isto em duas linhas de config),
-  não TLS implementado no servidor.
 - **Passwords com hash lento** (argon2 ou bcrypt), nunca em claro, nunca com
   hash rápido.
 - **Sessões em cookie `HttpOnly` + `Secure` + `SameSite=Lax`**, com expiração.
   Não guardar tokens em `localStorage`.
-- **Rate limiting no login.** Um formulário de login exposto à internet sem
-  limite de tentativas é um convite.
-- **CSP a rever.** A atual assume Tauri (`connect-src 'self' ipc:
-  http://ipc.localhost`); a versão web precisa da sua.
+- **Rate limiting no login**, mesmo em rede privada.
+- **HTTPS**, mesmo em rede privada — um certificado interno chega, mas texto
+  em claro não.
+- **CSP própria para a versão web.** A atual assume Tauri (`connect-src 'self'
+  ipc: http://ipc.localhost`).
 - **Um conjunto de dados, N utilizadores — não multi-tenant.** O caso real é
   «a minha família acede aos dados da minha cozinha», não «servir N cozinhas
   independentes». Multi-tenancy triplica a complexidade de cada query por um
   requisito que ninguém pediu. Se um dia for preciso, é uma coluna nova.
 
 **Papéis:** por agora, nenhum. Todos os utilizadores autenticados veem tudo.
-Papéis (quem pode apagar, quem só regista consumo) são uma decisão para quando
+Papéis (quem pode apagar, quem só regista consumo) são decisão para quando
 houver mais de uma pessoa a usar e uma queixa concreta.
+
+#### O que ser um Raspberry Pi acrescenta ao trabalho
+
+Não é «Linux, portanto já está» — há três coisas concretas que não existem em
+nenhum dos outros alvos:
+
+- **Build ARM.** O `release.yml` compila `x86_64`. Um Pi precisa de
+  `aarch64-unknown-linux-gnu` — cross-compile ou runner ARM. É trabalho de
+  build real, não uma flag.
+- **A base de dados fica num cartão SD**, que é o componente que falha
+  primeiro num Pi e falha por desgaste de escrita, sem aviso. Duas
+  consequências: preferir SSD por USB ao cartão, e **backup automático
+  agendado no host** — que deixa de ser conveniência e passa a ser o que
+  separa «o cartão morreu» de «perdeu-se tudo». O `backup_export` construído
+  na auditoria de 2026-07-26 já dá a peça; falta o agendamento.
+- **O host passa a ser a cópia única.** Como as apps nativas são
+  independentes (decisão acima), nada do que está no host existe noutro lado.
+  Isto não é um detalhe de operação — é a razão pela qual o ponto anterior é
+  obrigatório e não opcional.
 
 #### Porque depende dos movimentos de stock
 
