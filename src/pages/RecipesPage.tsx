@@ -10,6 +10,7 @@ import SearchBar from "../components/ui/SearchBar";
 import { useI18n } from "../i18n";
 import type { RecipeWithIngredients as Recipe } from "../../crates/core/bindings/RecipeWithIngredients";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
+import type { ShoppingList } from "../../crates/core/bindings/ShoppingList";
 import type { RecipeImportPreview } from "../../crates/core/bindings/RecipeImportPreview";
 import { UNIT_LABELS_FULL as UNIT_LABELS, UNIT_LABELS_SHORT as UNIT_SHORT, convertUnit } from "../lib/units";
 import { errKey } from "../lib/errors";
@@ -585,6 +586,10 @@ export default function RecipesPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [servings, setServings] = useState(4);
   const [importOpen, setImportOpen] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
+  const [listPicks, setListPicks] = useState<number[]>([]);
+  const [listMultiplier, setListMultiplier] = useState("1");
+  const [listBusy, setListBusy] = useState(false);
   const [importUrl, setImportUrl] = useState("");
   const [importBusy, setImportBusy] = useState(false);
 
@@ -766,6 +771,30 @@ export default function RecipesPage() {
     }
   }
 
+  async function handleGenerateList() {
+    setListBusy(true);
+    try {
+      const list = await invoke<ShoppingList>("shopping_list_create_from_recipes", {
+        input: {
+          recipe_ids: listPicks,
+          portions_multiplier: Number(listMultiplier),
+          name: null,
+        },
+      });
+      setListOpen(false);
+      showToast(
+        list.items.length === 0
+          ? t("recipes.shoppingList.nothingMissing")
+          : t("recipes.shoppingList.created", { name: list.name, count: list.items.length }),
+        "ok",
+      );
+    } catch (e) {
+      showToast(t(errKey(e, "recipes.shoppingList.error")), "err");
+    } finally {
+      setListBusy(false);
+    }
+  }
+
   return (
     <div className="content" style={{ padding: 0, height: "100%", maxWidth: "none" }}>
       <PageHeader
@@ -773,6 +802,14 @@ export default function RecipesPage() {
         subtitle={t("recipes.subtitle", { count: recipes.length })}
         actions={
           <>
+            <button
+              className="btn btn-secondary"
+              onClick={() => { setListPicks(selectedId ? [selectedId] : []); setListMultiplier("1"); setListOpen(true); }}
+              disabled={recipes.length === 0}
+            >
+              <span className="ms" style={{ fontSize: 16 }}>shopping_cart</span>
+              {t("recipes.toShoppingList")}
+            </button>
             <button className="btn btn-secondary" onClick={openImport}>
               <span className="ms" style={{ fontSize: 16 }}>link</span>
               {t("recipes.importFromUrl")}
@@ -875,6 +912,64 @@ export default function RecipesPage() {
         onCancel={() => setConfirmDelete(null)}
         danger
       />
+
+      <Modal
+        open={listOpen}
+        onClose={() => setListOpen(false)}
+        title={t("recipes.shoppingList.title")}
+        footer={
+          <>
+            <button className="btn btn-secondary" onClick={() => setListOpen(false)}>{t("common.cancel")}</button>
+            <button
+              className="btn btn-primary"
+              onClick={handleGenerateList}
+              disabled={listBusy || listPicks.length === 0 || !(Number(listMultiplier) > 0)}
+            >
+              {listBusy ? t("recipes.shoppingList.loading") : t("recipes.shoppingList.submit")}
+            </button>
+          </>
+        }
+      >
+        <p className="text-4" style={{ marginBottom: "var(--space-3)" }}>{t("recipes.shoppingList.desc")}</p>
+
+        <div className="field">
+          <label className="field-label" htmlFor="list-multiplier">{t("recipes.shoppingList.multiplier")}</label>
+          <input
+            id="list-multiplier"
+            className="input"
+            type="number"
+            min="0.25"
+            step="0.25"
+            value={listMultiplier}
+            onChange={e => setListMultiplier(e.target.value)}
+            disabled={listBusy}
+            style={{ maxWidth: 140 }}
+          />
+          <p className="text-4 mono" style={{ marginTop: "var(--space-1)" }}>{t("recipes.shoppingList.multiplierHint")}</p>
+        </div>
+
+        <div className="field">
+          <label className="field-label">{t("recipes.shoppingList.pick", { count: listPicks.length })}</label>
+          <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid var(--line)", borderRadius: "var(--radius-sm)" }}>
+            {recipes.map(recipe => (
+              <label
+                key={recipe.id}
+                style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", padding: "8px 12px", cursor: "pointer" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={listPicks.includes(recipe.id)}
+                  disabled={listBusy}
+                  onChange={e => setListPicks(prev =>
+                    e.target.checked ? [...prev, recipe.id] : prev.filter(id => id !== recipe.id)
+                  )}
+                />
+                <span>{recipe.name}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={importOpen}

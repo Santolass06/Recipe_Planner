@@ -173,8 +173,9 @@ impl AppDb {
         mise_core::db::create_shopping_list(&self.db, name, items).await.map_err(user_error)
     }
 
-    pub async fn create_shopping_list_from_recipes(&self, recipe_ids: Vec<i64>, portions_multiplier: u32) -> Result<ShoppingList, String> {
-        mise_core::db::create_shopping_list_from_recipes(&self.db, recipe_ids, portions_multiplier).await.map_err(user_error)
+    pub async fn create_shopping_list_from_recipes(&self, input: ShoppingListFromRecipesInput) -> Result<ShoppingList, String> {
+        input.validate().map_err(|e| e.to_string())?;
+        mise_core::db::create_shopping_list_from_recipes(&self.db, input).await.map_err(user_error)
     }
 
     pub async fn update_shopping_list_item(&self, list_id: i64, item_id: i64, purchased: bool) -> Result<ShoppingList, String> {
@@ -426,7 +427,7 @@ impl AppDb {
         mise_core::db::delete_meal_entry(&self.db, id).await.map_err(user_error)
     }
 
-    pub async fn meal_plan_generate_shopping_list(&self, plan_id: i64, portions_multiplier: u32) -> Result<MealPlanShoppingList, String> {
+    pub async fn meal_plan_generate_shopping_list(&self, plan_id: i64, portions_multiplier: f64) -> Result<MealPlanShoppingList, String> {
         mise_core::db::generate_shopping_list_from_meal_plan(&self.db, plan_id, portions_multiplier).await.map_err(user_error)
     }
 
@@ -747,12 +748,9 @@ pub mod commands {
     #[tauri::command]
     pub async fn shopping_list_create_from_recipes(
         db: tauri::State<'_, crate::AppDb>,
-        recipe_ids: Vec<i64>,
-        portions_multiplier: u32,
+        input: ShoppingListFromRecipesInput,
     ) -> Result<ShoppingList, String> {
-        db.create_shopping_list_from_recipes(recipe_ids, portions_multiplier)
-            .await
-            .map_err(user_error)
+        db.create_shopping_list_from_recipes(input).await.map_err(user_error)
     }
 
     #[tauri::command]
@@ -1239,7 +1237,7 @@ pub mod commands {
     pub async fn meal_plan_generate_shopping_list(
         db: tauri::State<'_, crate::AppDb>,
         plan_id: i64,
-        portions_multiplier: u32,
+        portions_multiplier: f64,
     ) -> Result<MealPlanShoppingList, String> {
         db.meal_plan_generate_shopping_list(plan_id, portions_multiplier)
             .await
