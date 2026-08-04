@@ -2,7 +2,9 @@
 
 > **mise** [/miːz/] — *culinary term: "everything in its place"*
 
-A kitchen management app for planning menus, tracking stock and costing recipes — built with **Tauri 2**, **Rust**, **React 19** and **libSQL**, running as a local-first desktop app (Linux/macOS/Windows) with an Android build.
+A kitchen management app for planning menus, tracking stock and costing recipes — built with **Tauri 2**, **Rust**, **React 19** and **libSQL**, running as a local-first desktop app.
+
+**Platform status, stated plainly:** Linux is the only target built and shipped today. Windows and Android are planned and not started; macOS and iOS are out of scope. See [`PROJECT.md`](PROJECT.md) for the roadmap.
 
 <p align="center">
   <img src="docs/screenshot-dashboard.png" alt="Dashboard" width="800" />
@@ -33,8 +35,14 @@ A kitchen management app for planning menus, tracking stock and costing recipes 
 - Confirmed lines are recorded as stock purchases in one step
 
 ### Reports
-- Cost report (spend over time, top-cost ingredients), meal stats, price trends — all live from real data
-- Waste report and stock-over-time trends are **not implemented yet** — no waste log or stock-history table exists, so those tabs are intentionally empty rather than showing invented numbers
+- Cost report (spend over time, top-cost ingredients), meal stats, price trends — all live from real data, sourced from actual purchases rather than shopping-list estimates
+- Waste report and stock-over-time trends are **not implemented yet** — the app models acquisition but not yet consumption, so there is no waste log or stock history to report on. Those tabs say what is missing rather than showing invented numbers. Closing this is the next structural piece of work (sprints S2–S4 in [`PROJECT.md`](PROJECT.md))
+
+### Backup
+
+- Full backup to a single JSON file — 18 tables plus stored images, ids preserved
+- Restore replaces everything and asks for confirmation first
+- Separate from "export data", which is a readable subset for sharing, not a backup
 
 ### Dashboard
 - Stock value, low-stock count, expiring count, pending purchases — each card links to its section
@@ -49,7 +57,7 @@ A kitchen management app for planning menus, tracking stock and costing recipes 
 
 ## Install
 
-Grab a built binary from [Releases](https://github.com/Santolass06/Recipe_Planner/releases) — `.AppImage` or `.deb` for Linux. No installer for macOS/Windows yet; build from source (below).
+Grab a built binary from [Releases](https://github.com/Santolass06/Recipe_Planner/releases) — `.AppImage` or `.deb` for Linux. Other platforms are not built yet; build from source (below).
 
 ## Development
 
@@ -87,10 +95,14 @@ cargo tauri dev        # desktop app, hot reload
 ### Build
 
 ```bash
-cargo tauri build       # bundles in src-tauri/target/release/bundle/{deb,appimage,msi,dmg}
+cargo tauri build       # bundles in src-tauri/target/release/bundle/{deb,appimage}
 ```
 
 ### Android
+
+Not wired up yet — the signing config and workflow were removed and are due
+back in sprint S7. The commands below are the starting point, not a working
+build:
 
 ```bash
 rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
@@ -102,19 +114,40 @@ cargo tauri android build
 
 ```bash
 cargo check --workspace && cargo test --workspace
+npx tsc --noEmit         # typecheck alone; also runs in CI
 npm run build            # tsc typecheck + vite build
 ```
 
 ## Architecture
 
 ```
-crates/core/    # mise-core   — domain types, libSQL migrations, ~106 query functions (db.rs)
-crates/tauri/   # mise-tauri  — thin AppDb wrapper exposing 105 #[tauri::command]s
+crates/core/    # mise-core   — domain types, libSQL migrations, query functions (db.rs)
+crates/tauri/   # mise-tauri  — thin AppDb wrapper exposing the #[tauri::command] surface
 src-tauri/      # Tauri 2 app entry, bundler config
-src/            # React 19 + TypeScript frontend (15 pages), i18n (PT/EN), CSS-variables design system
+src/            # React 19 + TypeScript frontend, i18n (PT/EN), CSS-variables design system
 ```
 
-Rust → TypeScript types are generated with `specta`/`ts-rs` into `crates/core/bindings/`, so frontend and backend types can't drift.
+`crates/core` has no Tauri dependency. That is deliberate: a server front-end
+is a second consumer of the same crate rather than a rewrite.
+
+Rust → TypeScript types are generated with `ts-rs` into `crates/core/bindings/`,
+so frontend and backend types can't drift.
+
+Counts change every week, so they are not written down here. To get them:
+
+```bash
+grep -c '#\[tauri::command\]' crates/tauri/src/lib.rs   # commands
+cargo test --workspace 2>&1 | grep '^test ' | grep -vc export_bindings   # real tests
+```
+
+## Project docs
+
+| File | What it is |
+|------|-----------|
+| [`PROJECT.md`](PROJECT.md) | The plan — what is left, in sprints |
+| [`CHANGELOG.md`](CHANGELOG.md) | What was done, and what was hard about it |
+| [`docs/AUDIT-2026-07.md`](docs/AUDIT-2026-07.md) | Full internal audit, 2026-07-26 |
+| `legacy/` | Superseded documents, kept for reference |
 
 ## License
 
