@@ -79,6 +79,16 @@ Cada sprint é **fechado por âmbito, não por tempo** — acaba quando os seus
 issues acabam, não ao fim de duas semanas. No fim de cada um: relatório do que
 mudou e teste da app inteira antes de abrir o seguinte.
 
+**Os 52 issues estão no GitHub**, um milestone por sprint:
+[milestones](https://github.com/Santolass06/Recipe_Planner/milestones). Esta
+secção é o resumo e o porquê; o detalhe de cada issue está lá. Se os dois
+divergirem, o GitHub é a verdade sobre o estado e este ficheiro é a verdade
+sobre a ordem.
+
+**Exceção ao critério de «testar a app no fim»:** o S2 é schema e escrita sem
+UI. Se estiver correto, o ecrã fica exatamente igual — o teste manual serve
+para confirmar que **nada** mudou, e a prova real está nos testes automáticos.
+
 A ordem é por dependência. Onde não há dependência, está dito.
 
 | | Sprint | Estado | Depende de |
@@ -446,8 +456,18 @@ resposta óbvia para isso.
 com SSD, ligado permanentemente, com a logística de segurança à volta tratada
 como parte do produto e não como problema do utilizador.
 
-**É o último sprint (S8), por decisão.** Nada do resto do plano espera por
-ele.
+**É o último sprint (S8), e a razão é financeira, não técnica.** A
+prioridade é a app instalada e a correr no dispositivo de quem a usa, sem
+depender de nada online. A infraestrutura online só se monta **quando houver
+quem pague por esse serviço** — até lá seria custo fixo sem receita. Nada do
+resto do plano espera por ele.
+
+**Consequência sobre a forma:** se o host vier a ser vendido a mais do que um
+cliente, a resposta **não é multi-tenancy**. É **uma base de dados por
+cliente** — o libSQL é baseado em ficheiro, e um ficheiro por cliente dá
+isolamento total sem acrescentar uma coluna de tenant a cada query, nem o
+risco de a esquecer numa. Multi-tenancy é a resposta cara para um problema
+que a arquitetura já resolve de graça.
 
 #### Forma proposta
 
@@ -497,10 +517,10 @@ aqui é candidato a simplificação:
   em claro não.
 - **CSP própria para a versão web.** A atual assume Tauri (`connect-src 'self'
   ipc: http://ipc.localhost`).
-- **Um conjunto de dados, N utilizadores — não multi-tenant.** O caso real é
-  «a minha família acede aos dados da minha cozinha», não «servir N cozinhas
-  independentes». Multi-tenancy triplica a complexidade de cada query por um
-  requisito que ninguém pediu. Se um dia for preciso, é uma coluna nova.
+- **Um conjunto de dados, N utilizadores — não multi-tenant.** Cada instância
+  serve uma cozinha. Se houver vários clientes, são várias instâncias com
+  várias bases de dados, não uma base partilhada com coluna de tenant — ver a
+  nota nas decisões fechadas acima.
 
 **Papéis:** por agora, nenhum. Todos os utilizadores autenticados veem tudo.
 Papéis (quem pode apagar, quem só regista consumo) são decisão para quando
