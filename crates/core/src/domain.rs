@@ -505,6 +505,91 @@ pub struct StockMovementInput {
     pub signed_quantity: Option<f64>,
 }
 
+/// Cooking or producing a recipe (Sprint S3).
+///
+/// The two differ in one thing: cooking only uses ingredients up, producing
+/// also puts the finished thing into stock so it can later be sold or lost.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS, Validate)]
+#[ts(export, export_to = "bindings/")]
+pub struct ProductionInput {
+    #[validate(range(min = 1))]
+    #[ts(type = "number")]
+    pub recipe_id: i64,
+    /// Half a batch is 0.5, two and a half is 2.5. The recipe stays canonical
+    /// ("this one yields 40 cookies") and the flexibility lives here.
+    #[validate(range(min = 0.0))]
+    pub multiplier: f64,
+    /// `false` cooks (ingredients out, nothing in), `true` produces (ingredients
+    /// out, product in).
+    pub yields_product: bool,
+    #[validate(length(max = 500))]
+    pub reason: Option<String>,
+}
+
+/// An ingredient the recipe asked for and the stock could not cover.
+///
+/// Reported, never fatal: in a real kitchen the recorded stock is almost always
+/// wrong, and an app that refuses to accept "I made the cookies" gets abandoned
+/// inside a week.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct StockShortfall {
+    #[ts(type = "number")]
+    pub ingredient_id: i64,
+    pub ingredient_name: String,
+    pub needed: f64,
+    pub available: f64,
+    pub unit: Unit,
+}
+
+/// What one cook or production run did.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct ProductionResult {
+    /// Groups every movement of this run, so it can be read back or undone.
+    pub production_id: String,
+    pub movements: Vec<StockMovement>,
+    /// Empty when the stock covered everything.
+    pub shortfalls: Vec<StockShortfall>,
+}
+
+/// Recording a loss (Sprint S3) — spoiled ingredient or unsold product.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS, Validate)]
+#[ts(export, export_to = "bindings/")]
+pub struct LossInput {
+    #[ts(type = "number | null")]
+    pub ingredient_id: Option<i64>,
+    #[ts(type = "number | null")]
+    pub recipe_id: Option<i64>,
+    #[validate(range(min = 0.0))]
+    pub quantity: f64,
+    pub unit: Unit,
+    #[validate(length(max = 500))]
+    pub reason: Option<String>,
+}
+
+/// Recording a sale (Sprint S3).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS, Validate)]
+#[ts(export, export_to = "bindings/")]
+pub struct SaleInput {
+    /// Selling something made is a recipe; reselling a bought thing is an
+    /// ingredient. Exactly one.
+    #[ts(type = "number | null")]
+    pub ingredient_id: Option<i64>,
+    #[ts(type = "number | null")]
+    pub recipe_id: Option<i64>,
+    #[validate(range(min = 0.0))]
+    pub quantity: f64,
+    pub unit: Unit,
+    /// The price actually charged, per unit. Written into the movement and never
+    /// read from the catalogue again — otherwise every past sale rewrites itself
+    /// the next time a price changes.
+    #[validate(range(min = 0.0))]
+    pub sale_price: f64,
+    #[validate(length(max = 500))]
+    pub reason: Option<String>,
+}
+
 /// What `stock_reconcile` found and fixed.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]

@@ -1761,6 +1761,148 @@ pub async fn stock_reconcile(db: &Database) -> LibsqlResult<StockReconcileResult
     })
 }
 
+/// Cook or produce a recipe (Sprint S3).
+///
+/// Reuses `needed_ingredients_for` — the same expansion the shopping list runs,
+/// which is the point: the quantities a recipe consumes and the quantities it
+/// needs bought are the same numbers, and computing them twice is how the two
+/// drift apart.
+///
+/// Every movement of a run shares one `production_id`, so N consumptions and
+/// the 1 product entry can be read back as a single event.
+///
+/// **Short stock warns and lets it through.** The shortfalls come back in the
+/// result for the caller to show; the movements are written either way.
+pub async fn recipe_produce(db: &Database, input: ProductionInput) -> LibsqlResult<ProductionResult> {
+    let conn = get_conn(db).await?;
+
+    let (recipe_name, portions) = {
+        let mut rows = conn.query(
+            "SELECT name, portions FROM recipes WHERE id = ?1",
+            params![input.recipe_id],
+        ).await?;
+        let row = rows.next().await?.ok_or(libsql::Error::QueryReturnedNoRows)?;
+        (row.get::<String>(0)?, row.get::<i64>(1)?)
+    };
+
+    let needed = needed_ingredients_for(&conn, &[(input.recipe_id, input.multiplier)]).await?;
+    if needed.is_empty() {
+        return Err(libsql::Error::Misuse(format!(
+            "'{recipe_name}' has no ingredients, so there is nothing to consume"
+        )));
+    }
+
+    // ponytail: recipe id plus microsecond timestamp. Unique enough for grouping
+    // rows written by one machine; a uuid dependency would buy nothing here.
+    let production_id = format!("{}-{}", input.recipe_id, Utc::now().timestamp_micros());
+
+    let mut shortfalls = Vec::new();
+    let mut movements = Vec::with_capacity(needed.len() + 1);
+    for line in &needed {
+        let available: f64 = {
+            let mut rows = conn.query(
+                "SELECT quantity FROM stock WHERE ingredient_id = ?1",
+                params![line.ingredient_id],
+            ).await?;
+            match rows.next().await? {
+                Some(row) => row.get(0)?,
+                None => 0.0,
+            }
+        };
+        if available < line.quantity {
+            shortfalls.push(StockShortfall {
+                ingredient_id: line.ingredient_id,
+                ingredient_name: line.name.clone(),
+                needed: line.quantity,
+                available,
+                unit: parse_unit_str(&line.unit_str),
+            });
+        }
+
+        movements.push(StockMovementInput {
+            ingredient_id: Some(line.ingredient_id),
+            recipe_id: None,
+            movement_type: MovementType::Consumption,
+            quantity: line.quantity,
+            unit: parse_unit_str(&line.unit_str),
+            unit_cost: Some(line.price_per_unit),
+            sale_price: None,
+            reason: input.reason.clone(),
+            production_id: Some(production_id.clone()),
+            signed_quantity: None,
+        });
+    }
+
+    if input.yields_product {
+        // Cost of one unit produced is what the run consumed, spread over what it
+        // yielded — the same number the recipe's cost-per-portion already shows.
+        let produced = portions as f64 * input.multiplier;
+        let run_cost: f64 = needed.iter().map(|l| l.quantity * l.price_per_unit).sum();
+        movements.push(StockMovementInput {
+            ingredient_id: None,
+            recipe_id: Some(input.recipe_id),
+            movement_type: MovementType::Production,
+            quantity: produced,
+            unit: Unit::Piece,
+            unit_cost: if produced > 0.0 { Some(run_cost / produced) } else { None },
+            sale_price: None,
+            reason: input.reason.clone(),
+            production_id: Some(production_id.clone()),
+            signed_quantity: None,
+        });
+    }
+
+    let written = stock_movements_add_batch(db, movements).await?;
+
+    Ok(ProductionResult { production_id, movements: written, shortfalls })
+}
+
+/// Record a loss — a spoiled ingredient or an unsold product.
+pub async fn stock_loss_record(db: &Database, input: LossInput) -> LibsqlResult<StockMovement> {
+    stock_movement_add(db, StockMovementInput {
+        ingredient_id: input.ingredient_id,
+        recipe_id: input.recipe_id,
+        movement_type: MovementType::Loss,
+        quantity: input.quantity,
+        unit: input.unit,
+        unit_cost: None,
+        sale_price: None,
+        reason: input.reason,
+        production_id: None,
+        signed_quantity: None,
+    }).await
+}
+
+/// Record a sale, with the price actually charged.
+pub async fn stock_sale_record(db: &Database, input: SaleInput) -> LibsqlResult<StockMovement> {
+    stock_movement_add(db, StockMovementInput {
+        ingredient_id: input.ingredient_id,
+        recipe_id: input.recipe_id,
+        movement_type: MovementType::Sale,
+        quantity: input.quantity,
+        unit: input.unit,
+        unit_cost: None,
+        sale_price: Some(input.sale_price),
+        reason: input.reason,
+        production_id: None,
+        signed_quantity: None,
+    }).await
+}
+
+/// How much of a produced recipe is on hand: everything produced, less what was
+/// sold or lost. Products have no `stock` row — their balance is the sum.
+pub async fn recipe_stock_balance(db: &Database, recipe_id: i64) -> LibsqlResult<f64> {
+    let conn = get_conn(db).await?;
+    let mut rows = conn.query(
+        "SELECT COALESCE(SUM(quantity), 0.0) FROM stock_movements WHERE recipe_id = ?1",
+        params![recipe_id],
+    ).await?;
+    match rows.next().await? {
+        Some(row) => row.get(0),
+        None => Ok(0.0),
+    }
+}
+
 /// One aggregated line, before stock is taken off it.
 struct NeededIngredient {
     ingredient_id: i64,
@@ -6601,6 +6743,144 @@ mod audit_2026_07 {
             exported.ingredients[0].category.as_deref(), Some(category_name.as_str()),
             "the export carried something other than the category's name"
         );
+    }
+
+    /// S3.1: cooking takes the ingredients out of stock, converted, atomically.
+    #[tokio::test]
+    async fn cooking_a_recipe_takes_its_ingredients_out_of_stock() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        // The recipe asks in kilograms for a flour tracked in grams.
+        let r = cake(&db, vec![RecipeIngredientInput { ingredient_id: f.id, quantity: 1.0, unit: Unit::Kilogram }]).await;
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 5000.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 10.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        let result = recipe_produce(&db, ProductionInput {
+            recipe_id: r.recipe.id, multiplier: 1.0, yields_product: false, reason: None,
+        }).await.unwrap();
+
+        assert!(result.shortfalls.is_empty(), "reported a shortfall with stock to spare");
+        assert_eq!(result.movements.len(), 1, "cooking wrote a product entry it should not have");
+        assert_eq!(
+            get_stock(&db, f.id).await.unwrap().quantity, 4000.0,
+            "the recipe's kilogram was not converted into the grams stock is kept in"
+        );
+    }
+
+    /// S3.2: a production run is N consumptions plus 1 product entry, sharing one
+    /// production_id, and the product's balance is what it produced.
+    #[tokio::test]
+    async fn producing_consumes_the_ingredients_and_puts_the_product_into_stock() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let sugar = create_ingredient(&db, IngredientInput {
+            name: "Açúcar".into(), unit: Unit::Gram, price_per_unit: 0.001,
+            category: None, event_id: None,
+        }).await.unwrap();
+        let r = create_recipe(&db, RecipeInput {
+            name: "Bolachas".into(), category: "Doces".into(), portions: 40,
+            instructions: String::new(),
+            ingredients: vec![
+                RecipeIngredientInput { ingredient_id: f.id, quantity: 500.0, unit: Unit::Gram },
+                RecipeIngredientInput { ingredient_id: sugar.id, quantity: 200.0, unit: Unit::Gram },
+            ],
+            prep_time_minutes: None, cook_time_minutes: None, tags: vec![],
+            image_base64: None, event_id: None,
+        }).await.unwrap();
+        for (id, qty) in [(f.id, 5000.0), (sugar.id, 5000.0)] {
+            stock_purchase_add(&db, StockPurchaseInput {
+                ingredient_id: id, quantity: qty, unit: Unit::Gram,
+                price_per_unit: 0.002, total_price: qty * 0.002, is_discount: false, discount_percent: 0.0,
+                purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            }).await.unwrap();
+        }
+
+        // Half a batch: the flexibility lives in the multiplier, not in portions.
+        let result = recipe_produce(&db, ProductionInput {
+            recipe_id: r.recipe.id, multiplier: 0.5, yields_product: true, reason: None,
+        }).await.unwrap();
+
+        assert_eq!(result.movements.len(), 3, "expected two consumptions and one product entry");
+        assert!(
+            result.movements.iter().all(|m| m.production_id.as_deref() == Some(result.production_id.as_str())),
+            "the movements of one run do not share a production_id"
+        );
+        assert_eq!(get_stock(&db, f.id).await.unwrap().quantity, 4750.0);
+        assert_eq!(get_stock(&db, sugar.id).await.unwrap().quantity, 4900.0);
+        assert_eq!(
+            recipe_stock_balance(&db, r.recipe.id).await.unwrap(), 20.0,
+            "half a batch of a 40-portion recipe should yield 20"
+        );
+    }
+
+    /// S3.5: in a real kitchen the recorded stock is almost always wrong. An app
+    /// that refuses "I made the cookies" gets abandoned inside a week — so short
+    /// stock reports and lets it through.
+    #[tokio::test]
+    async fn short_stock_warns_and_still_records_the_production() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let r = cake(&db, vec![RecipeIngredientInput { ingredient_id: f.id, quantity: 500.0, unit: Unit::Gram }]).await;
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 100.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 0.2, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        let result = recipe_produce(&db, ProductionInput {
+            recipe_id: r.recipe.id, multiplier: 1.0, yields_product: false, reason: None,
+        }).await.unwrap();
+
+        assert_eq!(result.shortfalls.len(), 1, "the shortfall was not reported");
+        assert_eq!(result.shortfalls[0].needed, 500.0);
+        assert_eq!(result.shortfalls[0].available, 100.0);
+        assert_eq!(result.movements.len(), 1, "the production was refused instead of warned about");
+        assert_eq!(
+            get_stock(&db, f.id).await.unwrap().quantity, -400.0,
+            "stock should be allowed to go negative and be reconciled later"
+        );
+    }
+
+    /// S3.4: the price charged is written into the movement. Reading it back from
+    /// the catalogue later would let a price change rewrite every past sale.
+    #[tokio::test]
+    async fn a_sale_keeps_the_price_that_was_charged_at_the_time() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let r = create_recipe(&db, RecipeInput {
+            name: "Bolachas".into(), category: "Doces".into(), portions: 40,
+            instructions: String::new(),
+            ingredients: vec![RecipeIngredientInput { ingredient_id: f.id, quantity: 500.0, unit: Unit::Gram }],
+            prep_time_minutes: None, cook_time_minutes: None, tags: vec![],
+            image_base64: None, event_id: None,
+        }).await.unwrap();
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 5000.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 10.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+        recipe_produce(&db, ProductionInput {
+            recipe_id: r.recipe.id, multiplier: 1.0, yields_product: true, reason: None,
+        }).await.unwrap();
+
+        let sale = stock_sale_record(&db, SaleInput {
+            ingredient_id: None, recipe_id: Some(r.recipe.id),
+            quantity: 10.0, unit: Unit::Piece, sale_price: 0.75, reason: None,
+        }).await.unwrap();
+
+        assert_eq!(sale.sale_price, Some(0.75));
+        assert_eq!(sale.quantity, -10.0, "a sale must take the product out of stock");
+        assert_eq!(recipe_stock_balance(&db, r.recipe.id).await.unwrap(), 30.0);
+
+        // A loss on the finished product, the second of the two levels.
+        stock_loss_record(&db, LossInput {
+            ingredient_id: None, recipe_id: Some(r.recipe.id),
+            quantity: 5.0, unit: Unit::Piece, reason: Some("não vendidas".into()),
+        }).await.unwrap();
+        assert_eq!(recipe_stock_balance(&db, r.recipe.id).await.unwrap(), 25.0);
     }
 
     /// S2.5/S2.7: `stock.quantity` is a cache of `SUM(stock_movements.quantity)`.

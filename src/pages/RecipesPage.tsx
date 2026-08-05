@@ -11,6 +11,8 @@ import { useI18n } from "../i18n";
 import type { RecipeWithIngredients as Recipe } from "../../crates/core/bindings/RecipeWithIngredients";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import type { ShoppingList } from "../../crates/core/bindings/ShoppingList";
+import type { ProductionResult } from "../../crates/core/bindings/ProductionResult";
+import type { StockShortfall } from "../../crates/core/bindings/StockShortfall";
 import type { RecipeImportPreview } from "../../crates/core/bindings/RecipeImportPreview";
 import { UNIT_LABELS_FULL as UNIT_LABELS, UNIT_LABELS_SHORT as UNIT_SHORT, convertUnit } from "../lib/units";
 import { errKey } from "../lib/errors";
@@ -207,6 +209,7 @@ function RecipeDetail({
   ingredients,
   onEdit,
   onDelete,
+  onCook,
   t,
 }: {
   recipe: Recipe;
@@ -215,6 +218,7 @@ function RecipeDetail({
   ingredients: Ingredient[];
   onEdit: () => void;
   onDelete: () => void;
+  onCook: () => void;
   t: T;
 }) {
   const costLines = useMemo(() => computeCostLines(recipe, servings, ingredients, t), [recipe, servings, ingredients, t]);
@@ -255,6 +259,9 @@ function RecipeDetail({
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-primary" onClick={onCook} type="button">
+            <span className="ms" style={{ fontSize: 15 }}>skillet</span> {t("recipes.cook.action")}
+          </button>
           <button className="btn btn-secondary" onClick={onEdit} type="button">
             <span className="ms" style={{ fontSize: 15 }}>edit</span> {t("common.edit")}
           </button>
@@ -590,6 +597,11 @@ export default function RecipesPage() {
   const [listPicks, setListPicks] = useState<number[]>([]);
   const [listMultiplier, setListMultiplier] = useState("1");
   const [listBusy, setListBusy] = useState(false);
+  const [cookOpen, setCookOpen] = useState(false);
+  const [cookMultiplier, setCookMultiplier] = useState("1");
+  const [cookYields, setCookYields] = useState(false);
+  const [cookBusy, setCookBusy] = useState(false);
+  const [shortfalls, setShortfalls] = useState<StockShortfall[]>([]);
   const [importUrl, setImportUrl] = useState("");
   const [importBusy, setImportBusy] = useState(false);
 
@@ -771,6 +783,36 @@ export default function RecipesPage() {
     }
   }
 
+  async function handleCook() {
+    if (!selected) return;
+    setCookBusy(true);
+    try {
+      const result = await invoke<ProductionResult>("recipe_produce", {
+        input: {
+          recipe_id: selected.id,
+          multiplier: Number(cookMultiplier),
+          yields_product: cookYields,
+          reason: null,
+        },
+      });
+      setCookOpen(false);
+      // Short stock is reported, never fatal — the movements were written either
+      // way, so the toast says what was off rather than pretending it failed.
+      setShortfalls(result.shortfalls);
+      showToast(
+        result.shortfalls.length > 0
+          ? t("recipes.cook.doneWithShortfalls", { count: result.shortfalls.length })
+          : t("recipes.cook.done", { name: selected.name }),
+        result.shortfalls.length > 0 ? "warn" : "ok",
+      );
+      load();
+    } catch (e) {
+      showToast(t(errKey(e, "recipes.cook.error")), "err");
+    } finally {
+      setCookBusy(false);
+    }
+  }
+
   async function handleGenerateList() {
     setListBusy(true);
     try {
@@ -883,6 +925,7 @@ export default function RecipesPage() {
                 ingredients={ingredients}
                 onEdit={() => openEdit(selected)}
                 onDelete={() => setConfirmDelete(selected.id)}
+                onCook={() => { setCookMultiplier("1"); setCookYields(false); setCookOpen(true); }}
                 t={t}
               />
             ) : (
@@ -912,6 +955,77 @@ export default function RecipesPage() {
         onCancel={() => setConfirmDelete(null)}
         danger
       />
+
+      <Modal
+        open={cookOpen}
+        onClose={() => setCookOpen(false)}
+        title={t("recipes.cook.title", { name: selected?.name ?? "" })}
+        footer={
+          <>
+            <button className="btn btn-secondary" onClick={() => setCookOpen(false)}>{t("common.cancel")}</button>
+            <button
+              className="btn btn-primary"
+              onClick={handleCook}
+              disabled={cookBusy || !(Number(cookMultiplier) > 0)}
+            >
+              {cookBusy ? t("recipes.cook.loading") : t("recipes.cook.submit")}
+            </button>
+          </>
+        }
+      >
+        <p className="text-4" style={{ marginBottom: "var(--space-3)" }}>{t("recipes.cook.desc")}</p>
+
+        <div className="field">
+          <label className="field-label" htmlFor="cook-multiplier">{t("recipes.cook.multiplier")}</label>
+          <input
+            id="cook-multiplier"
+            className="input"
+            type="number"
+            min="0.25"
+            step="0.25"
+            value={cookMultiplier}
+            onChange={e => setCookMultiplier(e.target.value)}
+            disabled={cookBusy}
+            style={{ maxWidth: 140 }}
+          />
+          <p className="text-4 mono" style={{ marginTop: "var(--space-1)" }}>
+            {t("recipes.cook.multiplierHint", { count: Math.round((selected?.portions ?? 0) * (Number(cookMultiplier) || 0)) })}
+          </p>
+        </div>
+
+        <div className="field">
+          <label style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={cookYields}
+              disabled={cookBusy}
+              onChange={e => setCookYields(e.target.checked)}
+            />
+            <span>{t("recipes.cook.yieldsProduct")}</span>
+          </label>
+          <p className="text-4 mono" style={{ marginTop: "var(--space-1)" }}>{t("recipes.cook.yieldsProductHint")}</p>
+        </div>
+      </Modal>
+
+      <Modal
+        open={shortfalls.length > 0}
+        onClose={() => setShortfalls([])}
+        title={t("recipes.cook.shortfallTitle")}
+        footer={<button className="btn btn-primary" onClick={() => setShortfalls([])}>{t("common.confirm")}</button>}
+      >
+        <p className="text-4" style={{ marginBottom: "var(--space-3)" }}>{t("recipes.cook.shortfallDesc")}</p>
+        <ul style={{ margin: 0, paddingLeft: 18 }}>
+          {shortfalls.map(s => (
+            <li key={s.ingredient_id} style={{ marginBottom: 6 }}>
+              <strong>{s.ingredient_name}</strong>{" — "}
+              {t("recipes.cook.shortfallLine", {
+                needed: s.needed.toLocaleString("pt-PT"),
+                available: s.available.toLocaleString("pt-PT"),
+              })}
+            </li>
+          ))}
+        </ul>
+      </Modal>
 
       <Modal
         open={listOpen}
