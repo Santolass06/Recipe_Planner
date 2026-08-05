@@ -52,6 +52,10 @@ pub fn run() {
             mise_tauri::commands::shopping_list_get,
             mise_tauri::commands::shopping_list_create,
             mise_tauri::commands::shopping_list_create_from_recipes,
+            mise_tauri::commands::stock_movement_add,
+            mise_tauri::commands::stock_movements_add_batch,
+            mise_tauri::commands::stock_movements_for_ingredient,
+            mise_tauri::commands::stock_reconcile,
             mise_tauri::commands::shopping_list_update_item,
             mise_tauri::commands::shopping_list_delete,
             // Suggester

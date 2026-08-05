@@ -472,6 +472,50 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
         (),
     ).await?;
 
+    // Migration 020: stock movements (Sprint S2). The half of the domain that
+    // never existed — until now every path that wrote to `stock` was an inflow,
+    // and the only way down was the user correcting the number by hand.
+    //
+    // `quantity` is **signed**: inflows positive, outflows negative. That makes
+    // the stock of an ingredient `SUM(quantity)` and reconciliation a one-liner,
+    // which is the query that matters most. `movement_type` carries the meaning
+    // and `movement_direction` keeps the two from disagreeing.
+    //
+    // Target is polymorphic, same shape `shopping_list_items.ingredient_id`
+    // already uses: exactly one of `ingredient_id` (a raw ingredient) or
+    // `recipe_id` (something produced), enforced by CHECK.
+    //
+    // Money stays `REAL` here, deliberately: converting the app's money
+    // representation is a separate piece of work (see issue S2.3), and a table
+    // born in a different denomination than the other twenty would be the mixed
+    // representation this project keeps paying for.
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS stock_movements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ingredient_id INTEGER,
+            recipe_id INTEGER,
+            movement_type TEXT NOT NULL,
+            quantity REAL NOT NULL,
+            unit TEXT NOT NULL,
+            unit_cost REAL,
+            sale_price REAL,
+            reason TEXT,
+            production_id TEXT,
+            created_by INTEGER,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            CHECK ((ingredient_id IS NULL) <> (recipe_id IS NULL)),
+            FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE RESTRICT,
+            FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE RESTRICT
+        );
+        "#,
+        (),
+    ).await?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_stock_movements_ingredient ON stock_movements(ingredient_id)", ()).await?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_stock_movements_recipe ON stock_movements(recipe_id)", ()).await?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at)", ()).await?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_stock_movements_production ON stock_movements(production_id)", ()).await?;
+
     run_data_migrations(&conn).await?;
 
     Ok(())
@@ -479,7 +523,7 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
 
 /// Schema version of the *data* migrations — the ones that rewrite rows that
 /// are already on disk. Bump when adding a step to `run_data_migrations`.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// Everything above this point is idempotent by construction (`CREATE TABLE IF
 /// NOT EXISTS`, `add_column_if_missing`) and needs no bookkeeping. Anything
@@ -502,6 +546,9 @@ async fn run_data_migrations(conn: &Connection) -> LibsqlResult<()> {
     if current < 1 {
         normalize_stock_purchase_units(conn).await?;
     }
+    if current < 2 {
+        backfill_purchase_movements(conn).await?;
+    }
 
     // ponytail: PRAGMA takes no bind params; SCHEMA_VERSION is a const i64.
     conn.execute(&format!("PRAGMA user_version = {SCHEMA_VERSION}"), ()).await?;
@@ -520,6 +567,37 @@ async fn run_data_migrations(conn: &Connection) -> LibsqlResult<()> {
 /// `stock.quantity` is deliberately *not* recomputed: purchases are only one
 /// of its inputs (manual corrections, receipts and seeds also write it), so a
 /// balance rebuilt from purchases alone would be a different lie.
+/// Every `stock_purchases` row already on disk becomes its `purchase` movement,
+/// so the history does not start empty on the day the table appears.
+///
+/// Idempotent by construction: it only inserts for purchase ids that have no
+/// movement yet, so running it twice is a no-op. Safe on an empty database.
+///
+/// Nothing here converts units — since the 2026-07-26 audit every
+/// `stock_purchases` row is already stored in the ingredient's own unit, which
+/// is exactly the invariant that makes this a straight copy.
+async fn backfill_purchase_movements(conn: &Connection) -> LibsqlResult<()> {
+    conn.execute(
+        r#"
+        INSERT INTO stock_movements
+            (ingredient_id, recipe_id, movement_type, quantity, unit, unit_cost, reason, created_at)
+        SELECT sp.ingredient_id, NULL, 'purchase', sp.quantity, sp.unit, sp.price_per_unit,
+               'backfill', sp.purchase_date
+        FROM stock_purchases sp
+        WHERE NOT EXISTS (
+            SELECT 1 FROM stock_movements m
+            WHERE m.movement_type = 'purchase'
+              AND m.reason = 'backfill'
+              AND m.ingredient_id = sp.ingredient_id
+              AND m.created_at = sp.purchase_date
+              AND m.quantity = sp.quantity
+        )
+        "#,
+        (),
+    ).await?;
+    Ok(())
+}
+
 async fn normalize_stock_purchase_units(conn: &Connection) -> LibsqlResult<()> {
     let mut rows = conn.query(
         "SELECT sp.id, sp.quantity, sp.unit, sp.price_per_unit, i.unit
@@ -1473,6 +1551,216 @@ pub async fn create_shopping_list(db: &Database, name: String, items: Vec<Shoppi
     get_shopping_list(db, list_id).await
 }
 
+// =====================================================================
+// STOCK MOVEMENTS (Sprint S2)
+// =====================================================================
+
+/// Turn the caller's positive magnitude into the signed quantity the table
+/// stores. `Adjustment` is the only type whose direction is the caller's to
+/// pick, and the only one that reads `signed_quantity`.
+fn signed_movement_quantity(input: &StockMovementInput) -> LibsqlResult<f64> {
+    match input.movement_type.is_inflow() {
+        Some(true) => Ok(input.quantity.abs()),
+        Some(false) => Ok(-input.quantity.abs()),
+        None => input.signed_quantity.ok_or_else(|| {
+            libsql::Error::Misuse(
+                "an adjustment must say which way it goes: set signed_quantity".to_string(),
+            )
+        }),
+    }
+}
+
+/// Write one movement and move the `stock` cache with it, inside the caller's
+/// transaction.
+///
+/// The two have to land together. A movement without its cache update makes the
+/// stock number lie until someone reconciles; a cache update without its
+/// movement makes the history lie forever.
+async fn stock_movement_add_tx(
+    conn: &Connection,
+    input: StockMovementInput,
+) -> LibsqlResult<StockMovement> {
+    if input.ingredient_id.is_some() == input.recipe_id.is_some() {
+        return Err(libsql::Error::Misuse(
+            "a movement targets exactly one of an ingredient or a recipe".to_string(),
+        ));
+    }
+
+    let quantity = signed_movement_quantity(&input)?;
+    let unit_str = input.unit.to_string();
+    let type_str = input.movement_type.to_string();
+
+    conn.execute(
+        r#"
+        INSERT INTO stock_movements
+            (ingredient_id, recipe_id, movement_type, quantity, unit, unit_cost, sale_price, reason, production_id, created_by, created_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10)
+        "#,
+        params![
+            input.ingredient_id,
+            input.recipe_id,
+            type_str,
+            quantity,
+            unit_str.clone(),
+            input.unit_cost,
+            input.sale_price,
+            input.reason.clone(),
+            input.production_id.clone(),
+            Utc::now().to_rfc3339(),
+        ],
+    ).await?;
+    let id = conn.last_insert_rowid();
+
+    // Products (recipe-targeted movements) have no `stock` row to keep in step —
+    // there is no per-recipe stock table. Their balance is the movement sum.
+    if let Some(ingredient_id) = input.ingredient_id {
+        let (name, ingredient_unit_str) = {
+            let mut rows = conn.query(
+                "SELECT name, unit FROM ingredients WHERE id = ?1",
+                params![ingredient_id],
+            ).await?;
+            let row = rows.next().await?.ok_or(libsql::Error::QueryReturnedNoRows)?;
+            (row.get::<String>(0)?, row.get::<String>(1)?)
+        };
+        conn.execute(
+            "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 0, datetime('now'))
+             ON CONFLICT(ingredient_id) DO UPDATE SET quantity = quantity + ?4, updated_at = datetime('now')",
+            params![ingredient_id, name, ingredient_unit_str, quantity],
+        ).await?;
+    }
+
+    Ok(StockMovement {
+        id,
+        ingredient_id: input.ingredient_id,
+        recipe_id: input.recipe_id,
+        movement_type: input.movement_type,
+        quantity,
+        unit: input.unit,
+        unit_cost: input.unit_cost,
+        sale_price: input.sale_price,
+        reason: input.reason,
+        production_id: input.production_id,
+        created_by: None,
+        created_at: Utc::now(),
+    })
+}
+
+/// Record one movement.
+pub async fn stock_movement_add(db: &Database, input: StockMovementInput) -> LibsqlResult<StockMovement> {
+    let conn = get_conn(db).await?;
+    let tx = conn.transaction().await?;
+    let movement = stock_movement_add_tx(&tx, input).await?;
+    tx.commit().await?;
+    Ok(movement)
+}
+
+/// Record several movements as one unit — a production run, where N consumptions
+/// and 1 product entry either all happen or none do.
+pub async fn stock_movements_add_batch(db: &Database, inputs: Vec<StockMovementInput>) -> LibsqlResult<Vec<StockMovement>> {
+    let conn = get_conn(db).await?;
+    let tx = conn.transaction().await?;
+    let mut written = Vec::with_capacity(inputs.len());
+    for input in inputs {
+        written.push(stock_movement_add_tx(&tx, input).await?);
+    }
+    tx.commit().await?;
+    Ok(written)
+}
+
+/// Movements for one ingredient, newest first.
+pub async fn stock_movements_for_ingredient(db: &Database, ingredient_id: i64, limit: u32) -> LibsqlResult<Vec<StockMovement>> {
+    let conn = get_conn(db).await?;
+    let mut rows = conn.query(
+        r#"SELECT id, ingredient_id, recipe_id, movement_type, quantity, unit,
+                  unit_cost, sale_price, reason, production_id, created_by, created_at
+           FROM stock_movements WHERE ingredient_id = ?1
+           ORDER BY created_at DESC, id DESC LIMIT ?2"#,
+        params![ingredient_id, limit as i64],
+    ).await?;
+
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await? {
+        out.push(row_to_stock_movement(&row)?);
+    }
+    Ok(out)
+}
+
+fn row_to_stock_movement(row: &Row) -> LibsqlResult<StockMovement> {
+    let type_str: String = row.get(3)?;
+    let unit_str: String = row.get(5)?;
+    let created_at: String = row.get(11)?;
+    Ok(StockMovement {
+        id: row.get(0)?,
+        ingredient_id: row.get(1)?,
+        recipe_id: row.get(2)?,
+        movement_type: type_str.parse().unwrap_or(MovementType::Adjustment),
+        quantity: row.get(4)?,
+        unit: parse_unit_str(&unit_str),
+        unit_cost: row.get(6)?,
+        sale_price: row.get(7)?,
+        reason: row.get(8)?,
+        production_id: row.get(9)?,
+        created_by: row.get(10)?,
+        created_at: DateTime::parse_from_rfc3339(&created_at)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now()),
+    })
+}
+
+/// Recompute every `stock.quantity` from the movements that produced it.
+///
+/// `stock.quantity` is a cache, and caches drift — a crash between the two
+/// writes, a hand-edited row, a bug. This is how the user gets back to a
+/// truthful number without anyone having to reason about which is right: the
+/// movements are the history, the cache is derived.
+///
+/// Ingredients whose stock predates the movements table are left alone: with no
+/// movement rows, `SUM` is nothing, and zeroing them would destroy real data to
+/// satisfy a table that did not exist when they were written.
+pub async fn stock_reconcile(db: &Database) -> LibsqlResult<StockReconcileResult> {
+    let conn = get_conn(db).await?;
+
+    let mut drifted: Vec<(i64, f64)> = Vec::new();
+    let mut checked = 0u32;
+    {
+        let mut rows = conn.query(
+            r#"SELECT s.ingredient_id, s.quantity, COALESCE(SUM(m.quantity), 0.0), COUNT(m.id)
+               FROM stock s
+               LEFT JOIN stock_movements m ON m.ingredient_id = s.ingredient_id
+               GROUP BY s.ingredient_id, s.quantity"#,
+            (),
+        ).await?;
+        while let Some(row) = rows.next().await? {
+            checked += 1;
+            let ingredient_id: i64 = row.get(0)?;
+            let cached: f64 = row.get(1)?;
+            let from_movements: f64 = row.get(2)?;
+            let movement_count: i64 = row.get(3)?;
+            if movement_count == 0 {
+                continue;
+            }
+            if (cached - from_movements).abs() > 1e-9 {
+                drifted.push((ingredient_id, from_movements));
+            }
+        }
+    }
+
+    let tx = conn.transaction().await?;
+    for (ingredient_id, truth) in &drifted {
+        tx.execute(
+            "UPDATE stock SET quantity = ?1, updated_at = datetime('now') WHERE ingredient_id = ?2",
+            params![*truth, *ingredient_id],
+        ).await?;
+    }
+    tx.commit().await?;
+
+    Ok(StockReconcileResult {
+        rows_checked: checked,
+        rows_corrected: drifted.len() as u32,
+    })
+}
+
 /// One aggregated line, before stock is taken off it.
 struct NeededIngredient {
     ingredient_id: i64,
@@ -2112,6 +2400,7 @@ pub async fn delete_all_data(db: &Database) -> LibsqlResult<()> {
     conn.execute("DELETE FROM meal_plan_entries", ()).await?;
     conn.execute("DELETE FROM meal_plans", ()).await?;
     conn.execute("DELETE FROM price_quotes", ()).await?;
+    conn.execute("DELETE FROM stock_movements", ()).await?;
     conn.execute("DELETE FROM stock_purchases", ()).await?;
     conn.execute("DELETE FROM receipt_imports", ()).await?;
     conn.execute("DELETE FROM images", ()).await?;
@@ -2714,6 +3003,14 @@ pub async fn delete_event(db: &Database, id: i64) -> LibsqlResult<()> {
     let tx = conn.transaction().await?;
     tx.execute(
         "DELETE FROM recipe_ingredients WHERE recipe_id IN (SELECT id FROM recipes WHERE event_id = ?1)",
+        params![id],
+    ).await?;
+    // Movements come first: they reference both the event's ingredients and its
+    // recipes with ON DELETE RESTRICT, so anything else deleted before them
+    // fails the constraint. Same manual-cascade convention as Migration 017.
+    tx.execute(
+        "DELETE FROM stock_movements WHERE ingredient_id IN (SELECT id FROM ingredients WHERE event_id = ?1)
+            OR recipe_id IN (SELECT id FROM recipes WHERE event_id = ?1)",
         params![id],
     ).await?;
     tx.execute("DELETE FROM recipes WHERE event_id = ?1", params![id]).await?;
@@ -3321,7 +3618,7 @@ pub async fn price_quotes_all(db: &Database) -> LibsqlResult<Vec<PriceQuoteWithI
 /// rebuilt by the migrations on any database.
 const BACKUP_TABLES: &[&str] = &[
     "settings", "categories", "ingredients", "recipes", "recipe_ingredients",
-    "stock", "stock_purchases", "suppliers", "price_quotes", "events",
+    "stock", "stock_purchases", "stock_movements", "suppliers", "price_quotes", "events",
     "shopping_lists", "shopping_list_items", "meal_plans", "meal_plan_entries",
     "images", "receipt_imports", "usage_events", "problem_reports",
 ];
@@ -5023,15 +5320,26 @@ async fn stock_purchase_add_tx(conn: &Connection, input: StockPurchaseInput) -> 
         ],
     ).await?;
 
-    // Update stock quantity (add purchased quantity)
-    conn.execute(
-        "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity, updated_at)
-         VALUES (?1, ?2, ?3, ?4, 0, datetime('now'))
-         ON CONFLICT(ingredient_id) DO UPDATE SET quantity = quantity + ?4, updated_at = datetime('now')",
-        params![input.ingredient_id, ingredient_name, ingredient_unit_str, quantity],
-    ).await?;
-    
+    // Read straight after the insert it belongs to. Reading it later means
+    // reading whatever the next statement inserted: the `stock` upsert below
+    // allocates a rowid of its own even when it resolves to an UPDATE, and any
+    // movement that is not a purchase pushes the two sequences apart for good.
     let id = conn.last_insert_rowid();
+
+    // The purchase is also a movement, and the movement owns the stock cache —
+    // one path up, one path down, one place where the two can disagree.
+    stock_movement_add_tx(conn, StockMovementInput {
+        ingredient_id: Some(input.ingredient_id),
+        recipe_id: None,
+        movement_type: MovementType::Purchase,
+        quantity,
+        unit: ingredient_unit,
+        unit_cost: Some(price_per_unit),
+        sale_price: None,
+        reason: None,
+        production_id: None,
+        signed_quantity: None,
+    }).await?;
     let mut rows = conn.query(
         r#"
         SELECT sp.id, sp.ingredient_id, i.name, i.unit, sp.quantity, sp.unit, sp.price_per_unit, sp.total_price,
@@ -6293,6 +6601,230 @@ mod audit_2026_07 {
             exported.ingredients[0].category.as_deref(), Some(category_name.as_str()),
             "the export carried something other than the category's name"
         );
+    }
+
+    /// S2.5/S2.7: `stock.quantity` is a cache of `SUM(stock_movements.quantity)`.
+    /// If the two ever disagree, the movements are the history and the cache is
+    /// what gets rewritten.
+    #[tokio::test]
+    async fn the_stock_cache_is_the_sum_of_its_movements() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 1000.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 2.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+        stock_movement_add(&db, StockMovementInput {
+            ingredient_id: Some(f.id), recipe_id: None,
+            movement_type: MovementType::Consumption, quantity: 300.0, unit: Unit::Gram,
+            unit_cost: None, sale_price: None, reason: None, production_id: None,
+            signed_quantity: None,
+        }).await.unwrap();
+        stock_movement_add(&db, StockMovementInput {
+            ingredient_id: Some(f.id), recipe_id: None,
+            movement_type: MovementType::Loss, quantity: 200.0, unit: Unit::Gram,
+            unit_cost: None, sale_price: None, reason: Some("caiu ao chão".into()),
+            production_id: None, signed_quantity: None,
+        }).await.unwrap();
+
+        // 1000 in, 300 used, 200 lost.
+        assert_eq!(get_stock(&db, f.id).await.unwrap().quantity, 500.0);
+
+        let movements = stock_movements_for_ingredient(&db, f.id, 10).await.unwrap();
+        assert_eq!(movements.len(), 3, "the purchase did not record its own movement");
+        assert!(movements.iter().any(|m| m.movement_type == MovementType::Purchase && m.quantity > 0.0));
+        assert!(movements.iter().all(|m| match m.movement_type {
+            MovementType::Consumption | MovementType::Loss => m.quantity < 0.0,
+            _ => true,
+        }), "an outflow was stored with a positive sign");
+    }
+
+    /// S2.5: a cache that drifted — a crash between the two writes, a hand-edited
+    /// row — is put back from the movements, and rows with no movement history at
+    /// all are left alone rather than zeroed.
+    #[tokio::test]
+    async fn reconciling_rebuilds_a_drifted_cache_and_spares_rows_without_history() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 800.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 1.6, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        // An ingredient whose stock predates the movements table.
+        let legacy = create_ingredient(&db, IngredientInput {
+            name: "Sal".into(), unit: Unit::Gram, price_per_unit: 0.001,
+            category: None, event_id: None,
+        }).await.unwrap();
+        let conn = get_conn(&db).await.unwrap();
+        conn.execute(
+            "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity, updated_at)
+             VALUES (?1, 'Sal', 'gram', 999.0, 0, datetime('now'))",
+            params![legacy.id],
+        ).await.unwrap();
+        // And a cache that lies.
+        conn.execute("UPDATE stock SET quantity = 12345.0 WHERE ingredient_id = ?1", params![f.id]).await.unwrap();
+
+        let result = stock_reconcile(&db).await.unwrap();
+        assert_eq!(result.rows_corrected, 1, "reconcile touched the wrong number of rows");
+        assert_eq!(get_stock(&db, f.id).await.unwrap().quantity, 800.0, "the drifted cache was not rebuilt");
+        assert_eq!(
+            get_stock(&db, legacy.id).await.unwrap().quantity, 999.0,
+            "stock with no movement history was zeroed — that destroys real data"
+        );
+    }
+
+    /// S2.4: the backfill gives existing purchases their movement, and running
+    /// migrations twice must not double the history.
+    #[tokio::test]
+    async fn the_backfill_is_idempotent() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+
+        // A purchase written the way it was before movements existed.
+        let conn = get_conn(&db).await.unwrap();
+        let when = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO stock_purchases (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date)
+             VALUES (?1, 500.0, 'gram', 0.002, 1.0, 0, 0.0, ?2)",
+            params![f.id, when.clone()],
+        ).await.unwrap();
+        conn.execute("PRAGMA user_version = 1", ()).await.unwrap();
+
+        backfill_purchase_movements(&conn).await.unwrap();
+        let after_first = stock_movements_for_ingredient(&db, f.id, 50).await.unwrap().len();
+        backfill_purchase_movements(&conn).await.unwrap();
+        let after_second = stock_movements_for_ingredient(&db, f.id, 50).await.unwrap().len();
+
+        assert_eq!(after_first, 1, "the backfill did not give the old purchase its movement");
+        assert_eq!(after_second, after_first, "running the backfill twice doubled the history");
+    }
+
+    /// S2.1: the sign is decided by the type, not by the caller, so a loss can
+    /// never be recorded as something that increases stock.
+    #[tokio::test]
+    async fn the_movement_type_decides_the_sign() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+
+        let loss = stock_movement_add(&db, StockMovementInput {
+            ingredient_id: Some(f.id), recipe_id: None,
+            movement_type: MovementType::Loss,
+            quantity: 50.0, // positive magnitude, as the API asks for
+            unit: Unit::Gram, unit_cost: None, sale_price: None, reason: None,
+            production_id: None, signed_quantity: None,
+        }).await.unwrap();
+        assert_eq!(loss.quantity, -50.0, "a loss was stored as an inflow");
+
+        // An adjustment is the one type that must say which way it goes.
+        let err = stock_movement_add(&db, StockMovementInput {
+            ingredient_id: Some(f.id), recipe_id: None,
+            movement_type: MovementType::Adjustment, quantity: 10.0, unit: Unit::Gram,
+            unit_cost: None, sale_price: None, reason: None, production_id: None,
+            signed_quantity: None,
+        }).await.unwrap_err().to_string();
+        assert!(err.contains("signed_quantity"), "an ambiguous adjustment was accepted: {err}");
+
+        // A movement must target exactly one of an ingredient or a recipe.
+        let both = stock_movement_add(&db, StockMovementInput {
+            ingredient_id: Some(f.id), recipe_id: Some(1),
+            movement_type: MovementType::Loss, quantity: 1.0, unit: Unit::Gram,
+            unit_cost: None, sale_price: None, reason: None, production_id: None,
+            signed_quantity: None,
+        }).await;
+        assert!(both.is_err(), "a movement targeting both an ingredient and a recipe was accepted");
+    }
+
+    /// S2.6: a production run is N consumptions and 1 entry. Half of it landing
+    /// would leave the stock wrong with no sign that anything failed.
+    #[tokio::test]
+    async fn a_batch_of_movements_is_all_or_nothing() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 1000.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 2.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        let before = get_stock(&db, f.id).await.unwrap().quantity;
+        let result = stock_movements_add_batch(&db, vec![
+            StockMovementInput {
+                ingredient_id: Some(f.id), recipe_id: None,
+                movement_type: MovementType::Consumption, quantity: 100.0, unit: Unit::Gram,
+                unit_cost: None, sale_price: None, reason: None, production_id: Some("p1".into()),
+                signed_quantity: None,
+            },
+            // Targets nothing at all — the batch must take the first one back out.
+            StockMovementInput {
+                ingredient_id: None, recipe_id: None,
+                movement_type: MovementType::Production, quantity: 1.0, unit: Unit::Piece,
+                unit_cost: None, sale_price: None, reason: None, production_id: Some("p1".into()),
+                signed_quantity: None,
+            },
+        ]).await;
+
+        assert!(result.is_err(), "an invalid batch was accepted");
+        assert_eq!(
+            get_stock(&db, f.id).await.unwrap().quantity, before,
+            "the first movement of a failed batch stayed applied"
+        );
+        assert!(
+            stock_movements_for_ingredient(&db, f.id, 50).await.unwrap()
+                .iter().all(|m| m.movement_type != MovementType::Consumption),
+            "the first movement of a failed batch was left in the history"
+        );
+    }
+
+    /// Found while wiring purchases to movements (S2): `stock_purchase_add_tx`
+    /// read `last_insert_rowid()` *after* upserting `stock`. `stock` has its own
+    /// AUTOINCREMENT id, so the first purchase of an ingredient with no stock row
+    /// makes that upsert an INSERT — and the id read back belongs to the stock
+    /// row, not the purchase. The purchase returned to the caller is then some
+    /// other purchase entirely.
+    ///
+    /// Invisible on a fresh database, where the two id sequences happen to line
+    /// up. It appears as soon as they drift apart.
+    #[tokio::test]
+    async fn adding_a_purchase_returns_that_purchase_and_not_another() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let sugar = create_ingredient(&db, IngredientInput {
+            name: "Açúcar".into(), unit: Unit::Gram, price_per_unit: 0.001,
+            category: None, event_id: None,
+        }).await.unwrap();
+
+        // A movement that is not a purchase advances `stock`'s rowid sequence
+        // without advancing `stock_purchases`', which is what pushes the two
+        // apart. Before S3 this could not happen, which is why the defect sat
+        // dormant instead of being caught.
+        stock_movement_add(&db, StockMovementInput {
+            ingredient_id: Some(f.id), recipe_id: None,
+            movement_type: MovementType::Loss, quantity: 1.0, unit: Unit::Gram,
+            unit_cost: None, sale_price: None, reason: Some("teste".into()),
+            production_id: None, signed_quantity: None,
+        }).await.unwrap();
+
+        for _ in 0..2 {
+            stock_purchase_add(&db, StockPurchaseInput {
+                ingredient_id: f.id, quantity: 100.0, unit: Unit::Gram,
+                price_per_unit: 0.002, total_price: 0.2, is_discount: false, discount_percent: 0.0,
+                purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            }).await.unwrap();
+        }
+
+        // Sugar's first purchase: the stock upsert INSERTs, so the rowid moves.
+        let purchase = stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: sugar.id, quantity: 250.0, unit: Unit::Gram,
+            price_per_unit: 0.001, total_price: 0.25, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        assert_eq!(purchase.ingredient_id, sugar.id, "the call returned a different ingredient's purchase");
+        assert_eq!(purchase.quantity, 250.0, "the call returned a different purchase's quantity");
     }
 
     /// S1: the same ingredient asked for by two recipes must become one line,
