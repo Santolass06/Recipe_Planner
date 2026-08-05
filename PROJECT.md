@@ -95,10 +95,10 @@ A ordem é por dependência. Onde não há dependência, está dito.
 |---|---|---|---|
 | **S0** | Confirmar a base | ⏳ Em ti | — |
 | **S1** | Lista de compras a partir de receitas | ✅ `a087dfc` | — |
-| **S2** | Movimentos de stock — schema e registo | ⬜ | — |
-| **S3** | Movimentos de stock — consumo, produção, perda, venda | ⬜ | S2 |
-| **S4** | Os relatórios que os movimentos desbloqueiam | ⬜ | S3 |
-| **S5** | Instrumentação e flag de edição | ⬜ | S4 |
+| **S2** | Movimentos de stock — schema e registo | ✅ `4635b11` (S2.3 adiado) | — |
+| **S3** | Movimentos de stock — consumo, produção, perda, venda | ✅ `f7c88e3` | S2 |
+| **S4** | Os relatórios que os movimentos desbloqueiam | ✅ `12eeb24` | S3 |
+| **S5** | Instrumentação e flag de edição | ✅ | S4 |
 | **S6** | Windows nativo | ⬜ | S0 |
 | **S7** | Android nativo | ⬜ | S0, S4 |
 | **S8** | Host no servidor | ⬜ | S2 |

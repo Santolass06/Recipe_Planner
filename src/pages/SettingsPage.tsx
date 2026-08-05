@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useToast } from "../components/ui/Toast";
 import { invoke, openExternal } from "../lib/devInvoke";
 import { useI18n } from "../i18n";
+import type { Edition } from "../../crates/core/bindings/Edition";
 import { applyTheme } from "../theme";
 import type { ProblemReportInput } from "../../crates/core/bindings/ProblemReportInput";
 import { errKey } from "../lib/errors";
@@ -178,6 +179,25 @@ export default function SettingsPage() {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showDeleteDataConfirm, setShowDeleteDataConfirm] = useState(false);
   const [pendingRestore, setPendingRestore] = useState<string | null>(null);
+  const [edition, setEdition] = useState<Edition>("family");
+
+  useEffect(() => {
+    invoke<Edition>("edition_get")
+      .then(setEdition)
+      .catch(e => console.error(e));
+  }, []);
+
+  async function changeEdition(next: Edition) {
+    const previous = edition;
+    setEdition(next);
+    try {
+      await invoke("edition_set", { edition: next });
+      showToast(t("settings.editionChanged"), "ok");
+    } catch (e) {
+      setEdition(previous);
+      showToast(t(errKey(e, "settings.editionError")), "err");
+    }
+  }
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportDescription, setReportDescription] = useState("");
   const [reportImage, setReportImage] = useState<{ base64: string; name: string } | null>(null);
@@ -455,6 +475,19 @@ export default function SettingsPage() {
                   value={getSetting("language", "general")}
                   onChange={v => saveCategorySettings("general", { language: v })}
                 />
+              </div>
+
+              <div className="settings-group">
+                <label>{t("settings.edition")}</label>
+                <Seg
+                  options={[
+                    { value: "family", label: t("settings.editionFamily") },
+                    { value: "pro", label: t("settings.editionPro") },
+                  ]}
+                  value={edition}
+                  onChange={v => changeEdition(v as Edition)}
+                />
+                <p className="text-4" style={{ marginTop: "var(--space-1)" }}>{t("settings.editionDesc")}</p>
               </div>
 
               <div className="settings-group">

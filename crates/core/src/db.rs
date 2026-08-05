@@ -1767,6 +1767,49 @@ pub async fn stock_reconcile(db: &Database) -> LibsqlResult<StockReconcileResult
     })
 }
 
+// =====================================================================
+// EDIÇÕES E INSTRUMENTAÇÃO (Sprint S5)
+// =====================================================================
+
+const EDITION_SETTING_KEY: &str = "edition";
+
+/// Which edition this install presents. Family unless told otherwise.
+pub async fn get_edition(db: &Database) -> LibsqlResult<Edition> {
+    Ok(get_setting(db, EDITION_SETTING_KEY)
+        .await?
+        .map(|v| Edition::from_str_or_family(&v))
+        .unwrap_or(Edition::Family))
+}
+
+pub async fn set_edition(db: &Database, edition: Edition) -> LibsqlResult<()> {
+    set_setting(db, EDITION_SETTING_KEY, edition.as_str()).await?;
+    record_usage_event(db, "edition_changed", &serde_json::json!({ "edition": edition.as_str() })).await;
+    Ok(())
+}
+
+/// Record one usage event.
+///
+/// `usage_events` has existed since 2026-07-10 with **no writers** — deliberately,
+/// because before movements existed the only thing worth logging was navigation,
+/// which feeds no decision. Now there are events with meaning.
+///
+/// **Never fails the caller.** Instrumentation that can break a cook recording a
+/// loss is worse than no instrumentation, so a write error is swallowed after
+/// being logged. Local-only: nothing here leaves the machine.
+pub async fn record_usage_event(db: &Database, event_type: &str, payload: &serde_json::Value) {
+    let write = async {
+        let conn = get_conn(db).await?;
+        conn.execute(
+            "INSERT INTO usage_events (event_type, payload_json, created_at) VALUES (?1, ?2, ?3)",
+            params![event_type, payload.to_string(), Utc::now().to_rfc3339()],
+        ).await?;
+        Ok::<_, libsql::Error>(())
+    };
+    if let Err(e) = write.await {
+        eprintln!("[usage] could not record '{event_type}': {e}");
+    }
+}
+
 /// Recipes worth making with what is actually in stock (Sprint S4).
 ///
 /// Ranked by coverage, then by whether they use something about to expire —
@@ -2029,6 +2072,15 @@ pub async fn recipe_produce(db: &Database, input: ProductionInput) -> LibsqlResu
     }
 
     let written = stock_movements_add_batch(db, movements).await?;
+
+    // Feeds the "did the user have to correct the stock afterwards" question,
+    // which is the one that tells us whether the numbers are trusted.
+    record_usage_event(db, "production_recorded", &serde_json::json!({
+        "recipe_id": input.recipe_id,
+        "multiplier": input.multiplier,
+        "yields_product": input.yields_product,
+        "shortfalls": shortfalls.len(),
+    })).await;
 
     Ok(ProductionResult { production_id, movements: written, shortfalls })
 }
@@ -3747,6 +3799,8 @@ pub async fn recipe_import_from_url(db: &Database, url: String) -> Result<Recipe
     if html.len() as u64 > MAX_BODY_BYTES {
         return Err("A página é demasiado grande para importar.".to_string());
     }
+
+    record_usage_event(db, "recipe_import_attempted", &serde_json::json!({ "hops": hops })).await;
 
     let recipe_json = extract_recipe_json_ld(&html)
         .ok_or_else(|| "Não foi possível encontrar dados de receita (schema.org/Recipe) nesta página.".to_string())?;
@@ -6152,6 +6206,13 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
     ).await?;
 
     tx.commit().await?;
+
+    // Feeds the OCR engine decision: how many lines the user kept out of how
+    // many were read tells us more about tesseract.js than any benchmark would.
+    record_usage_event(db, "receipt_confirmed", &serde_json::json!({
+        "items_kept": created_purchases.len(),
+    })).await;
+
     Ok(created_purchases)
 }
 
@@ -7028,6 +7089,67 @@ mod audit_2026_07 {
             exported.ingredients[0].category.as_deref(), Some(category_name.as_str()),
             "the export carried something other than the category's name"
         );
+    }
+
+    /// S5.2/S5.3: the edition is a runtime value that defaults to Family, and
+    /// the gating matrix lives in one place instead of being re-decided per
+    /// screen.
+    #[tokio::test]
+    async fn the_edition_defaults_to_family_and_gates_what_it_should() {
+        let db = test_db().await;
+
+        assert_eq!(get_edition(&db).await.unwrap(), Edition::Family, "a fresh install should be Family");
+
+        // Family runs a kitchen; it just does not sell.
+        for feature in [
+            EditionFeature::Recipes, EditionFeature::Stock, EditionFeature::ShoppingLists,
+            EditionFeature::MealPlanning, EditionFeature::Events, EditionFeature::ReceiptScanner,
+            EditionFeature::Suggestions, EditionFeature::WasteReport, EditionFeature::CostReport,
+        ] {
+            assert!(Edition::Family.allows(feature), "Family should allow {feature:?}");
+        }
+        for feature in [
+            EditionFeature::Production, EditionFeature::Sales,
+            EditionFeature::SupplierComparison, EditionFeature::EventBudget,
+        ] {
+            assert!(!Edition::Family.allows(feature), "Family should not allow {feature:?}");
+            assert!(Edition::Pro.allows(feature), "Pro should allow {feature:?}");
+        }
+
+        set_edition(&db, Edition::Pro).await.unwrap();
+        assert_eq!(get_edition(&db).await.unwrap(), Edition::Pro);
+
+        // A corrupt or unknown value must fall back to the smaller surface.
+        set_setting(&db, "edition", "sarilho").await.unwrap();
+        assert_eq!(get_edition(&db).await.unwrap(), Edition::Family);
+    }
+
+    /// S5.1: `usage_events` had no writers on purpose until there were events
+    /// with meaning. Instrumentation must never be able to fail the operation
+    /// it is observing.
+    #[tokio::test]
+    async fn usage_events_are_recorded_and_never_break_the_caller() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let r = cake(&db, vec![RecipeIngredientInput { ingredient_id: f.id, quantity: 100.0, unit: Unit::Gram }]).await;
+
+        async fn count(db: &Database) -> i64 {
+            let conn = get_conn(db).await.unwrap();
+            let mut rows = conn.query("SELECT COUNT(*) FROM usage_events", ()).await.unwrap();
+            rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
+        }
+
+        assert_eq!(count(&db).await, 0, "the table should start empty");
+
+        recipe_produce(&db, ProductionInput {
+            recipe_id: r.recipe.id, multiplier: 1.0, yields_product: false, reason: None,
+        }).await.unwrap();
+        assert_eq!(count(&db).await, 1, "producing did not emit its event");
+
+        // Recording against a table that cannot take the row must not propagate.
+        let conn = get_conn(&db).await.unwrap();
+        conn.execute("DROP TABLE usage_events", ()).await.unwrap();
+        record_usage_event(&db, "whatever", &serde_json::json!({})).await; // must not panic
     }
 
     /// S4.1: the waste report returned zeros until there were losses to report.
