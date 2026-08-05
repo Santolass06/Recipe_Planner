@@ -39,6 +39,7 @@ export default function Sidebar() {
       { to: "/eventos", icon: "celebration", label: t("nav.events") },
     ] },
     { label: t("nav.analytics"), items: [
+      { to: "/sugestoes", icon: "lightbulb", label: t("nav.suggestions") },
       { to: "/relatorios", icon: "monitoring", label: t("nav.reports") },
     ] },
     { label: t("nav.tools"), items: [

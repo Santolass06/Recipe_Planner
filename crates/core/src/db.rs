@@ -516,6 +516,12 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
     conn.execute("CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at)", ()).await?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_stock_movements_production ON stock_movements(production_id)", ()).await?;
 
+    // Migration 021: expiry dates on purchase lots (Sprint S4). The dashboard has
+    // counted "expiring soon" since day one against a hardcoded zero — there was
+    // nowhere to record when something goes off. Nullable: most purchases will
+    // never have one, and a missing date means "no expiry tracked", not "expired".
+    add_column_if_missing(&conn, "stock_purchases", "expiry_date", "TEXT").await?;
+
     run_data_migrations(&conn).await?;
 
     Ok(())
@@ -1761,6 +1767,176 @@ pub async fn stock_reconcile(db: &Database) -> LibsqlResult<StockReconcileResult
     })
 }
 
+/// Recipes worth making with what is actually in stock (Sprint S4).
+///
+/// Ranked by coverage, then by whether they use something about to expire —
+/// the reason to cook one today rather than tomorrow.
+///
+/// ponytail: one pass per catalogue recipe. Fine at this size, and PERF-01 says
+/// measure before optimising. If it ever matters, the fix is one query grouping
+/// recipe_ingredients against stock, not a cache.
+pub async fn suggest_recipes(db: &Database, limit: u32) -> LibsqlResult<Vec<RecipeSuggestion>> {
+    let conn = get_conn(db).await?;
+
+    let expiring: std::collections::HashSet<i64> = expiring_items(db, 7).await?
+        .into_iter().map(|item| item.ingredient_id).collect();
+
+    let recipes: Vec<(i64, String, String, u32)> = {
+        let mut rows = conn.query(
+            "SELECT id, name, category, portions FROM recipes WHERE event_id IS NULL",
+            (),
+        ).await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            out.push((row.get(0)?, row.get(1)?, row.get(2)?, row.get::<i64>(3)? as u32));
+        }
+        out
+    };
+
+    let mut suggestions = Vec::new();
+    for (recipe_id, recipe_name, category, portions) in recipes {
+        let needed = needed_ingredients_for(&conn, &[(recipe_id, 1.0)]).await?;
+        if needed.is_empty() {
+            continue;
+        }
+
+        let mut covered = 0usize;
+        let mut missing = Vec::new();
+        let mut total_cost = 0.0_f64;
+        let mut uses_expiring = false;
+
+        for line in &needed {
+            total_cost += line.quantity * line.price_per_unit;
+            if expiring.contains(&line.ingredient_id) {
+                uses_expiring = true;
+            }
+            let available: f64 = {
+                let mut rows = conn.query(
+                    "SELECT quantity FROM stock WHERE ingredient_id = ?1",
+                    params![line.ingredient_id],
+                ).await?;
+                match rows.next().await? {
+                    Some(row) => row.get(0)?,
+                    None => 0.0,
+                }
+            };
+            if available >= line.quantity {
+                covered += 1;
+            } else {
+                missing.push(StockShortfall {
+                    ingredient_id: line.ingredient_id,
+                    ingredient_name: line.name.clone(),
+                    needed: line.quantity,
+                    available,
+                    unit: parse_unit_str(&line.unit_str),
+                });
+            }
+        }
+
+        suggestions.push(RecipeSuggestion {
+            recipe_id,
+            recipe_name,
+            category,
+            portions,
+            coverage: covered as f64 / needed.len() as f64,
+            missing,
+            cost_per_portion: if portions > 0 { total_cost / portions as f64 } else { total_cost },
+            uses_expiring,
+        });
+    }
+
+    suggestions.sort_by(|a, b| {
+        b.uses_expiring.cmp(&a.uses_expiring)
+            .then(b.coverage.partial_cmp(&a.coverage).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    suggestions.truncate(limit as usize);
+    Ok(suggestions)
+}
+
+/// Purchase lots running out of time (Sprint S4).
+///
+/// Reads the lots, not the stock total: expiry belongs to the batch you bought,
+/// not to the ingredient. Only lots with a date recorded are considered — a
+/// missing date means nobody tracked it, not that it never goes off.
+pub async fn expiring_items(db: &Database, within_days: u32) -> LibsqlResult<Vec<ExpiringItem>> {
+    let conn = get_conn(db).await?;
+    let cutoff = (Utc::now() + chrono::Duration::days(within_days as i64)).to_rfc3339();
+
+    let mut rows = conn.query(
+        r#"SELECT sp.ingredient_id, i.name, SUM(sp.quantity), i.unit, MIN(sp.expiry_date)
+           FROM stock_purchases sp
+           JOIN ingredients i ON sp.ingredient_id = i.id
+           WHERE sp.expiry_date IS NOT NULL
+             AND i.event_id IS NULL
+             AND date(sp.expiry_date) <= date(?1)
+           GROUP BY sp.ingredient_id, i.name, i.unit
+           ORDER BY MIN(sp.expiry_date) ASC"#,
+        params![cutoff],
+    ).await?;
+
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await? {
+        let unit_str: String = row.get(3)?;
+        let expiry_str: String = row.get(4)?;
+        let expiry_date = DateTime::parse_from_rfc3339(&expiry_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+        out.push(ExpiringItem {
+            ingredient_id: row.get(0)?,
+            ingredient_name: row.get(1)?,
+            quantity: row.get(2)?,
+            unit: parse_unit_str(&unit_str),
+            days_left: (expiry_date - Utc::now()).num_days(),
+            expiry_date,
+        });
+    }
+    Ok(out)
+}
+
+/// Planned against actual for one event (Sprint S4).
+///
+/// Planned is what the event's recipes cost on paper; actual is what its
+/// movements say was really consumed. The gap is the number worth looking at.
+pub async fn get_event_budget(db: &Database, event_id: i64) -> LibsqlResult<EventBudget> {
+    let conn = get_conn(db).await?;
+
+    let event_name: String = {
+        let mut rows = conn.query("SELECT name FROM events WHERE id = ?1", params![event_id]).await?;
+        rows.next().await?.ok_or(libsql::Error::QueryReturnedNoRows)?.get(0)?
+    };
+
+    let recipe_ids: Vec<i64> = {
+        let mut rows = conn.query("SELECT id FROM recipes WHERE event_id = ?1", params![event_id]).await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            out.push(row.get(0)?);
+        }
+        out
+    };
+    let weights: Vec<(i64, f64)> = recipe_ids.iter().map(|id| (*id, 1.0)).collect();
+    let planned_cost: f64 = needed_ingredients_for(&conn, &weights).await?
+        .iter().map(|line| line.quantity * line.price_per_unit).sum();
+
+    let actual_cost: f64 = {
+        let mut rows = conn.query(
+            r#"SELECT COALESCE(SUM(-m.quantity * COALESCE(m.unit_cost, i.price_per_unit)), 0.0)
+               FROM stock_movements m
+               JOIN ingredients i ON m.ingredient_id = i.id
+               WHERE i.event_id = ?1 AND m.quantity < 0"#,
+            params![event_id],
+        ).await?;
+        rows.next().await?.map(|row| row.get(0)).transpose()?.unwrap_or(0.0)
+    };
+
+    Ok(EventBudget {
+        event_id,
+        event_name,
+        planned_cost,
+        actual_cost,
+        variance: actual_cost - planned_cost,
+    })
+}
+
 /// Cook or produce a recipe (Sprint S3).
 ///
 /// Reuses `needed_ingredients_for` — the same expansion the shopping list runs,
@@ -2232,6 +2408,7 @@ pub async fn shopping_list_mark_purchased(
             is_discount: false,
             discount_percent: 0.0,
             purchase_date: chrono::Utc::now(),
+            expiry_date: None,
             supplier_id: input.supplier_id,
             brand: input.brand,
             notes: input.notes,
@@ -4318,11 +4495,13 @@ pub async fn get_dashboard_stats(db: &Database) -> LibsqlResult<DashboardStats> 
     ).await?;
     let low_stock_count: i64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
 
-    // Expiring soon count - ingredients with expiry < 7 days
-    // Note: We don't have an expiry_date column in stock yet, so we'll use a placeholder
-    // This would need a migration to add expiry tracking
+    // Expiring within 7 days. Was a hardcoded zero until Migration 021 gave
+    // purchase lots an expiry_date.
     let mut rows = conn.query(
-        "SELECT COUNT(*) FROM stock WHERE 0 = 1", // Placeholder - no expiry tracking yet
+        "SELECT COUNT(DISTINCT sp.ingredient_id) FROM stock_purchases sp
+         JOIN ingredients i ON sp.ingredient_id = i.id
+         WHERE sp.expiry_date IS NOT NULL AND i.event_id IS NULL
+           AND date(sp.expiry_date) <= date('now', '+7 days')",
         (),
     ).await?;
     let expiring_soon_count: i64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
@@ -4852,12 +5031,72 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
 // history we don't track (no waste_log table); this used to run a query and
 // then discard the result before always returning zero — dead work removed,
 // still honestly empty until waste tracking exists.
-pub async fn get_waste_report(_db: &Database, _days: u32) -> LibsqlResult<WasteReport> {
-    Ok(WasteReport {
-        total_wasted_value: 0.0,
-        by_ingredient: Vec::new(),
-        by_category: Vec::new(),
-    })
+/// What was thrown away, from the `loss` movements (Sprint S4).
+///
+/// Returned zeros until S3 existed, and honestly so — there was no loss log to
+/// report on. Value is the movement's own `unit_cost` where it has one, falling
+/// back to the ingredient's current price: a loss recorded without a cost is
+/// still a loss, and pricing it at today's rate beats reporting it as free.
+pub async fn get_waste_report(db: &Database, days: u32) -> LibsqlResult<WasteReport> {
+    let conn = get_conn(db).await?;
+    let since = (Utc::now() - chrono::Duration::days(days as i64)).to_rfc3339();
+
+    let mut by_ingredient = Vec::new();
+    let mut total_wasted_value = 0.0_f64;
+    {
+        let mut rows = conn.query(
+            r#"SELECT m.ingredient_id, i.name, i.unit,
+                      SUM(-m.quantity) AS qty,
+                      SUM(-m.quantity * COALESCE(m.unit_cost, i.price_per_unit)) AS value
+               FROM stock_movements m
+               JOIN ingredients i ON m.ingredient_id = i.id
+               WHERE m.movement_type = 'loss'
+                 AND i.event_id IS NULL
+                 AND date(m.created_at) >= date(?1)
+               GROUP BY m.ingredient_id, i.name, i.unit
+               ORDER BY value DESC"#,
+            params![since.clone()],
+        ).await?;
+        while let Some(row) = rows.next().await? {
+            let unit_str: String = row.get(2)?;
+            let wasted_value: f64 = row.get(4)?;
+            total_wasted_value += wasted_value;
+            by_ingredient.push(IngredientWaste {
+                ingredient_id: row.get(0)?,
+                ingredient_name: row.get(1)?,
+                unit: parse_unit_str(&unit_str),
+                wasted_quantity: row.get(3)?,
+                wasted_value,
+            });
+        }
+    }
+
+    let mut by_category = Vec::new();
+    {
+        let mut rows = conn.query(
+            r#"SELECT COALESCE(c.name, ''),
+                      SUM(-m.quantity * COALESCE(m.unit_cost, i.price_per_unit)) AS value
+               FROM stock_movements m
+               JOIN ingredients i ON m.ingredient_id = i.id
+               LEFT JOIN categories c ON i.category_id = c.id
+               WHERE m.movement_type = 'loss'
+                 AND i.event_id IS NULL
+                 AND date(m.created_at) >= date(?1)
+               GROUP BY COALESCE(c.name, '')
+               ORDER BY value DESC"#,
+            params![since],
+        ).await?;
+        while let Some(row) = rows.next().await? {
+            let value: f64 = row.get(1)?;
+            by_category.push(CategoryWaste {
+                category: row.get(0)?,
+                total_wasted_value: value,
+                percentage: if total_wasted_value > 0.0 { value / total_wasted_value * 100.0 } else { 0.0 },
+            });
+        }
+    }
+
+    Ok(WasteReport { total_wasted_value, by_ingredient, by_category })
 }
 
 /// Get stock trends for a date range
@@ -4868,8 +5107,51 @@ pub async fn get_waste_report(_db: &Database, _days: u32) -> LibsqlResult<WasteR
 // chart). A single "today" point isn't a trend either and the chart has no
 // clean way to render it, so return empty like get_waste_report — add a
 // snapshots table (written on every stock change) if a real trend is needed.
-pub async fn get_stock_trends(_db: &Database, _days: u32) -> LibsqlResult<Vec<StockSnapshot>> {
-    Ok(Vec::new())
+/// Stock level over time, rebuilt from the movements (Sprint S4).
+///
+/// Returned empty until S3 existed, and the comment said why: fabricating the
+/// series would have been lying. Now it is derived — the stock on any day is the
+/// sum of every movement up to that day, so the series is the running total.
+///
+/// One point per ingredient per day on which something moved. Days with no
+/// movement produce no point; a chart joins the dots, which is the truth.
+pub async fn get_stock_trends(db: &Database, days: u32) -> LibsqlResult<Vec<StockSnapshot>> {
+    let conn = get_conn(db).await?;
+    let since = (Utc::now() - chrono::Duration::days(days as i64)).to_rfc3339();
+
+    let mut rows = conn.query(
+        r#"SELECT m.ingredient_id, i.name, date(m.created_at) AS day,
+                  i.price_per_unit,
+                  (SELECT COALESCE(SUM(e.quantity), 0.0)
+                     FROM stock_movements e
+                    WHERE e.ingredient_id = m.ingredient_id
+                      AND date(e.created_at) <= date(m.created_at)) AS running
+           FROM stock_movements m
+           JOIN ingredients i ON m.ingredient_id = i.id
+           WHERE i.event_id IS NULL
+             AND date(m.created_at) >= date(?1)
+           GROUP BY m.ingredient_id, i.name, day, i.price_per_unit
+           ORDER BY day ASC, i.name ASC"#,
+        params![since],
+    ).await?;
+
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await? {
+        let day: String = row.get(2)?;
+        let price: f64 = row.get(3)?;
+        let quantity: f64 = row.get(4)?;
+        let date = DateTime::parse_from_rfc3339(&format!("{day}T00:00:00Z"))
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+        out.push(StockSnapshot {
+            date,
+            ingredient_id: row.get(0)?,
+            ingredient_name: row.get(1)?,
+            quantity,
+            value: quantity * price,
+        });
+    }
+    Ok(out)
 }
 
 /// Get meal statistics for a date range
@@ -5444,8 +5726,8 @@ async fn stock_purchase_add_tx(conn: &Connection, input: StockPurchaseInput) -> 
     conn.execute(
         r#"
         INSERT INTO stock_purchases
-        (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date, supplier_id, brand, notes)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date, supplier_id, brand, notes, expiry_date)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
         "#,
         params![
             input.ingredient_id,
@@ -5459,6 +5741,7 @@ async fn stock_purchase_add_tx(conn: &Connection, input: StockPurchaseInput) -> 
             input.supplier_id,
             input.brand,
             input.notes,
+            input.expiry_date.map(|d| d.to_rfc3339()),
         ],
     ).await?;
 
@@ -5941,6 +6224,7 @@ mod fase3_stock_tests {
             is_discount: false,
             discount_percent: 0.0,
             purchase_date: Utc::now(),
+            expiry_date: None,
             supplier_id: Some(supplier.id),
             brand: Some("Marca X".into()),
             notes: None,
@@ -5968,7 +6252,7 @@ mod fase3_stock_tests {
             stock_purchase_add(&db, StockPurchaseInput {
                 ingredient_id: ingredient.id, quantity: qty, unit: Unit::Liter,
                 price_per_unit: price, total_price: qty * price, is_discount: false,
-                discount_percent: 0.0, purchase_date: Utc::now(), supplier_id: None,
+                discount_percent: 0.0, purchase_date: Utc::now(), expiry_date: None, supplier_id: None,
                 brand: None, notes: None,
             }).await.unwrap();
         }
@@ -6161,6 +6445,7 @@ mod fase3_stock_tests {
             is_discount: false,
             discount_percent: 0.0,
             purchase_date: chrono::Utc::now(),
+            expiry_date: None,
             supplier_id: None,
             brand: None,
             notes: None,
@@ -6705,7 +6990,7 @@ mod audit_2026_07 {
             ingredient_id: f.id, quantity: 3.0, unit: Unit::Kilogram,
             price_per_unit: 2.0, total_price: 6.0,
             is_discount: false, discount_percent: 0.0,
-            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
         }).await.unwrap();
 
         let backup = backup_export(&db, &dir).await.unwrap();
@@ -6745,6 +7030,128 @@ mod audit_2026_07 {
         );
     }
 
+    /// S4.1: the waste report returned zeros until there were losses to report.
+    /// It prices each loss at the cost recorded on the movement, not at today's
+    /// catalogue price, so a later price change does not rewrite the past.
+    #[tokio::test]
+    async fn the_waste_report_counts_what_was_actually_thrown_away() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 1000.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 2.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        assert_eq!(get_waste_report(&db, 30).await.unwrap().total_wasted_value, 0.0);
+
+        stock_loss_record(&db, LossInput {
+            ingredient_id: Some(f.id), recipe_id: None,
+            quantity: 250.0, unit: Unit::Gram, reason: Some("bolor".into()),
+        }).await.unwrap();
+
+        let report = get_waste_report(&db, 30).await.unwrap();
+        assert_eq!(report.by_ingredient.len(), 1);
+        assert_eq!(report.by_ingredient[0].wasted_quantity, 250.0, "the loss was reported with the wrong sign or amount");
+        assert!((report.total_wasted_value - 0.5).abs() < 1e-9, "value was {}", report.total_wasted_value);
+        assert!((report.by_category.iter().map(|c| c.percentage).sum::<f64>() - 100.0).abs() < 1e-6);
+    }
+
+    /// S4.2: the stock series is the running total of the movements. Fabricating
+    /// it was refused before, correctly — now it is derived.
+    #[tokio::test]
+    async fn stock_trends_are_the_running_total_of_the_movements() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+
+        assert!(get_stock_trends(&db, 30).await.unwrap().is_empty(), "a series appeared out of nothing");
+
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 1000.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 2.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+        stock_loss_record(&db, LossInput {
+            ingredient_id: Some(f.id), recipe_id: None,
+            quantity: 400.0, unit: Unit::Gram, reason: None,
+        }).await.unwrap();
+
+        let series = get_stock_trends(&db, 30).await.unwrap();
+        assert!(!series.is_empty(), "the series is still empty with movements on record");
+        let last = series.last().unwrap();
+        assert_eq!(last.quantity, 600.0, "the running total does not match the stock");
+        assert_eq!(last.quantity, get_stock(&db, f.id).await.unwrap().quantity);
+    }
+
+    /// S4.4: the suggester ranks by what the stock actually covers, and puts
+    /// recipes that use something about to expire first.
+    #[tokio::test]
+    async fn the_suggester_ranks_by_what_the_stock_covers() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let caviar = create_ingredient(&db, IngredientInput {
+            name: "Caviar".into(), unit: Unit::Gram, price_per_unit: 5.0,
+            category: None, event_id: None,
+        }).await.unwrap();
+
+        let doable = cake(&db, vec![RecipeIngredientInput { ingredient_id: f.id, quantity: 200.0, unit: Unit::Gram }]).await;
+        let impossible = create_recipe(&db, RecipeInput {
+            name: "Impossível".into(), category: "Luxo".into(), portions: 2,
+            instructions: String::new(),
+            ingredients: vec![RecipeIngredientInput { ingredient_id: caviar.id, quantity: 100.0, unit: Unit::Gram }],
+            prep_time_minutes: None, cook_time_minutes: None, tags: vec![],
+            image_base64: None, event_id: None,
+        }).await.unwrap();
+
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 1000.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 2.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        let suggestions = suggest_recipes(&db, 10).await.unwrap();
+        assert_eq!(suggestions.len(), 2);
+        assert_eq!(suggestions[0].recipe_id, doable.recipe.id, "the recipe you can actually make was not first");
+        assert_eq!(suggestions[0].coverage, 1.0);
+        assert!(suggestions[0].missing.is_empty());
+
+        let last = suggestions.iter().find(|s| s.recipe_id == impossible.recipe.id).unwrap();
+        assert_eq!(last.coverage, 0.0);
+        assert_eq!(last.missing.len(), 1, "the missing ingredient was not reported");
+        assert_eq!(last.missing[0].ingredient_name, "Caviar");
+    }
+
+    /// S4.6: the dashboard counted "expiring soon" against a hardcoded zero
+    /// until purchase lots could carry a date.
+    #[tokio::test]
+    async fn expiring_lots_are_found_and_counted() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 500.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 1.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), expiry_date: Some(Utc::now() + chrono::Duration::days(3)),
+            supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+        // A lot with no date is untracked, not expired.
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 500.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 1.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        let expiring = expiring_items(&db, 7).await.unwrap();
+        assert_eq!(expiring.len(), 1, "an untracked lot was reported as expiring");
+        assert_eq!(expiring[0].ingredient_name, "Farinha");
+        assert!(expiring[0].days_left <= 3 && expiring[0].days_left >= 2, "days_left was {}", expiring[0].days_left);
+
+        assert_eq!(
+            get_dashboard_stats(&db).await.unwrap().expiring_soon_count, 1,
+            "the dashboard is still reporting the hardcoded zero"
+        );
+    }
+
     /// S3.1: cooking takes the ingredients out of stock, converted, atomically.
     #[tokio::test]
     async fn cooking_a_recipe_takes_its_ingredients_out_of_stock() {
@@ -6755,7 +7162,7 @@ mod audit_2026_07 {
         stock_purchase_add(&db, StockPurchaseInput {
             ingredient_id: f.id, quantity: 5000.0, unit: Unit::Gram,
             price_per_unit: 0.002, total_price: 10.0, is_discount: false, discount_percent: 0.0,
-            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
         }).await.unwrap();
 
         let result = recipe_produce(&db, ProductionInput {
@@ -6794,7 +7201,7 @@ mod audit_2026_07 {
             stock_purchase_add(&db, StockPurchaseInput {
                 ingredient_id: id, quantity: qty, unit: Unit::Gram,
                 price_per_unit: 0.002, total_price: qty * 0.002, is_discount: false, discount_percent: 0.0,
-                purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+                purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
             }).await.unwrap();
         }
 
@@ -6827,7 +7234,7 @@ mod audit_2026_07 {
         stock_purchase_add(&db, StockPurchaseInput {
             ingredient_id: f.id, quantity: 100.0, unit: Unit::Gram,
             price_per_unit: 0.002, total_price: 0.2, is_discount: false, discount_percent: 0.0,
-            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
         }).await.unwrap();
 
         let result = recipe_produce(&db, ProductionInput {
@@ -6860,7 +7267,7 @@ mod audit_2026_07 {
         stock_purchase_add(&db, StockPurchaseInput {
             ingredient_id: f.id, quantity: 5000.0, unit: Unit::Gram,
             price_per_unit: 0.002, total_price: 10.0, is_discount: false, discount_percent: 0.0,
-            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
         }).await.unwrap();
         recipe_produce(&db, ProductionInput {
             recipe_id: r.recipe.id, multiplier: 1.0, yields_product: true, reason: None,
@@ -6894,7 +7301,7 @@ mod audit_2026_07 {
         stock_purchase_add(&db, StockPurchaseInput {
             ingredient_id: f.id, quantity: 1000.0, unit: Unit::Gram,
             price_per_unit: 0.002, total_price: 2.0, is_discount: false, discount_percent: 0.0,
-            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
         }).await.unwrap();
         stock_movement_add(&db, StockMovementInput {
             ingredient_id: Some(f.id), recipe_id: None,
@@ -6931,7 +7338,7 @@ mod audit_2026_07 {
         stock_purchase_add(&db, StockPurchaseInput {
             ingredient_id: f.id, quantity: 800.0, unit: Unit::Gram,
             price_per_unit: 0.002, total_price: 1.6, is_discount: false, discount_percent: 0.0,
-            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
         }).await.unwrap();
 
         // An ingredient whose stock predates the movements table.
@@ -7027,7 +7434,7 @@ mod audit_2026_07 {
         stock_purchase_add(&db, StockPurchaseInput {
             ingredient_id: f.id, quantity: 1000.0, unit: Unit::Gram,
             price_per_unit: 0.002, total_price: 2.0, is_discount: false, discount_percent: 0.0,
-            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
         }).await.unwrap();
 
         let before = get_stock(&db, f.id).await.unwrap().quantity;
@@ -7092,7 +7499,7 @@ mod audit_2026_07 {
             stock_purchase_add(&db, StockPurchaseInput {
                 ingredient_id: f.id, quantity: 100.0, unit: Unit::Gram,
                 price_per_unit: 0.002, total_price: 0.2, is_discount: false, discount_percent: 0.0,
-                purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+                purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
             }).await.unwrap();
         }
 
@@ -7100,7 +7507,7 @@ mod audit_2026_07 {
         let purchase = stock_purchase_add(&db, StockPurchaseInput {
             ingredient_id: sugar.id, quantity: 250.0, unit: Unit::Gram,
             price_per_unit: 0.001, total_price: 0.25, is_discount: false, discount_percent: 0.0,
-            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
         }).await.unwrap();
 
         assert_eq!(purchase.ingredient_id, sugar.id, "the call returned a different ingredient's purchase");
@@ -7161,12 +7568,12 @@ mod audit_2026_07 {
         stock_purchase_add(&db, StockPurchaseInput {
             ingredient_id: f.id, quantity: 200.0, unit: Unit::Gram,
             price_per_unit: 0.002, total_price: 0.4, is_discount: false, discount_percent: 0.0,
-            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
         }).await.unwrap();
         stock_purchase_add(&db, StockPurchaseInput {
             ingredient_id: sugar.id, quantity: 500.0, unit: Unit::Gram,
             price_per_unit: 0.001, total_price: 0.5, is_discount: false, discount_percent: 0.0,
-            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
         }).await.unwrap();
 
         let list = create_shopping_list_from_recipes(&db, ShoppingListFromRecipesInput {
@@ -7226,7 +7633,7 @@ mod audit_2026_07 {
         stock_purchase_add(&db, StockPurchaseInput {
             ingredient_id: f.id, quantity: 500.0, unit: Unit::Gram,
             price_per_unit: 0.002, total_price: 1.0, is_discount: false, discount_percent: 0.0,
-            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
         }).await.unwrap();
 
         let plan = create_meal_plan(&db, MealPlanInput {
@@ -7325,7 +7732,7 @@ mod audit_2026_07 {
             ingredient_id: f.id, quantity: 1.0, unit: Unit::Kilogram,
             price_per_unit: 2.0, total_price: 2.0,
             is_discount: false, discount_percent: 0.0,
-            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
         }).await.unwrap();
 
         let stock = stock_list(&db).await.unwrap();
@@ -7350,7 +7757,7 @@ mod audit_2026_07 {
                 ingredient_id: f.id, quantity: qty, unit,
                 price_per_unit: price, total_price: 2.0,
                 is_discount: false, discount_percent: 0.0,
-                purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+                purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
             }).await.unwrap();
         }
 
@@ -7463,7 +7870,7 @@ mod audit_2026_07 {
             ingredient_id: eggs.id, quantity: 1.0, unit: Unit::Kilogram,
             price_per_unit: 2.0, total_price: 2.0,
             is_discount: false, discount_percent: 0.0,
-            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
         }).await;
 
         assert!(result.is_err(), "1 kg into a piece-tracked ingredient must not be accepted");
@@ -7485,7 +7892,7 @@ mod audit_2026_07 {
             ingredient_id: f.id, quantity: 3.0, unit: Unit::Kilogram,
             price_per_unit: 2.0, total_price: 6.0,
             is_discount: false, discount_percent: 0.0,
-            purchase_date: Utc::now(), supplier_id: None, brand: None, notes: None,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
         }).await.unwrap();
 
         let report = get_cost_report(&db, 30).await.unwrap();

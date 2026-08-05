@@ -205,6 +205,25 @@ const fixtures: Record<string, unknown | ((args: unknown) => unknown)> = {
   },
   stock_loss_record: { id: 1, ingredient_id: 1, recipe_id: null, movement_type: "loss", quantity: -1, unit: "gram", unit_cost: null, sale_price: null, reason: null, production_id: null, created_by: null, created_at: now },
   stock_movements_for_ingredient: [],
+  // Sprint S4 previews.
+  suggest_recipes: () =>
+    recipes.map((r) => {
+      const missing = r.ingredients.flatMap((line) => {
+        const ing = ingredients.find((i) => i.id === line.ingredient_id);
+        const held = stock.find((s) => s.ingredient_id === line.ingredient_id)?.quantity ?? 0;
+        if (!ing || (line.unit === ing.unit && held >= line.quantity)) return [];
+        return [{ ingredient_id: line.ingredient_id, ingredient_name: ing?.name ?? "?", needed: line.quantity, available: held, unit: ing?.unit ?? "gram" }];
+      });
+      return {
+        recipe_id: r.id, recipe_name: r.name, category: r.category, portions: r.portions,
+        coverage: r.ingredients.length ? 1 - missing.length / r.ingredients.length : 0,
+        missing, cost_per_portion: 2.5, uses_expiring: r.id === 2,
+      };
+    }).sort((a, b) => Number(b.uses_expiring) - Number(a.uses_expiring) || b.coverage - a.coverage),
+  expiring_items: [
+    { ingredient_id: 9, ingredient_name: "Natas 35%", quantity: 1, unit: "liter", expiry_date: now, days_left: 2 },
+    { ingredient_id: 8, ingredient_name: "Manteiga", quantity: 0.25, unit: "kilogram", expiry_date: now, days_left: -1 },
+  ],
   recipe_stock_balance: 0,
 };
 
