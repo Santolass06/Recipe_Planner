@@ -39,7 +39,7 @@ function levelPct(quantity: number, min: number) {
   return quantity > 0 ? 100 : 0;
 }
 
-function StockTable({ items, ingredients, onEdit, onDelete, onPurchase, t }: any) {
+function StockTable({ items, ingredients, onEdit, onDelete, onPurchase, onLoss, t }: any) {
   const getIngredientName = (id: number) => ingredients.find((i: any) => i.id === id)?.name ?? "—";
   const getIngredientUnit = (id: number) => ingredients.find((i: any) => i.id === id)?.unit ?? "";
 
@@ -82,6 +82,9 @@ function StockTable({ items, ingredients, onEdit, onDelete, onPurchase, t }: any
                       </button>
                       <button className="btn-icon" onClick={(e) => { e.stopPropagation(); onPurchase(item); }} title={t("stock.registerPurchase")}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12V7H5V7M16 7V4M8 7V4M3 18H21M7 18V12M17 18V12M7 12H17"/></svg>
+                      </button>
+                      <button className="btn-icon" onClick={(e) => { e.stopPropagation(); onLoss(item); }} title={t("stock.loss.action")}>
+                        <span className="ms" style={{ fontSize: 14 }}>delete_sweep</span>
                       </button>
                       <button className="btn-icon danger" onClick={(e) => { e.stopPropagation(); onDelete(item); }} title={t("common.delete")}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
@@ -324,6 +327,10 @@ export default function StockPage() {
   const [selectedIngredientForPurchases, setSelectedIngredientForPurchases] = useState<StockItem | null>(null);
   const [purchases, setPurchases] = useState<StockPurchase[]>([]);
   const [loadingPurchases, setLoadingPurchases] = useState(false);
+  const [lossTarget, setLossTarget] = useState<{ id: number; name: string; unit: string } | null>(null);
+  const [lossQuantity, setLossQuantity] = useState("");
+  const [lossReason, setLossReason] = useState("");
+  const [lossBusy, setLossBusy] = useState(false);
   const [purchaseForm, setPurchaseForm] = useState<{
     ingredient_id: number;
     quantity: number;
@@ -408,6 +415,36 @@ export default function StockPage() {
   };
 
   const closeModal = () => { setModal(null); setEditing(null); }
+
+  const openLossModal = (item: StockItem) => {
+    const ing = ingredients.find(i => i.id === item.ingredient_id);
+    setLossTarget({ id: item.ingredient_id, name: item.ingredient_name, unit: ing?.unit ?? item.ingredient_unit });
+    setLossQuantity("");
+    setLossReason("");
+  };
+
+  async function handleLoss() {
+    if (!lossTarget) return;
+    setLossBusy(true);
+    try {
+      await invoke("stock_loss_record", {
+        input: {
+          ingredient_id: lossTarget.id,
+          recipe_id: null,
+          quantity: Number(lossQuantity),
+          unit: lossTarget.unit,
+          reason: lossReason.trim() || null,
+        },
+      });
+      setLossTarget(null);
+      showToast(t("stock.loss.done", { name: lossTarget.name }), "ok");
+      load();
+    } catch (e) {
+      showToast(t(errKey(e, "stock.loss.error")), "err");
+    } finally {
+      setLossBusy(false);
+    }
+  }
 
   const openPurchaseModal = (item: StockItem) => {
     const ing = ingredients.find(i => i.id === item.ingredient_id);
@@ -561,9 +598,55 @@ export default function StockPage() {
           onEdit={openEdit}
           onDelete={setConfirmDelete}
           onPurchase={openPurchaseModal}
+          onLoss={openLossModal}
           t={t}
         />
       )}
+
+      <Modal
+        open={lossTarget !== null}
+        onClose={() => setLossTarget(null)}
+        title={t("stock.loss.title", { name: lossTarget?.name ?? "" })}
+        footer={
+          <>
+            <button className="btn btn-secondary" onClick={() => setLossTarget(null)}>{t("common.cancel")}</button>
+            <button
+              className="btn btn-primary"
+              onClick={handleLoss}
+              disabled={lossBusy || !(Number(lossQuantity) > 0)}
+            >
+              {lossBusy ? t("stock.loss.loading") : t("stock.loss.submit")}
+            </button>
+          </>
+        }
+      >
+        <p className="text-4" style={{ marginBottom: "var(--space-3)" }}>{t("stock.loss.desc")}</p>
+        <div className="field">
+          <label className="field-label" htmlFor="loss-quantity">{t("stock.loss.quantity")}</label>
+          <input
+            id="loss-quantity"
+            className="input"
+            type="number"
+            min="0"
+            step="any"
+            value={lossQuantity}
+            onChange={e => setLossQuantity(e.target.value)}
+            disabled={lossBusy}
+            style={{ maxWidth: 180 }}
+          />
+        </div>
+        <div className="field">
+          <label className="field-label" htmlFor="loss-reason">{t("stock.loss.reason")}</label>
+          <input
+            id="loss-reason"
+            className="input"
+            value={lossReason}
+            onChange={e => setLossReason(e.target.value)}
+            placeholder={t("stock.loss.reasonPlaceholder")}
+            disabled={lossBusy}
+          />
+        </div>
+      </Modal>
 
       {modal && (
         <StockModal

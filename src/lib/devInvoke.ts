@@ -182,6 +182,30 @@ const fixtures: Record<string, unknown | ((args: unknown) => unknown)> = {
   price_quotes_all: priceQuotes,
   settings_get_all: settingsMap,
   shopping_list_create_from_recipes: shoppingListFromRecipes,
+  // Sprint S3 previews. Fixtures only — the real consumption, conversion and
+  // shortfall detection live in `crates/core` and are tested there.
+  recipe_produce: (args: unknown) => {
+    const input = (args as { input?: { recipe_id?: number; multiplier?: number; yields_product?: boolean } })?.input;
+    const r = recipes.find((r) => r.id === input?.recipe_id);
+    const multiplier = input?.multiplier ?? 1;
+    const movements = (r?.ingredients ?? []).map((line, i) => ({
+      id: i + 1, ingredient_id: line.ingredient_id, recipe_id: null,
+      movement_type: "consumption", quantity: -line.quantity * multiplier,
+      unit: line.unit, unit_cost: null, sale_price: null, reason: null,
+      production_id: "preview", created_by: null, created_at: now,
+    }));
+    const shortfalls = (r?.ingredients ?? []).flatMap((line) => {
+      const ing = ingredients.find((i) => i.id === line.ingredient_id);
+      const held = stock.find((s) => s.ingredient_id === line.ingredient_id)?.quantity ?? 0;
+      const needed = line.quantity * multiplier;
+      if (!ing || line.unit !== ing.unit || held >= needed) return [];
+      return [{ ingredient_id: line.ingredient_id, ingredient_name: ing.name, needed, available: held, unit: ing.unit }];
+    });
+    return { production_id: "preview", movements, shortfalls };
+  },
+  stock_loss_record: { id: 1, ingredient_id: 1, recipe_id: null, movement_type: "loss", quantity: -1, unit: "gram", unit_cost: null, sale_price: null, reason: null, production_id: null, created_by: null, created_at: now },
+  stock_movements_for_ingredient: [],
+  recipe_stock_balance: 0,
 };
 
 const noopCommandPrefixes = [

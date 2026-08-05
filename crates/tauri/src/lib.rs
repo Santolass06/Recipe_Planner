@@ -173,6 +173,25 @@ impl AppDb {
         mise_core::db::create_shopping_list(&self.db, name, items).await.map_err(user_error)
     }
 
+    pub async fn recipe_produce(&self, input: ProductionInput) -> Result<ProductionResult, String> {
+        input.validate().map_err(|e| e.to_string())?;
+        mise_core::db::recipe_produce(&self.db, input).await.map_err(user_error)
+    }
+
+    pub async fn stock_loss_record(&self, input: LossInput) -> Result<StockMovement, String> {
+        input.validate().map_err(|e| e.to_string())?;
+        mise_core::db::stock_loss_record(&self.db, input).await.map_err(user_error)
+    }
+
+    pub async fn stock_sale_record(&self, input: SaleInput) -> Result<StockMovement, String> {
+        input.validate().map_err(|e| e.to_string())?;
+        mise_core::db::stock_sale_record(&self.db, input).await.map_err(user_error)
+    }
+
+    pub async fn recipe_stock_balance(&self, recipe_id: i64) -> Result<f64, String> {
+        mise_core::db::recipe_stock_balance(&self.db, recipe_id).await.map_err(user_error)
+    }
+
     pub async fn stock_movement_add(&self, input: StockMovementInput) -> Result<StockMovement, String> {
         input.validate().map_err(|e| e.to_string())?;
         mise_core::db::stock_movement_add(&self.db, input).await.map_err(user_error)
@@ -761,6 +780,38 @@ pub mod commands {
         items: Vec<ShoppingItem>,
     ) -> Result<ShoppingList, String> {
         db.create_shopping_list(name, items).await.map_err(user_error)
+    }
+
+    #[tauri::command]
+    pub async fn recipe_produce(
+        db: tauri::State<'_, crate::AppDb>,
+        input: ProductionInput,
+    ) -> Result<ProductionResult, String> {
+        db.recipe_produce(input).await.map_err(user_error)
+    }
+
+    #[tauri::command]
+    pub async fn stock_loss_record(
+        db: tauri::State<'_, crate::AppDb>,
+        input: LossInput,
+    ) -> Result<StockMovement, String> {
+        db.stock_loss_record(input).await.map_err(user_error)
+    }
+
+    #[tauri::command]
+    pub async fn stock_sale_record(
+        db: tauri::State<'_, crate::AppDb>,
+        input: SaleInput,
+    ) -> Result<StockMovement, String> {
+        db.stock_sale_record(input).await.map_err(user_error)
+    }
+
+    #[tauri::command]
+    pub async fn recipe_stock_balance(
+        db: tauri::State<'_, crate::AppDb>,
+        recipe_id: i64,
+    ) -> Result<f64, String> {
+        db.recipe_stock_balance(recipe_id).await.map_err(user_error)
     }
 
     #[tauri::command]
