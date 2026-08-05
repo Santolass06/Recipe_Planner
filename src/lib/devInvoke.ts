@@ -220,6 +220,7 @@ const fixtures: Record<string, unknown | ((args: unknown) => unknown)> = {
         missing, cost_per_portion: 2.5, uses_expiring: r.id === 2,
       };
     }).sort((a, b) => Number(b.uses_expiring) - Number(a.uses_expiring) || b.coverage - a.coverage),
+  edition_get: "family",
   expiring_items: [
     { ingredient_id: 9, ingredient_name: "Natas 35%", quantity: 1, unit: "liter", expiry_date: now, days_left: 2 },
     { ingredient_id: 8, ingredient_name: "Manteiga", quantity: 0.25, unit: "kilogram", expiry_date: now, days_left: -1 },

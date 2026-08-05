@@ -4,7 +4,7 @@
 
 A kitchen management app for planning menus, tracking stock and costing recipes — built with **Tauri 2**, **Rust**, **React 19** and **libSQL**, running as a local-first desktop app.
 
-**Platform status, stated plainly:** Linux is the only target built and shipped today. Windows and Android are planned and not started; macOS and iOS are out of scope. See [`PROJECT.md`](PROJECT.md) for the roadmap.
+**Platform status, stated plainly:** Linux is the only target built and shipped today, and the shipped build has not yet been confirmed on a clean machine. Windows, Android and a self-hosted server are planned and not started; macOS and iOS are out of scope. See [`PROJECT.md`](PROJECT.md) for the roadmap.
 
 <p align="center">
   <img src="docs/screenshot-dashboard.png" alt="Dashboard" width="800" />
@@ -36,7 +36,27 @@ A kitchen management app for planning menus, tracking stock and costing recipes 
 
 ### Reports
 - Cost report (spend over time, top-cost ingredients), meal stats, price trends — all live from real data, sourced from actual purchases rather than shopping-list estimates
-- Waste report and stock-over-time trends are **not implemented yet** — the app models acquisition but not yet consumption, so there is no waste log or stock history to report on. Those tabs say what is missing rather than showing invented numbers. Closing this is the next structural piece of work (sprints S2–S4 in [`PROJECT.md`](PROJECT.md))
+- Waste report and stock-over-time trends, both built on the movement log — the stock on any day is the running total of what moved
+
+### Cooking, production and waste
+
+- **"I cooked this"** on a recipe takes its ingredients out of stock, converted into whatever unit the stock is kept in
+- Fractional multiplier — half a batch is `0.5`; the recipe stays canonical
+- Mark a run as yielding a product and the finished thing enters stock, ready to be sold or written off
+- Short stock **warns and lets it through**: recorded stock is almost always behind reality, and an app that refuses "I made the cookies" gets abandoned
+- Losses at two levels — a spoiled ingredient, or unsold product
+- Sales record the price actually charged, so a later price change never rewrites the past
+
+### What to cook
+
+- Recipes ranked by how much of them your stock already covers, with what is missing spelled out
+- Anything about to expire comes first, with the action attached — cook it or write it off from the same screen
+
+### Editions
+
+- **Family** — plan meals, manage the pantry, watch what it costs
+- **Pro** — adds production, sales, supplier comparison and per-event budgets
+- A runtime setting, not a separate build
 
 ### Backup
 

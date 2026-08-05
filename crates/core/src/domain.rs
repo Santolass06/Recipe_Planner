@@ -645,6 +645,76 @@ pub struct EventBudget {
     pub variance: f64,
 }
 
+/// Which edition the app presents (Sprint S5).
+///
+/// **Runtime value, not a Cargo feature.** With four distribution targets,
+/// splitting by build would double the matrix to eight for the sake of hiding
+/// screens. The cost is that Pro's code ships inside Family's binary and anyone
+/// who pokes at it can flip the flag — for a product with no DRM that is the
+/// difference between hiding and forbidding, and hiding is enough.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "bindings/")]
+pub enum Edition {
+    /// Home use: plan meals, manage the pantry, watch what it costs.
+    Family,
+    /// Business use: produce to sell, know the real cost, count sold and lost.
+    Pro,
+}
+
+impl Edition {
+    pub fn as_str(self) -> &'static str {
+        match self { Edition::Family => "family", Edition::Pro => "pro" }
+    }
+
+    /// Anything unrecognised falls back to Family — the smaller surface is the
+    /// safe default when the setting is missing or corrupt.
+    pub fn from_str_or_family(s: &str) -> Self {
+        match s { "pro" => Edition::Pro, _ => Edition::Family }
+    }
+
+    /// The gating matrix, in one place instead of scattered across screens.
+    pub fn allows(self, feature: EditionFeature) -> bool {
+        match feature {
+            // Family covers everything about running a kitchen for yourself.
+            EditionFeature::Recipes
+            | EditionFeature::Stock
+            | EditionFeature::ShoppingLists
+            | EditionFeature::MealPlanning
+            | EditionFeature::Events
+            | EditionFeature::ReceiptScanner
+            | EditionFeature::Suggestions
+            | EditionFeature::WasteReport
+            | EditionFeature::CostReport => true,
+            // Selling is what makes it a business.
+            EditionFeature::Production
+            | EditionFeature::Sales
+            | EditionFeature::SupplierComparison
+            | EditionFeature::EventBudget => self == Edition::Pro,
+        }
+    }
+}
+
+/// What the edition flag gates (Sprint S5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "bindings/")]
+pub enum EditionFeature {
+    Recipes,
+    Stock,
+    ShoppingLists,
+    MealPlanning,
+    Events,
+    ReceiptScanner,
+    Suggestions,
+    WasteReport,
+    CostReport,
+    Production,
+    Sales,
+    SupplierComparison,
+    EventBudget,
+}
+
 /// What `stock_reconcile` found and fixed.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]

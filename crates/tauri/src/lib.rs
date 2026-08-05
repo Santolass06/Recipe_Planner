@@ -173,6 +173,14 @@ impl AppDb {
         mise_core::db::create_shopping_list(&self.db, name, items).await.map_err(user_error)
     }
 
+    pub async fn get_edition(&self) -> Result<Edition, String> {
+        mise_core::db::get_edition(&self.db).await.map_err(user_error)
+    }
+
+    pub async fn set_edition(&self, edition: Edition) -> Result<(), String> {
+        mise_core::db::set_edition(&self.db, edition).await.map_err(user_error)
+    }
+
     pub async fn suggest_recipes(&self, limit: u32) -> Result<Vec<RecipeSuggestion>, String> {
         mise_core::db::suggest_recipes(&self.db, limit).await.map_err(user_error)
     }
@@ -792,6 +800,21 @@ pub mod commands {
         items: Vec<ShoppingItem>,
     ) -> Result<ShoppingList, String> {
         db.create_shopping_list(name, items).await.map_err(user_error)
+    }
+
+    #[tauri::command]
+    pub async fn edition_get(
+        db: tauri::State<'_, crate::AppDb>,
+    ) -> Result<Edition, String> {
+        db.get_edition().await.map_err(user_error)
+    }
+
+    #[tauri::command]
+    pub async fn edition_set(
+        db: tauri::State<'_, crate::AppDb>,
+        edition: Edition,
+    ) -> Result<(), String> {
+        db.set_edition(edition).await.map_err(user_error)
     }
 
     #[tauri::command]

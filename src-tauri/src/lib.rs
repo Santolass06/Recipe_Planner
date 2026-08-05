@@ -55,6 +55,8 @@ pub fn run() {
             mise_tauri::commands::stock_movement_add,
             mise_tauri::commands::recipe_produce,
             mise_tauri::commands::suggest_recipes,
+            mise_tauri::commands::edition_get,
+            mise_tauri::commands::edition_set,
             mise_tauri::commands::expiring_items,
             mise_tauri::commands::event_budget,
             mise_tauri::commands::stock_loss_record,
