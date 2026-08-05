@@ -122,6 +122,51 @@ const priceQuotes = [
   { id: 3, ingredient_id: 8, ingredient_name: "Manteiga", ingredient_unit: "kilogram", supplier: "Distribuição Sá", price_per_unit: 8.7, valid_from: null, valid_to: null, is_promo: false, created_at: now },
 ];
 
+/**
+ * Mirrors what the Rust `create_shopping_list_from_recipes` does, so the browser
+ * preview shows a plausible list instead of an error toast. It is a fixture, not
+ * a second implementation: the real aggregation, unit conversion and stock
+ * subtraction live in `crates/core` and are covered by tests there.
+ */
+function shoppingListFromRecipes(args: unknown): unknown {
+  const input = (args as { input?: { recipe_ids?: number[]; portions_multiplier?: number; name?: string } })?.input;
+  const picked = input?.recipe_ids ?? [];
+  const multiplier = input?.portions_multiplier ?? 1;
+
+  const needed = new Map<number, number>();
+  for (const r of recipes.filter((r) => picked.includes(r.id))) {
+    for (const line of r.ingredients) {
+      const ing = ingredients.find((i) => i.id === line.ingredient_id);
+      if (!ing) continue;
+      // The fixture only sums lines already in the ingredient's own unit; the
+      // conversion is the backend's job and is tested there.
+      const qty = line.unit === ing.unit ? line.quantity * multiplier : 0;
+      needed.set(line.ingredient_id, (needed.get(line.ingredient_id) ?? 0) + qty);
+    }
+  }
+
+  const items = [...needed.entries()].flatMap(([ingredient_id, quantity], idx) => {
+    const ing = ingredients.find((i) => i.id === ingredient_id)!;
+    const inStock = stock.find((s) => s.ingredient_id === ingredient_id)?.quantity ?? 0;
+    const toBuy = Math.max(0, quantity - inStock);
+    if (toBuy === 0) return [];
+    return [{
+      id: idx + 1, ingredient_id, ingredient_name: ing.name, ingredient_unit: ing.unit,
+      needed_quantity: quantity, stock_quantity: inStock, to_buy_quantity: toBuy,
+      category: "", estimated_cost: toBuy * ing.price_per_unit,
+      purchased: false, notes: null, purchased_at: null, created_at: now,
+    }];
+  });
+
+  return {
+    id: 1,
+    name: input?.name ?? `Compras ${new Date().toLocaleDateString("pt-PT")}`,
+    items,
+    total_estimated_cost: items.reduce((sum, i) => sum + i.estimated_cost, 0),
+    created_at: now,
+  };
+}
+
 /** command name -> canned response (or function of args) */
 const fixtures: Record<string, unknown | ((args: unknown) => unknown)> = {
   dashboard_stats: dashboardStats,
@@ -136,6 +181,7 @@ const fixtures: Record<string, unknown | ((args: unknown) => unknown)> = {
   meal_plans_list: [],
   price_quotes_all: priceQuotes,
   settings_get_all: settingsMap,
+  shopping_list_create_from_recipes: shoppingListFromRecipes,
 };
 
 const noopCommandPrefixes = [
@@ -143,10 +189,10 @@ const noopCommandPrefixes = [
   "_set", "_reset", "_clear", "_seed", "_import", "_export", "_upload", "open_url",
 ];
 
-function fallbackFor(cmd: string): unknown {
+function fallbackFor(cmd: string, args?: Record<string, unknown>): unknown {
   if (cmd in fixtures) {
     const f = fixtures[cmd];
-    return typeof f === "function" ? (f as (a: unknown) => unknown)(undefined) : structuredClone(f);
+    return typeof f === "function" ? (f as (a: unknown) => unknown)(args) : structuredClone(f);
   }
   if (cmd.endsWith("_list") || cmd.endsWith("_all")) return [];
   if (noopCommandPrefixes.some((suffix) => cmd.includes(suffix))) return undefined;
@@ -158,7 +204,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
   if (isTauri()) return tauriInvoke<T>(cmd, args);
   if (import.meta.env.DEV) {
     console.debug(`[devInvoke] ${cmd}`, args ?? "");
-    return fallbackFor(cmd) as T;
+    return fallbackFor(cmd, args) as T;
   }
   return tauriInvoke<T>(cmd, args);
 }

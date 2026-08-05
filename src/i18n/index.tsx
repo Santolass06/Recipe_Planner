@@ -69,7 +69,11 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       let result = lookup(dictionaries[language], key);
       if (result === undefined) result = lookup(dictionaries[referenceLanguage], key);
       if (result === undefined) {
-        if (import.meta.env.DEV) {
+        // Dictionaries load asynchronously, so the first renders miss every key
+        // and used to warn about all of them — ~178 false positives per page,
+        // which buried the real ones this warning exists to surface. Only warn
+        // once the reference locale, the last fallback, is actually in.
+        if (import.meta.env.DEV && dictionaries[referenceLanguage] !== undefined) {
           console.warn(`[i18n] missing key "${key}" for language "${language}"`);
         }
         return key;
