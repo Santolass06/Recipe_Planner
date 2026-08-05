@@ -388,6 +388,133 @@ pub struct ShoppingItem {
     pub created_at: DateTime<Utc>,
 }
 
+/// Why stock moved (Sprint S2).
+///
+/// Six from the first migration, `sale` and `production` included, because the
+/// edition split is the last layer and not the first: the UI for selling and
+/// producing can arrive late, the schema cannot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "bindings/")]
+pub enum MovementType {
+    /// Stock bought in. Mirrors a `stock_purchases` row.
+    Purchase,
+    /// Something made from a recipe entering stock as a product.
+    Production,
+    /// Ingredients used up, whether by cooking or by a production run.
+    Consumption,
+    /// Sold to someone. Carries the price actually charged.
+    Sale,
+    /// Spoiled, dropped, thrown away.
+    Loss,
+    /// The user correcting the number by hand. The only type allowed either way.
+    Adjustment,
+}
+
+impl MovementType {
+    /// Whether this type adds to stock. `Adjustment` is the one that can do
+    /// both, so it answers `None` and is exempt from the sign check.
+    pub fn is_inflow(self) -> Option<bool> {
+        match self {
+            MovementType::Purchase | MovementType::Production => Some(true),
+            MovementType::Consumption | MovementType::Sale | MovementType::Loss => Some(false),
+            MovementType::Adjustment => None,
+        }
+    }
+}
+
+impl std::fmt::Display for MovementType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            MovementType::Purchase => "purchase",
+            MovementType::Production => "production",
+            MovementType::Consumption => "consumption",
+            MovementType::Sale => "sale",
+            MovementType::Loss => "loss",
+            MovementType::Adjustment => "adjustment",
+        };
+        f.write_str(s)
+    }
+}
+
+impl std::str::FromStr for MovementType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "purchase" => MovementType::Purchase,
+            "production" => MovementType::Production,
+            "consumption" => MovementType::Consumption,
+            "sale" => MovementType::Sale,
+            "loss" => MovementType::Loss,
+            "adjustment" => MovementType::Adjustment,
+            other => return Err(format!("unknown movement type '{other}'")),
+        })
+    }
+}
+
+/// A single stock movement. `quantity` is signed — inflows positive, outflows
+/// negative — so an ingredient's stock is `SUM(quantity)`.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct StockMovement {
+    #[ts(type = "number")]
+    pub id: i64,
+    #[ts(type = "number | null")]
+    pub ingredient_id: Option<i64>,
+    #[ts(type = "number | null")]
+    pub recipe_id: Option<i64>,
+    pub movement_type: MovementType,
+    pub quantity: f64,
+    pub unit: Unit,
+    pub unit_cost: Option<f64>,
+    pub sale_price: Option<f64>,
+    pub reason: Option<String>,
+    /// Groups the N consumptions and the 1 product entry of one production run.
+    pub production_id: Option<String>,
+    /// Unused until the host (S8) has more than one user. Created now so that
+    /// adding it later is not a migration on a table full of real rows.
+    #[ts(type = "number | null")]
+    pub created_by: Option<i64>,
+    #[ts(type = "string")]
+    pub created_at: DateTime<Utc>,
+}
+
+/// One movement to write. Quantity is given as a positive magnitude and the
+/// type decides the sign, so a caller cannot accidentally record a loss that
+/// increases stock.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS, Validate)]
+#[ts(export, export_to = "bindings/")]
+pub struct StockMovementInput {
+    #[ts(type = "number | null")]
+    pub ingredient_id: Option<i64>,
+    #[ts(type = "number | null")]
+    pub recipe_id: Option<i64>,
+    pub movement_type: MovementType,
+    /// Always positive. For `Adjustment`, use `signed_quantity` instead.
+    #[validate(range(min = 0.0))]
+    pub quantity: f64,
+    pub unit: Unit,
+    #[validate(range(min = 0.0))]
+    pub unit_cost: Option<f64>,
+    #[validate(range(min = 0.0))]
+    pub sale_price: Option<f64>,
+    #[validate(length(max = 500))]
+    pub reason: Option<String>,
+    pub production_id: Option<String>,
+    /// Only read for `Adjustment`, where the direction is the caller's to pick.
+    pub signed_quantity: Option<f64>,
+}
+
+/// What `stock_reconcile` found and fixed.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct StockReconcileResult {
+    #[ts(type = "number")]
+    pub rows_checked: u32,
+    #[ts(type = "number")]
+    pub rows_corrected: u32,
+}
+
 /// Input for building a shopping list out of recipes (Sprint S1).
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS, Validate)]
 #[ts(export, export_to = "bindings/")]

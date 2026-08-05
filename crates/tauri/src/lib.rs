@@ -173,6 +173,24 @@ impl AppDb {
         mise_core::db::create_shopping_list(&self.db, name, items).await.map_err(user_error)
     }
 
+    pub async fn stock_movement_add(&self, input: StockMovementInput) -> Result<StockMovement, String> {
+        input.validate().map_err(|e| e.to_string())?;
+        mise_core::db::stock_movement_add(&self.db, input).await.map_err(user_error)
+    }
+
+    pub async fn stock_movements_add_batch(&self, inputs: Vec<StockMovementInput>) -> Result<Vec<StockMovement>, String> {
+        for input in &inputs { input.validate().map_err(|e| e.to_string())?; }
+        mise_core::db::stock_movements_add_batch(&self.db, inputs).await.map_err(user_error)
+    }
+
+    pub async fn stock_movements_for_ingredient(&self, ingredient_id: i64, limit: u32) -> Result<Vec<StockMovement>, String> {
+        mise_core::db::stock_movements_for_ingredient(&self.db, ingredient_id, limit).await.map_err(user_error)
+    }
+
+    pub async fn stock_reconcile(&self) -> Result<StockReconcileResult, String> {
+        mise_core::db::stock_reconcile(&self.db).await.map_err(user_error)
+    }
+
     pub async fn create_shopping_list_from_recipes(&self, input: ShoppingListFromRecipesInput) -> Result<ShoppingList, String> {
         input.validate().map_err(|e| e.to_string())?;
         mise_core::db::create_shopping_list_from_recipes(&self.db, input).await.map_err(user_error)
@@ -743,6 +761,38 @@ pub mod commands {
         items: Vec<ShoppingItem>,
     ) -> Result<ShoppingList, String> {
         db.create_shopping_list(name, items).await.map_err(user_error)
+    }
+
+    #[tauri::command]
+    pub async fn stock_movement_add(
+        db: tauri::State<'_, crate::AppDb>,
+        input: StockMovementInput,
+    ) -> Result<StockMovement, String> {
+        db.stock_movement_add(input).await.map_err(user_error)
+    }
+
+    #[tauri::command]
+    pub async fn stock_movements_add_batch(
+        db: tauri::State<'_, crate::AppDb>,
+        inputs: Vec<StockMovementInput>,
+    ) -> Result<Vec<StockMovement>, String> {
+        db.stock_movements_add_batch(inputs).await.map_err(user_error)
+    }
+
+    #[tauri::command]
+    pub async fn stock_movements_for_ingredient(
+        db: tauri::State<'_, crate::AppDb>,
+        ingredient_id: i64,
+        limit: u32,
+    ) -> Result<Vec<StockMovement>, String> {
+        db.stock_movements_for_ingredient(ingredient_id, limit).await.map_err(user_error)
+    }
+
+    #[tauri::command]
+    pub async fn stock_reconcile(
+        db: tauri::State<'_, crate::AppDb>,
+    ) -> Result<StockReconcileResult, String> {
+        db.stock_reconcile().await.map_err(user_error)
     }
 
     #[tauri::command]
