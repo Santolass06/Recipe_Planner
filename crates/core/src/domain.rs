@@ -590,6 +590,61 @@ pub struct SaleInput {
     pub reason: Option<String>,
 }
 
+/// A recipe you could make right now, and what it would take (Sprint S4).
+///
+/// The old `suggest_recipes` was a stub and was deleted in the 2026-07-26
+/// audit: without recorded consumption there was nothing to base a suggestion
+/// on. This one is built on real stock.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct RecipeSuggestion {
+    #[ts(type = "number")]
+    pub recipe_id: i64,
+    pub recipe_name: String,
+    pub category: String,
+    #[ts(type = "number")]
+    pub portions: u32,
+    /// 0.0–1.0. How many of the recipe's ingredients the stock fully covers.
+    pub coverage: f64,
+    /// Empty when everything is in stock.
+    pub missing: Vec<StockShortfall>,
+    pub cost_per_portion: f64,
+    /// True when this recipe uses something that is about to expire — the
+    /// reason to cook it today rather than tomorrow.
+    pub uses_expiring: bool,
+}
+
+/// An ingredient lot running out of time (Sprint S4).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct ExpiringItem {
+    #[ts(type = "number")]
+    pub ingredient_id: i64,
+    pub ingredient_name: String,
+    pub quantity: f64,
+    pub unit: Unit,
+    #[ts(type = "string")]
+    pub expiry_date: DateTime<Utc>,
+    /// Negative once it is past.
+    #[ts(type = "number")]
+    pub days_left: i64,
+}
+
+/// Planned against actual, for one event (Sprint S4).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct EventBudget {
+    #[ts(type = "number")]
+    pub event_id: i64,
+    pub event_name: String,
+    /// What the event's recipes say it should cost.
+    pub planned_cost: f64,
+    /// What its movements say it actually cost.
+    pub actual_cost: f64,
+    /// Positive means over budget.
+    pub variance: f64,
+}
+
 /// What `stock_reconcile` found and fixed.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
 #[ts(export, export_to = "bindings/")]
@@ -1407,6 +1462,11 @@ pub struct StockPurchaseInput {
     pub discount_percent: f64,
     #[ts(type = "string")]
     pub purchase_date: DateTime<Utc>,
+    /// When this lot goes off. `#[serde(default)]` so every existing caller that
+    /// never sends it keeps working — a missing date means nobody tracked it.
+    #[serde(default)]
+    #[ts(type = "string | null")]
+    pub expiry_date: Option<DateTime<Utc>>,
     #[ts(type = "number | null")]
     pub supplier_id: Option<i64>,
     pub brand: Option<String>,

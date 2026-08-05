@@ -12,6 +12,7 @@ import SettingsPage from "./pages/SettingsPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import EventsPage from "./pages/EventsPage";
 import EventDetailPage from "./pages/EventDetailPage";
+import SuggestionsPage from "./pages/SuggestionsPage";
 import ReportsPage from "./pages/ReportsPage";
 import ReceiptScannerPage from "./pages/ReceiptScannerPage";
 import HelpPage from "./pages/HelpPage";
@@ -32,6 +33,7 @@ export const router = createBrowserRouter([
       { path: "eventos/:id", element: <EventDetailPage /> },
       { path: "planeamento", element: <MealPlannerPage /> },
       { path: "calendario", element: <CalendarPage /> },
+      { path: "sugestoes", element: <SuggestionsPage /> },
       { path: "relatorios", element: <ReportsPage /> },
       { path: "fornecedores", element: <SuppliersPage /> },
       { path: "scanner", element: <ReceiptScannerPage /> },

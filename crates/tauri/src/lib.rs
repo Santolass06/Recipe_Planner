@@ -173,6 +173,18 @@ impl AppDb {
         mise_core::db::create_shopping_list(&self.db, name, items).await.map_err(user_error)
     }
 
+    pub async fn suggest_recipes(&self, limit: u32) -> Result<Vec<RecipeSuggestion>, String> {
+        mise_core::db::suggest_recipes(&self.db, limit).await.map_err(user_error)
+    }
+
+    pub async fn expiring_items(&self, within_days: u32) -> Result<Vec<ExpiringItem>, String> {
+        mise_core::db::expiring_items(&self.db, within_days).await.map_err(user_error)
+    }
+
+    pub async fn get_event_budget(&self, event_id: i64) -> Result<EventBudget, String> {
+        mise_core::db::get_event_budget(&self.db, event_id).await.map_err(user_error)
+    }
+
     pub async fn recipe_produce(&self, input: ProductionInput) -> Result<ProductionResult, String> {
         input.validate().map_err(|e| e.to_string())?;
         mise_core::db::recipe_produce(&self.db, input).await.map_err(user_error)
@@ -780,6 +792,30 @@ pub mod commands {
         items: Vec<ShoppingItem>,
     ) -> Result<ShoppingList, String> {
         db.create_shopping_list(name, items).await.map_err(user_error)
+    }
+
+    #[tauri::command]
+    pub async fn suggest_recipes(
+        db: tauri::State<'_, crate::AppDb>,
+        limit: u32,
+    ) -> Result<Vec<RecipeSuggestion>, String> {
+        db.suggest_recipes(limit).await.map_err(user_error)
+    }
+
+    #[tauri::command]
+    pub async fn expiring_items(
+        db: tauri::State<'_, crate::AppDb>,
+        within_days: u32,
+    ) -> Result<Vec<ExpiringItem>, String> {
+        db.expiring_items(within_days).await.map_err(user_error)
+    }
+
+    #[tauri::command]
+    pub async fn event_budget(
+        db: tauri::State<'_, crate::AppDb>,
+        event_id: i64,
+    ) -> Result<EventBudget, String> {
+        db.get_event_budget(event_id).await.map_err(user_error)
     }
 
     #[tauri::command]
