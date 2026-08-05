@@ -115,7 +115,7 @@ confirmado, empacotar para Windows e Android é construir sobre não-verificado.
   de 2026-07-22 15:42 e o fix do `max-width` entrou às 16:35, 53 minutos
   depois; além disso é anterior a toda a auditoria. Depois instalar numa
   máquina sem Nix e correr o essencial de ponta a ponta. Checklist completa no
-  [issue #47](https://github.com/Santolass06/Recipe_Planner/issues/47).
+  [issue #3](https://github.com/Santolass06/Recipe_Planner/issues/3).
 - **S0.2** Veredicto sobre a câmara do Scanner. Se funcionar na máquina limpa,
   fecha-se como «ambiente de dev, sem fix». Se não, ganha diagnóstico num
   ambiente representativo — que é tudo o que falta há três semanas.
@@ -142,7 +142,7 @@ Em vez de uma segunda agregação ao lado, os dois caminhos passaram a partilhar
 transacional, o que cobriu os três produtores de listas de uma vez.
 
 124 testes, 0 ignorados. Falta o teste manual, acumulado no
-[#47](https://github.com/Santolass06/Recipe_Planner/issues/47) até haver acesso
+[#3](https://github.com/Santolass06/Recipe_Planner/issues/3) até haver acesso
 à outra máquina.
 
 <details>
