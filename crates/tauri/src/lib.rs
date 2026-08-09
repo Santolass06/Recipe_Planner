@@ -1661,7 +1661,7 @@ mod tests {
                 name: "".into(),
                 unit: Unit::Gram,
                 price_per_unit: 1.0,
-                category: None,
+                category_id: None,
                 event_id: None,
             })
             .await;

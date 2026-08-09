@@ -70,7 +70,11 @@ export function computeCostLines(recipe: Recipe, servings: number, ingredients: 
   return (recipe.ingredients ?? []).map(ing => {
     const stock = ingredients.find(i => i.id === ing.ingredient_id);
     const scaledQty = ing.quantity * factor;
-    const price = stock?.price_per_unit ?? 0;
+    // The weighted average of recent purchases, which is what the backend costs
+    // recipes at. Using the catalogue price here made this screen and the costs
+    // page answer the same question with different numbers. `??` guards the
+    // browser preview, whose mocks predate the field.
+    const price = stock?.effective_price_per_unit ?? stock?.price_per_unit ?? 0;
     // price is €/stock.unit, so the quantity must be converted into stock.unit
     // before multiplying — mirrors Unit::convert_to in crates/core/src/domain.rs.
     const converted = stock ? convertUnit(scaledQty, ing.unit, stock.unit) : null;

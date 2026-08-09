@@ -254,7 +254,16 @@ pub struct IngredientInput {
     pub unit: Unit,
     #[validate(range(min = 0.0))]
     pub price_per_unit: f64,
-    pub category: Option<String>,
+    /// The id of a `categories` row of kind `ingredient`, or `None` for
+    /// "Sem categoria".
+    ///
+    /// Was `category: Option<String>` and named as if it took a name, while the
+    /// code parsed it as an id — so anything that sent a name silently lost the
+    /// category, and the frontend never sent anything at all. Callers that hold
+    /// a name (the data import) resolve it before getting here.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub category_id: Option<i64>,
     /// Set on create to scope a brand-new ingredient to an event (Fase 3.3).
     /// `#[serde(default)]` so existing catalog create/update callers that
     /// never send this field keep working.
@@ -270,7 +279,18 @@ pub struct Ingredient {
     pub id: i64,
     pub name: String,
     pub unit: Unit,
+    /// The catalogue price the user typed. What the ingredient is *listed* at.
     pub price_per_unit: f64,
+    /// What the ingredient actually costs, per `unit`: the weighted average of
+    /// recent purchases, falling back to older ones and finally to
+    /// `price_per_unit`. See `weighted_avg_stock_price`.
+    ///
+    /// **Invariant: every `Ingredient` handed to the frontend carries this.**
+    /// It exists because the recipe cost was being computed in two places from
+    /// two different prices — the recipe list from the catalogue number, the
+    /// costs page from the backend's weighted average — so the same recipe
+    /// showed two costs on two screens.
+    pub effective_price_per_unit: f64,
     #[ts(type = "number | null")]
     pub category_id: Option<i64>,
     pub favorite: bool,

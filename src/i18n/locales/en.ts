@@ -343,6 +343,8 @@ export const en = {
     empty: "No ingredients",
     noResultsDesc: "Try another search.",
     emptyDesc: "Add the first ingredient to get started.",
+    colCategory: "Category",
+    noCategory: "No category",
     colUnit: "Unit",
     actionsAriaLabel: "Ingredient actions",
     confirmDeleteAria: "Confirm deletion",

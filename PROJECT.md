@@ -66,6 +66,20 @@ correr o mise como serviço e acedido por browser a partir de outros
 dispositivos. macOS e iOS/iPad saem do âmbito. Ver
 [[#Alvos de distribuição]].
 
+**Categorias de ingrediente decididas (2026-08-09):** `IngredientInput` passa a
+`category_id`, com seletor no formulário. O campo chamava-se `category` e era
+lido como id, portanto nada lhe chegava e os dois `by_category` agrupavam tudo
+num balde vazio.
+
+**DOM-05 decidido (2026-08-09):** o preço de receita usa uma **janela de 90
+dias**, não FIFO — FIFO exige rastreio de esgotamento por lote, que não existe.
+Fallback em três degraus: janela → histórico todo → catálogo.
+
+**Fonte única de preço (2026-08-09):** todo o `Ingredient` entregue ao frontend
+carrega `effective_price_per_unit`, e é esse o número com que o frontend
+custeia. Antes, a página de Receitas usava o preço de catálogo e a de Custos o
+médio ponderado — dois números para a mesma receita.
+
 **Edições decididas (2026-07-28):** constrói-se a funcionalidade toda e a flag
 que separa Family de Pro é a última camada, não a primeira. Ver
 [[#Edições — Family e Pro]] — a consequência prática é que `stock_movements`
