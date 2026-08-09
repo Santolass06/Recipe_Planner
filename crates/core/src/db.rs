@@ -7643,6 +7643,73 @@ IVA 23% 1,21
         assert!(good.validate().is_ok(), "a valid recipe was rejected");
     }
 
+    /// ARC-004: the unit tables exist twice, in `domain.rs` and in
+    /// `src/lib/units.ts`, because the frontend converts without a round trip.
+    /// The audit accepted the duplication and recorded the risk as "future
+    /// divergence". This is that risk turned into a failing test: the two
+    /// tables are read against each other, so they cannot drift in silence.
+    #[test]
+    fn the_frontend_unit_table_still_matches_the_rust_one() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../src/lib/units.ts");
+        let Ok(source) = std::fs::read_to_string(&path) else {
+            // The crate can be built without the frontend checked out.
+            eprintln!("skipped: {} not found", path.display());
+            return;
+        };
+
+        /// Pull `name: value,` pairs out of the named `const` object.
+        fn table<'a>(source: &'a str, name: &str) -> Vec<(String, String)> {
+            let Some(start) = source.find(&format!("const {name}")) else { return Vec::new() };
+            let body = &source[start..];
+            let Some(open) = body.find('{') else { return Vec::new() };
+            let Some(close) = body.find("};") else { return Vec::new() };
+            body[open + 1..close]
+                .split(',')
+                .filter_map(|entry| {
+                    let (k, v) = entry.split_once(':')?;
+                    Some((
+                        k.trim().trim_matches('"').to_string(),
+                        v.trim().trim_matches('"').to_string(),
+                    ))
+                })
+                .filter(|(k, _)| !k.is_empty())
+                .collect()
+        }
+
+        let groups = table(&source, "UNIT_GROUP");
+        let factors = table(&source, "UNIT_BASE_FACTOR");
+        assert_eq!(groups.len(), Unit::all().len(), "UNIT_GROUP has a different number of units");
+        assert_eq!(factors.len(), Unit::all().len(), "UNIT_BASE_FACTOR has a different number of units");
+
+        for unit in Unit::all() {
+            let key = unit.to_string();
+
+            let (_, group) = groups.iter().find(|(k, _)| *k == key)
+                .unwrap_or_else(|| panic!("'{key}' is missing from UNIT_GROUP in units.ts"));
+            let expected_group = match unit.group() {
+                UnitGroup::Weight => "weight",
+                UnitGroup::Volume => "volume",
+                UnitGroup::Count => "count",
+            };
+            assert_eq!(group, expected_group, "'{key}' is in a different group in units.ts");
+
+            let (_, factor) = factors.iter().find(|(k, _)| *k == key)
+                .unwrap_or_else(|| panic!("'{key}' is missing from UNIT_BASE_FACTOR in units.ts"));
+            match unit.to_base_factor() {
+                None => assert_eq!(factor, "null", "'{key}' has a factor in units.ts but none in Rust"),
+                Some(expected) => {
+                    let parsed: f64 = factor.parse()
+                        .unwrap_or_else(|_| panic!("'{key}' has a non-numeric factor in units.ts: {factor}"));
+                    assert!(
+                        (parsed - expected).abs() < 1e-9,
+                        "'{key}' converts as {parsed} in units.ts and {expected} in Rust"
+                    );
+                }
+            }
+        }
+    }
+
     /// The reading that got `BACKUP_TABLES` wrong was a human one, so this
     /// checks the order against the schema itself: every table a row points at
     /// must already have been inserted. Adding a table in the wrong place now
