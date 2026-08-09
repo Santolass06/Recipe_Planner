@@ -4163,11 +4163,23 @@ pub async fn price_quotes_all(db: &Database) -> LibsqlResult<Vec<PriceQuoteWithI
 ///
 /// `approximate_unit_weights` is seeded reference data, not the user's, and is
 /// rebuilt by the migrations on any database.
+/// Every user table, **parents before children**.
+///
+/// The restore inserts in this order and deletes in its reverse, so the order
+/// is not cosmetic: a child listed before its parent hits a foreign key that
+/// does not exist yet and rolls the whole restore back. `stock_purchases` used
+/// to sit before `suppliers`, which broke restores for anyone who records where
+/// they shop — see `the_backup_order_puts_every_parent_before_its_children`,
+/// which checks this against the schema instead of trusting the reading.
 const BACKUP_TABLES: &[&str] = &[
-    "settings", "categories", "ingredients", "recipes", "recipe_ingredients",
-    "stock", "stock_purchases", "stock_movements", "suppliers", "price_quotes", "events",
-    "shopping_lists", "shopping_list_items", "meal_plans", "meal_plan_entries",
-    "images", "receipt_imports", "usage_events", "problem_reports",
+    // No foreign keys of their own.
+    "settings", "categories", "suppliers", "events",
+    "shopping_lists", "meal_plans", "images", "receipt_imports",
+    "usage_events", "problem_reports", "approximate_unit_weights",
+    // Depend on the above.
+    "ingredients", "recipes",
+    "recipe_ingredients", "stock", "stock_purchases", "stock_movements",
+    "price_quotes", "shopping_list_items", "meal_plan_entries",
 ];
 
 const BACKUP_FORMAT_VERSION: u32 = 1;
@@ -4242,7 +4254,12 @@ pub async fn backup_export(db: &Database, data_dir: &std::path::Path) -> LibsqlR
     // rows alone would restore recipes pointing at pictures that are gone.
     let mut images = serde_json::Map::new();
     let images_dir = data_dir.join("images");
-    if let Ok(entries) = std::fs::read_dir(&images_dir) {
+    // A missing folder is normal (nothing uploaded yet). A folder that exists
+    // and cannot be read is not: swallowing that writes a backup that silently
+    // has no pictures in it, and the user only finds out restoring.
+    if images_dir.exists() {
+        let entries = std::fs::read_dir(&images_dir)
+            .map_err(|e| libsql::Error::Misuse(format!("could not read the images folder: {e}")))?;
         for entry in entries.flatten() {
             if !entry.path().is_file() {
                 continue;
@@ -4283,8 +4300,10 @@ pub async fn backup_restore(db: &Database, data_dir: &std::path::Path, json: Str
         tx.execute(&format!("DELETE FROM {table}"), ()).await?;
     }
 
+    let mut tables_restored = 0_u32;
     for table in BACKUP_TABLES {
         let Some(table_rows) = tables.get(*table).and_then(|t| t.as_array()) else { continue };
+        tables_restored += 1;
         for row in table_rows {
             let Some(object) = row.as_object() else { continue };
             let columns: Vec<&String> = object.keys().collect();
@@ -4320,7 +4339,10 @@ pub async fn backup_restore(db: &Database, data_dir: &std::path::Path, json: Str
         }
     }
 
-    Ok(BackupRestoreResult { tables_restored: BACKUP_TABLES.len() as u32, rows_restored, images_restored })
+    // The tables the file actually carried, not the ones this build knows about
+    // — a backup from an older version has fewer, and saying otherwise would be
+    // reporting success for data that was never there.
+    Ok(BackupRestoreResult { tables_restored, rows_restored, images_restored })
 }
 
 pub async fn export_data(db: &Database) -> LibsqlResult<ImportData> {
@@ -7296,6 +7318,87 @@ mod audit_2026_07 {
                 .iter().any(|m| m.movement_type == MovementType::Adjustment),
             "the adjustment left no trace in the history"
         );
+    }
+
+    /// Audit 2026-08-05: the restore inserts tables in `BACKUP_TABLES` order,
+    /// which has to be parents-before-children. `stock_purchases` sat before
+    /// `suppliers`, so any purchase carrying a supplier hit a foreign key that
+    /// did not exist yet and rolled the whole restore back — the backup looked
+    /// corrupt to exactly the users who record where they shop.
+    #[tokio::test]
+    async fn a_backup_with_suppliers_can_be_restored() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let supplier = create_supplier(&db, SupplierInput {
+            name: "Talho Central".into(), contact: None, notes: None,
+        }).await.unwrap();
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 500.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 1.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), expiry_date: None,
+            supplier_id: Some(supplier.id), brand: Some("Nacional".into()), notes: None,
+        }).await.unwrap();
+
+        let dir = std::env::temp_dir().join(format!("mise_backup_{}", supplier.id));
+        let json = backup_export(&db, &dir).await.unwrap();
+        let result = backup_restore(&db, &dir, json).await.unwrap();
+
+        assert!(result.rows_restored > 0);
+        let purchases = stock_purchases_list(&db, f.id).await.unwrap();
+        assert_eq!(purchases.len(), 1, "the purchase did not survive the restore");
+        assert_eq!(
+            purchases[0].supplier_id, Some(supplier.id),
+            "the purchase came back without the supplier it was linked to"
+        );
+    }
+
+    /// The reading that got `BACKUP_TABLES` wrong was a human one, so this
+    /// checks the order against the schema itself: every table a row points at
+    /// must already have been inserted. Adding a table in the wrong place now
+    /// fails here instead of failing a user's restore.
+    #[tokio::test]
+    async fn the_backup_order_puts_every_parent_before_its_children() {
+        let db = test_db().await;
+        let conn = get_conn(&db).await.unwrap();
+
+        let mut seen: Vec<&str> = Vec::new();
+        for table in BACKUP_TABLES {
+            let mut rows = conn.query(&format!("PRAGMA foreign_key_list({table})"), ()).await.unwrap();
+            while let Some(row) = rows.next().await.unwrap() {
+                // Column 2 of foreign_key_list is the referenced table.
+                let parent: String = row.get(2).unwrap();
+                if parent == *table {
+                    continue; // self-reference needs no ordering
+                }
+                assert!(
+                    seen.contains(&parent.as_str()),
+                    "BACKUP_TABLES inserts '{table}' before '{parent}', which it points at — \
+                     a restore would fail the foreign key and roll everything back"
+                );
+            }
+            seen.push(table);
+        }
+    }
+
+    /// Every table the app writes to has to be in the backup. One left out is a
+    /// backup that looks complete and silently loses that table on restore.
+    #[tokio::test]
+    async fn the_backup_covers_every_user_table() {
+        let db = test_db().await;
+        let conn = get_conn(&db).await.unwrap();
+
+        let mut rows = conn.query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+            (),
+        ).await.unwrap();
+        let mut missing = Vec::new();
+        while let Some(row) = rows.next().await.unwrap() {
+            let name: String = row.get(0).unwrap();
+            if !BACKUP_TABLES.contains(&name.as_str()) {
+                missing.push(name);
+            }
+        }
+        assert!(missing.is_empty(), "tables absent from BACKUP_TABLES: {missing:?}");
     }
 
     /// Audit 2026-08-05: `stock_movement_add_tx` trusted the unit it was handed
