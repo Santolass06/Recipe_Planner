@@ -97,12 +97,16 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
         r#"
         CREATE TABLE IF NOT EXISTS categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
             kind TEXT NOT NULL CHECK (kind IN ('ingredient', 'recipe')),
             color TEXT,
             icon TEXT,
             sort_order INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            -- Unique per kind, not globally: "Bebidas" is both a recipe
+            -- category and an ingredient category, and they are not the same
+            -- thing. See repair_categories_unique_per_kind.
+            UNIQUE (name, kind)
         );
         "#,
         (),
@@ -299,6 +303,18 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
     conn.execute("CREATE INDEX IF NOT EXISTS idx_meal_plans_created ON meal_plans(created_at);", ()).await?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_meal_plan_entries_plan ON meal_plan_entries(meal_plan_id);", ()).await?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_meal_plan_entries_recipe ON meal_plan_entries(recipe_id);", ()).await?;
+
+    // Migration 022: a category name is unique *within its kind*, not globally.
+    //
+    // `categories` was created with `UNIQUE(name)`, and the seed has "Bebidas"
+    // twice — once for recipes, once for ingredients. `INSERT OR IGNORE` then
+    // silently dropped whichever came second, leaving the ingredient list with
+    // seven of its eight categories and no way to file milk or wine under
+    // drinks. Same name, different kind is a legitimate pair.
+    //
+    // Runs *before* the seed: rebuilding afterwards would leave the missing
+    // category out until the next startup.
+    repair_categories_unique_per_kind(&conn).await?;
 
     // Default categories
     seed_default_categories(&conn).await?;
@@ -561,19 +577,8 @@ async fn run_data_migrations(conn: &Connection) -> LibsqlResult<()> {
     Ok(())
 }
 
-/// Data migration 1 — repair for DOM-01/DOM-02.
-///
-/// `stock_purchase_add` used to store the purchase in whatever unit was typed,
-/// while the stock balance and the weighted average both assume the
-/// ingredient's own unit. Rewrites the historical rows into that unit, keeping
-/// the line total exactly. Rows whose unit belongs to another dimension can't
-/// be converted and are left untouched — there is no right answer for "1 piece
-/// of flour" and inventing one would be the original bug again.
-///
-/// `stock.quantity` is deliberately *not* recomputed: purchases are only one
-/// of its inputs (manual corrections, receipts and seeds also write it), so a
-/// balance rebuilt from purchases alone would be a different lie.
-/// Every `stock_purchases` row already on disk becomes its `purchase` movement,
+/// Data migration 2 — every `stock_purchases` row already on disk becomes its
+/// `purchase` movement,
 /// so the history does not start empty on the day the table appears.
 ///
 /// Idempotent by construction: it only inserts for purchase ids that have no
@@ -604,6 +609,18 @@ async fn backfill_purchase_movements(conn: &Connection) -> LibsqlResult<()> {
     Ok(())
 }
 
+/// Data migration 1 — repair for DOM-01/DOM-02.
+///
+/// `stock_purchase_add` used to store the purchase in whatever unit was typed,
+/// while the stock balance and the weighted average both assume the
+/// ingredient's own unit. Rewrites the historical rows into that unit, keeping
+/// the line total exactly. Rows whose unit belongs to another dimension can't
+/// be converted and are left untouched — there is no right answer for "1 piece
+/// of flour" and inventing one would be the original bug again.
+///
+/// `stock.quantity` is deliberately *not* recomputed: purchases are only one
+/// of its inputs (manual corrections, receipts and seeds also write it), so a
+/// balance rebuilt from purchases alone would be a different lie.
 async fn normalize_stock_purchase_units(conn: &Connection) -> LibsqlResult<()> {
     let mut rows = conn.query(
         "SELECT sp.id, sp.quantity, sp.unit, sp.price_per_unit, i.unit
@@ -655,6 +672,59 @@ async fn add_column_if_missing(conn: &Connection, table: &str, column: &str, dec
         }
     }
     conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"), ()).await?;
+    Ok(())
+}
+
+/// Rebuild `categories` with `UNIQUE(name, kind)` when it still carries the old
+/// global `UNIQUE(name)`.
+///
+/// Ids are copied across unchanged, because `ingredients.category_id` points at
+/// them — a rebuild that renumbered would silently recategorise every
+/// ingredient. Foreign keys are turned off around the swap: with them on,
+/// SQLite rewrites referring tables to follow a renamed table, which is the
+/// opposite of what a rebuild wants.
+async fn repair_categories_unique_per_kind(conn: &Connection) -> LibsqlResult<()> {
+    let needs_rebuild = {
+        let mut rows = conn.query(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'categories'",
+            (),
+        ).await?;
+        match rows.next().await? {
+            Some(row) => {
+                let sql: String = row.get(0)?;
+                sql.contains("name TEXT NOT NULL UNIQUE")
+            }
+            None => false,
+        }
+    };
+    if !needs_rebuild {
+        return Ok(());
+    }
+
+    let _ = conn.query("PRAGMA foreign_keys = OFF", ()).await?;
+    conn.execute(
+        r#"
+        CREATE TABLE categories_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('ingredient', 'recipe')),
+            color TEXT,
+            icon TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE (name, kind)
+        );
+        "#,
+        (),
+    ).await?;
+    conn.execute(
+        "INSERT INTO categories_new (id, name, kind, color, icon, sort_order, created_at)
+         SELECT id, name, kind, color, icon, sort_order, created_at FROM categories",
+        (),
+    ).await?;
+    conn.execute("DROP TABLE categories", ()).await?;
+    conn.execute("ALTER TABLE categories_new RENAME TO categories", ()).await?;
+    let _ = conn.query("PRAGMA foreign_keys = ON", ()).await?;
     Ok(())
 }
 
@@ -7089,6 +7159,72 @@ mod audit_2026_07 {
             exported.ingredients[0].category.as_deref(), Some(category_name.as_str()),
             "the export carried something other than the category's name"
         );
+    }
+
+
+
+    /// Audit 2026-08-05: `categories` was created with `UNIQUE(name)`, but the
+    /// seed lists "Bebidas" as both a recipe category and an ingredient one.
+    /// `INSERT OR IGNORE` dropped the second silently, so the ingredient picker
+    /// only ever offered seven of its eight categories and there was no way to
+    /// file milk or wine under drinks.
+    #[tokio::test]
+    async fn a_category_name_can_repeat_across_kinds() {
+        let db = test_db().await;
+
+        let ingredient_kinds = categories_list(&db, Some("ingredient")).await.unwrap();
+        let recipe_kinds = categories_list(&db, Some("recipe")).await.unwrap();
+
+        assert!(
+            ingredient_kinds.iter().any(|c| c.name == "Bebidas"),
+            "the ingredient list lost 'Bebidas' to the recipe category of the same name"
+        );
+        assert!(recipe_kinds.iter().any(|c| c.name == "Bebidas"));
+        assert_eq!(ingredient_kinds.len(), 8, "an ingredient category went missing");
+        assert_eq!(recipe_kinds.len(), 10);
+
+        // The pair must still be unique within a kind.
+        let conn = get_conn(&db).await.unwrap();
+        let duplicate = conn.execute(
+            "INSERT INTO categories (name, kind, sort_order) VALUES ('Bebidas', 'ingredient', 99)",
+            (),
+        ).await;
+        assert!(duplicate.is_err(), "the same name was accepted twice within one kind");
+    }
+
+    /// The category rebuild must copy ids across unchanged:
+    /// `ingredients.category_id` points at them, so renumbering would
+    /// recategorise every ingredient in silence.
+    #[tokio::test]
+    async fn rebuilding_categories_keeps_the_ids_ingredients_point_at() {
+        let db = test_db().await;
+        let conn = get_conn(&db).await.unwrap();
+
+        // Ids as they are before the repair, including the gaps left by the
+        // seed — a renumbering rebuild would close those gaps and shift rows.
+        let before: Vec<(i64, String, String)> = {
+            let mut rows = conn.query("SELECT id, name, kind FROM categories ORDER BY id", ()).await.unwrap();
+            let mut out = Vec::new();
+            while let Some(row) = rows.next().await.unwrap() {
+                out.push((row.get(0).unwrap(), row.get(1).unwrap(), row.get(2).unwrap()));
+            }
+            out
+        };
+        assert!(before.len() >= 18, "the seed did not run");
+
+        // Idempotent: the table is already in the new shape, so this is a no-op
+        // and must leave every id exactly where it was.
+        repair_categories_unique_per_kind(&conn).await.unwrap();
+
+        let after: Vec<(i64, String, String)> = {
+            let mut rows = conn.query("SELECT id, name, kind FROM categories ORDER BY id", ()).await.unwrap();
+            let mut out = Vec::new();
+            while let Some(row) = rows.next().await.unwrap() {
+                out.push((row.get(0).unwrap(), row.get(1).unwrap(), row.get(2).unwrap()));
+            }
+            out
+        };
+        assert_eq!(before, after, "the repair moved category ids that ingredients point at");
     }
 
     /// S5.2/S5.3: the edition is a runtime value that defaults to Family, and
