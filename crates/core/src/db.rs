@@ -1323,35 +1323,46 @@ pub async fn get_recipe(db: &Database, id: i64) -> LibsqlResult<Recipe> {
 }
 
 /// Create recipe with ingredients
+/// Create a recipe with its ingredient lines.
+///
+/// Transactional: this is the same defect `update_recipe` was fixed for in
+/// TRX-01/DOM-03, and the create side was left behind. A line naming an
+/// ingredient that no longer exists fails partway, and without the transaction
+/// the recipe stayed behind holding whatever lines had already gone in — a
+/// recipe silently missing ingredients, alongside an error toast.
 pub async fn create_recipe(db: &Database, input: RecipeInput) -> LibsqlResult<RecipeWithIngredients> {
     let conn = get_conn(db).await?;
     let tags_json = serde_json::to_string(&input.tags).unwrap_or_else(|_| "[]".to_string());
 
-    conn.execute(
-        "INSERT INTO recipes (name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, image_path, event_id)
-         VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9)",
-        params![input.name, input.category, input.portions, input.instructions, input.prep_time_minutes, input.cook_time_minutes, tags_json, input.image_base64, input.event_id],
-    ).await?;
-
-    let recipe_id = conn.last_insert_rowid();
-
-    // Insert recipe ingredients
+    // Names resolved up front: an open `Rows` holds its read lock, so looking
+    // them up inside the transaction would block the writes below.
+    let mut lines = Vec::with_capacity(input.ingredients.len());
     for ingredient_input in &input.ingredients {
-        let unit_str = ingredient_input.unit.to_string();
-
-        // Get ingredient name for denormalization
         let mut rows = conn.query(
             "SELECT name FROM ingredients WHERE id = ?1",
             params![ingredient_input.ingredient_id],
         ).await?;
-        let ingredient_name: String = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
+        let ingredient_name: String = rows.next().await?
+            .ok_or(libsql::Error::QueryReturnedNoRows)?.get(0)?;
+        lines.push((ingredient_input.ingredient_id, ingredient_name, ingredient_input.quantity, ingredient_input.unit.to_string()));
+    }
 
-        conn.execute(
+    let tx = conn.transaction().await?;
+    tx.execute(
+        "INSERT INTO recipes (name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, image_path, event_id)
+         VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9)",
+        params![input.name, input.category, input.portions, input.instructions, input.prep_time_minutes, input.cook_time_minutes, tags_json, input.image_base64, input.event_id],
+    ).await?;
+    let recipe_id = tx.last_insert_rowid();
+
+    for (ingredient_id, ingredient_name, quantity, unit_str) in lines {
+        tx.execute(
             "INSERT INTO recipe_ingredients (recipe_id, ingredient_id, ingredient_name, quantity, unit)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![recipe_id, ingredient_input.ingredient_id, ingredient_name, ingredient_input.quantity, unit_str],
+            params![recipe_id, ingredient_id, ingredient_name, quantity, unit_str],
         ).await?;
     }
+    tx.commit().await?;
 
     let recipe = get_recipe(db, recipe_id).await?;
     row_to_recipe_with_ingredients(db, recipe).await
@@ -3629,26 +3640,36 @@ pub async fn recipe_copy_to_event(db: &Database, recipe_id: i64, event_id: i64) 
         (row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?);
     drop(rows);
 
-    conn.execute(
+    // Read the lines out before opening the transaction, same reason as
+    // create_recipe: an open `Rows` holds its read lock.
+    let mut lines: Vec<(i64, String, f64, String)> = Vec::new();
+    {
+        let mut rows = conn.query(
+            "SELECT ingredient_id, ingredient_name, quantity, unit FROM recipe_ingredients WHERE recipe_id = ?1",
+            params![recipe_id],
+        ).await?;
+        while let Some(row) = rows.next().await? {
+            lines.push((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?));
+        }
+    }
+
+    // Transactional for the same reason as create_recipe: a copy that fails
+    // partway would leave the event holding a variant missing ingredients.
+    let tx = conn.transaction().await?;
+    tx.execute(
         "INSERT INTO recipes (name, category, portions, instructions, favorite, prep_time_minutes, cook_time_minutes, tags, image_path, event_id, base_recipe_id)
          VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![name, category, portions, instructions, prep_time_minutes, cook_time_minutes, tags, image_path, event_id, recipe_id],
     ).await?;
-    let new_id = conn.last_insert_rowid();
+    let new_id = tx.last_insert_rowid();
 
-    let mut rows = conn.query(
-        "SELECT ingredient_id, ingredient_name, quantity, unit FROM recipe_ingredients WHERE recipe_id = ?1",
-        params![recipe_id],
-    ).await?;
-    while let Some(row) = rows.next().await? {
-        let (ingredient_id, ingredient_name, quantity, unit): (i64, String, f64, String) =
-            (row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?);
-        conn.execute(
+    for (ingredient_id, ingredient_name, quantity, unit) in lines {
+        tx.execute(
             "INSERT INTO recipe_ingredients (recipe_id, ingredient_id, ingredient_name, quantity, unit) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![new_id, ingredient_id, ingredient_name, quantity, unit],
         ).await?;
     }
-    drop(rows);
+    tx.commit().await?;
 
     let recipe = get_recipe(db, new_id).await?;
     row_to_recipe_with_ingredients(db, recipe).await
@@ -7425,6 +7446,40 @@ mod audit_2026_07 {
             "a list vanished from the report because of what it was named: {:?}",
             report.by_recipe.iter().map(|r| r.recipe_name.clone()).collect::<Vec<_>>()
         );
+    }
+
+    /// Audit 2026-08-05: TRX-01/DOM-03 made `update_recipe` transactional and
+    /// left `create_recipe` behind — the same defect, on the sibling path. A
+    /// line naming an ingredient that does not exist failed partway and left
+    /// the recipe behind holding whatever had already gone in.
+    #[tokio::test]
+    async fn a_failed_recipe_creation_leaves_nothing_behind() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let before = recipes_list(&db).await.unwrap().len();
+
+        let result = create_recipe(&db, RecipeInput {
+            name: "Meio criada".into(), category: "Pão".into(), portions: 4,
+            instructions: String::new(),
+            ingredients: vec![
+                RecipeIngredientInput { ingredient_id: f.id, quantity: 100.0, unit: Unit::Gram },
+                // No ingredient has this id.
+                RecipeIngredientInput { ingredient_id: 999_999, quantity: 50.0, unit: Unit::Gram },
+            ],
+            prep_time_minutes: None, cook_time_minutes: None, tags: vec![],
+            image_base64: None, event_id: None,
+        }).await;
+
+        assert!(result.is_err(), "a recipe naming a missing ingredient was accepted");
+        assert_eq!(
+            recipes_list(&db).await.unwrap().len(), before,
+            "the half-created recipe was left behind"
+        );
+
+        let conn = get_conn(&db).await.unwrap();
+        let mut rows = conn.query("SELECT COUNT(*) FROM recipe_ingredients", ()).await.unwrap();
+        let orphans: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+        assert_eq!(orphans, 0, "ingredient lines from the failed recipe were left behind");
     }
 
     /// The reading that got `BACKUP_TABLES` wrong was a human one, so this
