@@ -176,7 +176,7 @@ function BrandBreakdown({ purchases, t }: { purchases: StockPurchase[]; t: T }) 
         {[...byBrand.entries()].map(([brand, { quantity, weightedCost, unit }]) => (
           <div key={brand} className="mono" style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, padding: "6px 10px", background: "var(--inset)", borderRadius: 8 }}>
             <span>{brand}</span>
-            <span style={{ color: "var(--ink-3)" }}>{quantity} {UNIT_LABELS[unit] ?? unit} · {t("stock.purchaseModal.avgPrice")} {(weightedCost / quantity).toFixed(2)} €</span>
+            <span style={{ color: "var(--ink-3)" }}>{quantity} {UNIT_LABELS[unit] ?? unit} · {t("stock.purchaseModal.avgPrice")} {(quantity > 0 ? weightedCost / quantity : 0).toFixed(2)} €</span>
           </div>
         ))}
       </div>
@@ -224,6 +224,13 @@ function PurchaseModal({
             <label className="field-label" htmlFor="purchase-date">{t("stock.purchaseModal.purchaseDate")}</label>
             <input id="purchase-date" type="date" className="input" value={form.purchase_date} onChange={e => setForm((f: any) => ({ ...f, purchase_date: e.target.value }))} />
           </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label className="field-label" htmlFor="purchase-expiry">{t("stock.purchaseModal.expiryDate")}</label>
+            <input id="purchase-expiry" type="date" className="input" value={form.expiry_date} onChange={e => setForm((f: any) => ({ ...f, expiry_date: e.target.value }))} />
+            <p className="text-4 mono" style={{ marginTop: "var(--space-1)" }}>{t("stock.purchaseModal.expiryHint")}</p>
+          </div>
+        </div>
+        <div className="field-row" style={{ display: "flex", gap: "var(--space-3)" }}>
           <div className="field" style={{ flex: 1 }}>
             <label className="field-label" htmlFor="purchase-supplier">{t("stock.purchaseModal.supplier")}</label>
             <select id="purchase-supplier" className="select" value={form.supplier_id ?? ""} onChange={e => {
@@ -340,6 +347,7 @@ export default function StockPage() {
     is_discount: boolean;
     discount_percent: number;
     purchase_date: string;
+    expiry_date: string;
     supplier_id: number | string;
     brand: string;
     notes: string;
@@ -352,6 +360,7 @@ export default function StockPage() {
     is_discount: false,
     discount_percent: 0,
     purchase_date: new Date().toISOString().split("T")[0],
+    expiry_date: "",
     supplier_id: "",
     brand: "",
     notes: "",
@@ -531,6 +540,8 @@ export default function StockPage() {
           // StockPurchaseInput.purchase_date é DateTime<Utc> (chrono) — exige RFC3339.
           // O formulário guarda só "YYYY-MM-DD", por isso acrescentamos a hora UTC.
           purchase_date: `${purchaseForm.purchase_date}T00:00:00Z`,
+          // Empty means "nobody tracked it", which is not the same as expired.
+          expiry_date: purchaseForm.expiry_date ? `${purchaseForm.expiry_date}T00:00:00Z` : null,
           supplier_id: purchaseForm.supplier_id ? Number(purchaseForm.supplier_id) : null,
           brand: purchaseForm.brand || null,
           notes: purchaseForm.notes || null,

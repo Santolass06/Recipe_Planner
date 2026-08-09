@@ -288,6 +288,8 @@ export const pt = {
       quantity: "Quantidade",
       unit: "Unidade",
       pricePerUnit: "Preço por unidade (€)",
+      expiryDate: "Validade",
+      expiryHint: "Opcional. Em branco = não controlada.",
       purchaseDate: "Data da compra",
       supplier: "Fornecedor",
       noneSupplier: "— Nenhum —",

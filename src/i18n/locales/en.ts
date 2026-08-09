@@ -288,6 +288,8 @@ export const en = {
       quantity: "Quantity",
       unit: "Unit",
       pricePerUnit: "Price per Unit (€)",
+      expiryDate: "Expiry",
+      expiryHint: "Optional. Blank means not tracked.",
       purchaseDate: "Purchase Date",
       supplier: "Supplier",
       noneSupplier: "— None —",
