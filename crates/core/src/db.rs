@@ -823,6 +823,43 @@ pub mod migrations {
 // DATABASE QUERY METHODS
 // =====================================================================
 
+/// Parse a timestamp as stored by this database.
+///
+/// Two formats are in the tables and both are ours: columns written by Rust
+/// carry RFC3339, columns filled by the schema's `DEFAULT (datetime('now'))`
+/// carry SQLite's `YYYY-MM-DD HH:MM:SS`, which is UTC without a marker saying
+/// so. Every reader used to try RFC3339 alone and fall back to *now* — so every
+/// row created by the default showed as having been created this instant, and
+/// the price-trend chart drew every point on today.
+fn parse_db_datetime(raw: &str) -> DateTime<Utc> {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(raw) {
+        return dt.with_timezone(&Utc);
+    }
+    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S") {
+        return DateTime::from_naive_utc_and_offset(naive, Utc);
+    }
+    // A date with no time, as `date('now')` writes.
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
+        return DateTime::from_naive_utc_and_offset(date.and_hms_opt(0, 0, 0).unwrap_or_default(), Utc);
+    }
+    Utc::now()
+}
+
+/// Same as `parse_db_datetime` for columns that are legitimately empty, where
+/// "no date" and "a date we could not read" must stay distinguishable.
+fn parse_db_datetime_opt(raw: Option<String>) -> Option<DateTime<Utc>> {
+    let raw = raw?;
+    if let Ok(dt) = DateTime::parse_from_rfc3339(&raw) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(&raw, "%Y-%m-%d %H:%M:%S") {
+        return Some(DateTime::from_naive_utc_and_offset(naive, Utc));
+    }
+    chrono::NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
+        .ok()
+        .map(|d| DateTime::from_naive_utc_and_offset(d.and_hms_opt(0, 0, 0).unwrap_or_default(), Utc))
+}
+
 /// Map a libsql Row to Ingredient
 fn row_to_ingredient(row: &Row) -> LibsqlResult<Ingredient> {
     let unit_str: String = row.get(2)?;
@@ -830,12 +867,8 @@ fn row_to_ingredient(row: &Row) -> LibsqlResult<Ingredient> {
 
     let created_at_str: String = row.get(5)?;
     let updated_at_str: String = row.get(6)?;
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
-    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
+    let created_at = parse_db_datetime(&created_at_str);
+    let updated_at = parse_db_datetime(&updated_at_str);
 
     Ok(Ingredient {
         id: row.get(0)?,
@@ -853,12 +886,8 @@ fn row_to_ingredient(row: &Row) -> LibsqlResult<Ingredient> {
 fn row_to_recipe(row: &Row) -> LibsqlResult<Recipe> {
     let created_at_str: String = row.get(10)?;
     let updated_at_str: String = row.get(11)?;
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
-    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
+    let created_at = parse_db_datetime(&created_at_str);
+    let updated_at = parse_db_datetime(&updated_at_str);
 
     Ok(Recipe {
         id: row.get(0)?,
@@ -914,9 +943,7 @@ fn row_to_stock_item(row: &Row) -> LibsqlResult<StockItem> {
     // SELECT order: s.id(0), s.ingredient_id(1), i.name(2), i.unit(3),
     // s.quantity(4), s.min_quantity(5), s.updated_at(6)
     let updated_at_str: String = row.get(6)?;
-    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
+    let updated_at = parse_db_datetime(&updated_at_str);
 
     Ok(StockItem {
         id: row.get(0)?,
@@ -932,9 +959,7 @@ fn row_to_stock_item(row: &Row) -> LibsqlResult<StockItem> {
 /// Map a libsql Row to ShoppingList
 fn row_to_shopping_list(row: &Row) -> LibsqlResult<ShoppingList> {
     let created_at_str: String = row.get(2)?;
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
+    let created_at = parse_db_datetime(&created_at_str);
 
     Ok(ShoppingList {
         id: Some(row.get(0)?),
@@ -954,14 +979,10 @@ fn row_to_shopping_item(row: &Row) -> LibsqlResult<ShoppingItem> {
     let unit = unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
 
     let purchased_at_str: Option<String> = row.get(12)?;
-    let purchased_at = purchased_at_str
-        .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
-        .map(|dt| dt.with_timezone(&Utc));
+    let purchased_at = parse_db_datetime_opt(purchased_at_str);
 
     let created_at_str: String = row.get(13)?;
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
+    let created_at = parse_db_datetime(&created_at_str);
 
     Ok(ShoppingItem {
         id: row.get(0)?,
@@ -1004,12 +1025,8 @@ fn row_to_supplier(row: &Row) -> LibsqlResult<Supplier> {
     // SELECT order: id(0), name(1), contact(2), notes(3), created_at(4), updated_at(5)
     let created_at_str: String = row.get(4)?;
     let updated_at_str: String = row.get(5)?;
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
-    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
+    let created_at = parse_db_datetime(&created_at_str);
+    let updated_at = parse_db_datetime(&updated_at_str);
 
     Ok(Supplier {
         id: row.get(0)?,
@@ -1027,17 +1044,11 @@ fn row_to_price_quote(row: &Row) -> LibsqlResult<PriceQuote> {
     let valid_to_str: Option<String> = row.get(5)?;
     let created_at_str: String = row.get(7)?;
 
-    let valid_from = valid_from_str
-        .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
-        .map(|dt| dt.with_timezone(&Utc));
+    let valid_from = parse_db_datetime_opt(valid_from_str);
 
-    let valid_to = valid_to_str
-        .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
-        .map(|dt| dt.with_timezone(&Utc));
+    let valid_to = parse_db_datetime_opt(valid_to_str);
 
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
+    let created_at = parse_db_datetime(&created_at_str);
 
     Ok(PriceQuote {
         id: row.get(0)?,
@@ -1893,9 +1904,7 @@ fn row_to_stock_movement(row: &Row) -> LibsqlResult<StockMovement> {
         reason: row.get(8)?,
         production_id: row.get(9)?,
         created_by: row.get(10)?,
-        created_at: DateTime::parse_from_rfc3339(&created_at)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now()),
+        created_at: parse_db_datetime(&created_at),
     })
 }
 
@@ -2106,9 +2115,7 @@ pub async fn expiring_items(db: &Database, within_days: u32) -> LibsqlResult<Vec
     while let Some(row) = rows.next().await? {
         let unit_str: String = row.get(3)?;
         let expiry_str: String = row.get(4)?;
-        let expiry_date = DateTime::parse_from_rfc3339(&expiry_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+        let expiry_date = parse_db_datetime(&expiry_str);
         out.push(ExpiringItem {
             ingredient_id: row.get(0)?,
             ingredient_name: row.get(1)?,
@@ -3513,12 +3520,8 @@ pub async fn delete_supplier(db: &Database, id: i64) -> LibsqlResult<()> {
 fn row_to_event(row: &Row) -> LibsqlResult<Event> {
     let created_at_str: String = row.get(4)?;
     let updated_at_str: String = row.get(5)?;
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
-    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
+    let created_at = parse_db_datetime(&created_at_str);
+    let updated_at = parse_db_datetime(&updated_at_str);
 
     Ok(Event {
         id: row.get(0)?,
@@ -4192,15 +4195,9 @@ pub async fn price_quotes_all(db: &Database) -> LibsqlResult<Vec<PriceQuoteWithI
         let valid_from_str: Option<String> = row.get(4)?;
         let valid_to_str: Option<String> = row.get(5)?;
         let created_at_str: String = row.get(7)?;
-        let valid_from = valid_from_str
-            .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
-            .map(|dt| dt.with_timezone(&Utc));
-        let valid_to = valid_to_str
-            .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
-            .map(|dt| dt.with_timezone(&Utc));
-        let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+        let valid_from = parse_db_datetime_opt(valid_from_str);
+        let valid_to = parse_db_datetime_opt(valid_to_str);
+        let created_at = parse_db_datetime(&created_at_str);
         quotes.push(PriceQuoteWithIngredient {
             id: row.get(0)?,
             ingredient_id: row.get(1)?,
@@ -4542,22 +4539,14 @@ pub async fn import_data(db: &Database, data: ImportData) -> LibsqlResult<Import
 fn row_to_meal_plan(row: &Row) -> LibsqlResult<MealPlan> {
     let created_at_str: String = row.get(4)?;
     let updated_at_str: String = row.get(5)?;
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
-    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
+    let created_at = parse_db_datetime(&created_at_str);
+    let updated_at = parse_db_datetime(&updated_at_str);
 
     Ok(MealPlan {
         id: row.get(0)?,
         name: row.get(1)?,
-        start_date: DateTime::parse_from_rfc3339(&row.get::<String>(2)?)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now()),
-        end_date: DateTime::parse_from_rfc3339(&row.get::<String>(3)?)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now()),
+        start_date: parse_db_datetime(&row.get::<String>(2)?),
+        end_date: parse_db_datetime(&row.get::<String>(3)?),
         created_at,
         updated_at,
     })
@@ -4588,12 +4577,8 @@ fn row_to_meal_plan_entry(row: &Row) -> LibsqlResult<MealPlanEntry> {
 
     let created_at_str: String = row.get(7)?;
     let updated_at_str: String = row.get(8)?;
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
-    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
+    let created_at = parse_db_datetime(&created_at_str);
+    let updated_at = parse_db_datetime(&updated_at_str);
 
     Ok(MealPlanEntry {
         id: row.get(0)?,
@@ -4891,9 +4876,7 @@ pub async fn get_recent_activity(db: &Database, limit: u32) -> LibsqlResult<Vec<
     ).await?;
     while let Some(row) = rows.next().await? {
         let created_at_str: String = row.get(2)?;
-        let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+        let created_at = parse_db_datetime(&created_at_str);
         activities.push(ActivityItem {
             id: row.get(0)?,
             activity_type: row.get(3)?,
@@ -4918,9 +4901,7 @@ pub async fn get_recent_activity(db: &Database, limit: u32) -> LibsqlResult<Vec<
     ).await?;
     while let Some(row) = rows.next().await? {
         let updated_at_str: String = row.get(2)?;
-        let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+        let updated_at = parse_db_datetime(&updated_at_str);
         activities.push(ActivityItem {
             id: row.get(0)?,
             activity_type: row.get(3)?,
@@ -4943,9 +4924,7 @@ pub async fn get_recent_activity(db: &Database, limit: u32) -> LibsqlResult<Vec<
     ).await?;
     while let Some(row) = rows.next().await? {
         let created_at_str: String = row.get(2)?;
-        let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+        let created_at = parse_db_datetime(&created_at_str);
         activities.push(ActivityItem {
             id: row.get(0)?,
             activity_type: row.get(3)?,
@@ -4969,9 +4948,7 @@ pub async fn get_recent_activity(db: &Database, limit: u32) -> LibsqlResult<Vec<
     ).await?;
     while let Some(row) = rows.next().await? {
         let purchased_at_str: String = row.get(2)?;
-        let purchased_at = DateTime::parse_from_rfc3339(&purchased_at_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+        let purchased_at = parse_db_datetime(&purchased_at_str);
         activities.push(ActivityItem {
             id: row.get(0)?,
             activity_type: row.get(3)?,
@@ -5040,9 +5017,7 @@ pub async fn get_upcoming_meals(db: &Database, days: u32) -> LibsqlResult<Vec<Me
 
         // Calculate the planned date based on the meal plan start date and day of week
         let plan_start_str: String = row.get(7)?;
-        let plan_start = DateTime::parse_from_rfc3339(&plan_start_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+        let plan_start = parse_db_datetime(&plan_start_str);
         
         // Calculate the date for this specific day of week
         let day_index = day_of_week.index();
@@ -5124,9 +5099,7 @@ pub async fn get_meal_plan_entries_by_date_range(
 
         // Calculate the planned date based on the meal plan start date and day of week
         let plan_start_str: String = row.get(7)?;
-        let plan_start = DateTime::parse_from_rfc3339(&plan_start_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+        let plan_start = parse_db_datetime(&plan_start_str);
 
         // Calculate the date for this specific day of week
         let day_index = day_of_week.index();
@@ -5190,9 +5163,7 @@ pub async fn get_low_stock_ingredients(db: &Database, threshold: f64) -> LibsqlR
         let unit = unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
 
         let updated_at_str: String = row.get(7)?;
-        let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+        let updated_at = parse_db_datetime(&updated_at_str);
 
         items.push(StockItemWithIngredient {
             id: row.get(0)?,
@@ -5514,9 +5485,7 @@ pub async fn get_meal_stats(db: &Database, days: u32) -> LibsqlResult<MealStats>
             _ => MealType::Lunch,
         };
 
-        let plan_start = DateTime::parse_from_rfc3339(&plan_start_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+        let plan_start = parse_db_datetime(&plan_start_str);
         
         let day_index = day_of_week.index();
         let planned_date = plan_start + chrono::Duration::days(day_index as i64);
@@ -5596,9 +5565,7 @@ pub async fn get_price_trends(db: &Database, ingredient_id: i64, days: u32) -> L
     let mut trends = Vec::new();
     while let Some(row) = rows.next().await? {
         let created_at_str: String = row.get(0)?;
-        let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+        let created_at = parse_db_datetime(&created_at_str);
         let price: f64 = row.get(1)?;
         let supplier: String = row.get(2)?;
         
@@ -5629,9 +5596,7 @@ fn row_to_image(row: &Row) -> LibsqlResult<Image> {
     };
 
     let created_at_str: String = row.get(6)?;
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
+    let created_at = parse_db_datetime(&created_at_str);
 
     Ok(Image {
         id: row.get(0)?,
@@ -5755,9 +5720,7 @@ pub async fn image_read_base64(db: &Database, id: i64, data_dir: &std::path::Pat
 
 fn row_to_problem_report(row: &Row) -> LibsqlResult<ProblemReport> {
     let created_at_str: String = row.get(3)?;
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
+    let created_at = parse_db_datetime(&created_at_str);
 
     Ok(ProblemReport {
         id: row.get(0)?,
@@ -5936,14 +5899,10 @@ fn row_to_stock_purchase(row: &Row) -> LibsqlResult<StockPurchase> {
     let unit = parse_unit_str(&unit_str);
 
     let purchase_date_str: String = row.get(10)?;
-    let purchase_date = DateTime::parse_from_rfc3339(&purchase_date_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
+    let purchase_date = parse_db_datetime(&purchase_date_str);
 
     let created_at_str: String = row.get(15)?;
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
+    let created_at = parse_db_datetime(&created_at_str);
 
     Ok(StockPurchase {
         id: row.get(0)?,
@@ -7568,6 +7527,52 @@ IVA 23% 1,21
             "a real footer line survived: {names:?}"
         );
         assert_eq!(items.len(), 2, "expected exactly the two products: {names:?}");
+    }
+
+
+    /// Audit 2026-08-05: two timestamp formats live in these tables — RFC3339
+    /// where Rust writes the column, SQLite's `YYYY-MM-DD HH:MM:SS` where the
+    /// schema default fills it. Every reader tried RFC3339 alone and fell back
+    /// to *now*, so anything created by the default reported as having been
+    /// created this instant, and the price-trend chart drew every point on today.
+    #[tokio::test]
+    async fn dates_written_by_the_schema_default_are_read_back_as_themselves() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        let conn = get_conn(&db).await.unwrap();
+
+        create_price_quote(&db, PriceQuoteInput {
+            ingredient_id: f.id, supplier: "Doca".into(), price_per_unit: 1.0,
+            valid_from: None, valid_to: None, is_promo: false,
+        }).await.unwrap();
+
+        // Backdate it the way the schema default would have written it.
+        conn.execute(
+            "UPDATE price_quotes SET created_at = '2026-01-15 10:30:00'",
+            (),
+        ).await.unwrap();
+        conn.execute(
+            "UPDATE ingredients SET created_at = '2026-01-15 10:30:00' WHERE id = ?1",
+            params![f.id],
+        ).await.unwrap();
+
+        let quotes = price_quotes_list(&db, f.id).await.unwrap();
+        assert_eq!(
+            quotes[0].created_at.format("%Y-%m-%d").to_string(), "2026-01-15",
+            "the quote's date was replaced by today"
+        );
+
+        let ingredient = ingredients_list(&db).await.unwrap()
+            .into_iter().find(|i| i.id == f.id).unwrap();
+        assert_eq!(
+            ingredient.created_at.format("%Y-%m-%d").to_string(), "2026-01-15",
+            "the ingredient's date was replaced by today"
+        );
+
+        // And the trend series has to spread over the real dates, not bunch up.
+        let trends = get_price_trends(&db, f.id, 3650).await.unwrap();
+        assert_eq!(trends.len(), 1);
+        assert_eq!(trends[0].date.format("%Y-%m-%d").to_string(), "2026-01-15");
     }
 
     /// The reading that got `BACKUP_TABLES` wrong was a human one, so this
