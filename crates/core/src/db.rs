@@ -1295,7 +1295,10 @@ pub async fn recipes_list(db: &Database) -> LibsqlResult<Vec<RecipeWithIngredien
 pub async fn recipes_paginated(db: &Database, page: u32, per_page: u32) -> LibsqlResult<Paginated<Recipe>> {
     let conn = get_conn(db).await?;
     // page is 1-based; page=0 would underflow (public IPC command, caller-supplied).
-    let offset = page.saturating_sub(1) * per_page;
+    // The multiply saturates too: a large page number wraps in release builds,
+    // and both numbers come straight off the IPC boundary.
+    let per_page = per_page.max(1);
+    let offset = page.saturating_sub(1).saturating_mul(per_page);
 
     let mut rows = conn.query("SELECT COUNT(*) FROM recipes WHERE event_id IS NULL", ()).await?;
     let total: i64 = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?.get(0)?;
@@ -1316,6 +1319,7 @@ pub async fn recipes_paginated(db: &Database, page: u32, per_page: u32) -> Libsq
         total,
         page,
         per_page,
+        // per_page is clamped to at least 1 above, so this cannot divide by zero.
         total_pages: ((total as f64) / (per_page as f64)).ceil() as u32,
     })
 }
@@ -2971,8 +2975,13 @@ pub async fn reset_to_defaults(db: &Database) -> LibsqlResult<()> {
 
 /// Delete ALL data from the database (ingredients, recipes, stock, etc.)
 /// but keep the schema (tables) intact. Used by the "Apagar todos os dados"
-/// button in Settings. Deletes in reverse dependency order to avoid FK issues
-/// (even though FKs are not enforced by default in libsql, this is safer).
+/// button in Settings. Deletes children before parents, which is required and
+/// not merely tidy: libsql **does** enforce foreign keys (see ARC-01 in the
+/// 2026-07-26 audit — the comment here used to claim the opposite).
+///
+/// The default categories are seeded back afterwards. They are shipped data,
+/// not user data, and without this the category pickers stayed empty until the
+/// next app start.
 pub async fn delete_all_data(db: &Database) -> LibsqlResult<()> {
     let conn = get_conn(db).await?;
     // Child tables first (dependencies), then parent tables
@@ -2993,6 +3002,12 @@ pub async fn delete_all_data(db: &Database) -> LibsqlResult<()> {
     conn.execute("DELETE FROM categories", ()).await?;
     conn.execute("DELETE FROM settings", ()).await?;
     conn.execute("DELETE FROM events", ()).await?;
+    // "All data" has to include what the user typed into a problem report and
+    // whatever the app recorded about their usage — those are theirs too.
+    conn.execute("DELETE FROM problem_reports", ()).await?;
+    conn.execute("DELETE FROM usage_events", ()).await?;
+
+    seed_default_categories(&conn).await?;
     Ok(())
 }
 
@@ -3025,11 +3040,22 @@ pub async fn seed_demo_data(db: &Database) -> LibsqlResult<()> {
     ];
     let mut cat_ids: HashMap<&str, i64> = HashMap::new();
     for (i, (name, color, icon)) in ingredient_categories.iter().enumerate() {
+        // OR IGNORE, and the id read back rather than taken from
+        // last_insert_rowid: some of these names are already seeded as
+        // defaults, and on a re-seed the insert is a no-op whose rowid belongs
+        // to whatever was written last.
         conn.execute(
-            "INSERT INTO categories (name, kind, color, icon, sort_order) VALUES (?1, 'ingredient', ?2, ?3, ?4)",
+            "INSERT OR IGNORE INTO categories (name, kind, color, icon, sort_order) VALUES (?1, 'ingredient', ?2, ?3, ?4)",
             params![*name, *color, *icon, i as i64],
         ).await?;
-        cat_ids.insert(name, conn.last_insert_rowid());
+        let id: i64 = {
+            let mut rows = conn.query(
+                "SELECT id FROM categories WHERE name = ?1 AND kind = 'ingredient'",
+                params![*name],
+            ).await?;
+            rows.next().await?.ok_or(libsql::Error::QueryReturnedNoRows)?.get(0)?
+        };
+        cat_ids.insert(name, id);
     }
     let recipe_categories: [(&str, &str, &str); 6] = [
         ("Sopas", "#40916c", "🍲"),
@@ -3041,7 +3067,7 @@ pub async fn seed_demo_data(db: &Database) -> LibsqlResult<()> {
     ];
     for (i, (name, color, icon)) in recipe_categories.iter().enumerate() {
         conn.execute(
-            "INSERT INTO categories (name, kind, color, icon, sort_order) VALUES (?1, 'recipe', ?2, ?3, ?4)",
+            "INSERT OR IGNORE INTO categories (name, kind, color, icon, sort_order) VALUES (?1, 'recipe', ?2, ?3, ?4)",
             params![*name, *color, *icon, i as i64],
         ).await?;
     }
