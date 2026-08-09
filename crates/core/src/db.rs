@@ -3848,11 +3848,33 @@ fn parse_quantity_prefix(s: &str) -> (f64, &str) {
 }
 
 /// Recipe sites commonly write quantities with vulgar fraction glyphs ("½ cup") instead
-/// of ASCII ("1/2 cup") — normalize the common ones so `parse_quantity_prefix` sees them.
+/// of ASCII ("1/2 cup") — normalize them so `parse_quantity_prefix` sees them.
+///
+/// Each glyph is replaced by a **space** and then the ASCII fraction. Without the
+/// space, "1½ cups" became "11/2 cups" and parsed as five and a half; with it,
+/// it becomes "1 1/2 cups", which is the mixed fraction the parser already
+/// understands. A leading glyph gains a harmless leading space that
+/// `parse_quantity_prefix` trims.
 fn normalize_vulgar_fractions(s: &str) -> String {
-    s.replace('½', "1/2").replace('¼', "1/4").replace('¾', "3/4")
-        .replace('⅓', "1/3").replace('⅔', "2/3")
-        .replace('⅛', "1/8").replace('⅜', "3/8").replace('⅝', "5/8").replace('⅞', "7/8")
+    const GLYPHS: &[(char, &str)] = &[
+        ('½', "1/2"), ('⅓', "1/3"), ('⅔', "2/3"),
+        ('¼', "1/4"), ('¾', "3/4"),
+        ('⅕', "1/5"), ('⅖', "2/5"), ('⅗', "3/5"), ('⅘', "4/5"),
+        ('⅙', "1/6"), ('⅚', "5/6"),
+        ('⅐', "1/7"), ('⅛', "1/8"), ('⅜', "3/8"), ('⅝', "5/8"), ('⅞', "7/8"),
+        ('⅑', "1/9"), ('⅒', "1/10"),
+    ];
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match GLYPHS.iter().find(|(glyph, _)| *glyph == c) {
+            Some((_, ascii)) => {
+                out.push(' ');
+                out.push_str(ascii);
+            }
+            None => out.push(c),
+        }
+    }
+    out
 }
 
 /// Strip the descriptive clauses recipe ingredient lines often carry — text after the
@@ -6213,16 +6235,27 @@ async fn parse_receipt_text(text: &str) -> Vec<ParsedReceiptItem> {
             continue;
         }
         
-        // Skip common receipt header/footer lines
+        // Skip receipt header/footer lines.
+        //
+        // Matched as **whole words**, not substrings. Substring matching threw
+        // away real products: "iva" is inside "AZEITE OLIVA", "tax" inside
+        // "TAXA"-like brand names, and the line vanished from the import with
+        // nothing to show it had. Multi-word markers are still checked as
+        // phrases, since neither half of "mb way" means anything alone.
+        const SKIP_WORDS: &[&str] = &[
+            "total", "subtotal", "troco", "change", "vlr", "valor",
+            "pagamento", "cartao", "cartão", "dinheiro", "multibanco",
+            "iva", "tax", "receipt", "cupom", "hora", "caixa",
+            "operador", "nif", "contribuinte",
+        ];
+        const SKIP_PHRASES: &[&str] = &["mb way", "nota fiscal"];
+
         let lower = line.to_lowercase();
-        if lower.contains("total") || lower.contains("subtotal") || lower.contains("troco") 
-            || lower.contains("change") || lower.contains("vlr") || lower.contains("valor")
-            || lower.contains("pagamento") || lower.contains("cartao") || lower.contains("dinheiro")
-            || lower.contains("multibanco") || lower.contains("mb way") || lower.contains("iva")
-            || lower.contains("tax") || lower.contains("receipt") || lower.contains("cupom")
-            || lower.contains("nota fiscal") || lower.contains("data") || lower.contains("hora")
-            || lower.contains("caixa") || lower.contains("operador") || lower.contains("nif")
-            || lower.contains("contribuinte") {
+        let is_footer = SKIP_PHRASES.iter().any(|phrase| lower.contains(phrase))
+            || lower
+                .split(|c: char| !c.is_alphanumeric())
+                .any(|word| SKIP_WORDS.contains(&word));
+        if is_footer {
             continue;
         }
         
@@ -7480,6 +7513,61 @@ mod audit_2026_07 {
         let mut rows = conn.query("SELECT COUNT(*) FROM recipe_ingredients", ()).await.unwrap();
         let orphans: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
         assert_eq!(orphans, 0, "ingredient lines from the failed recipe were left behind");
+    }
+
+
+    /// Audit 2026-08-05: "1½ cups" imported as **5.5** cups. The glyph was
+    /// replaced by "1/2" with nothing between it and the preceding digit, so
+    /// "1½" became "11/2" and parsed as eleven halves. The bare "½ cup" form was
+    /// right, which is why it went unnoticed — and "1½" is the commoner of the
+    /// two on recipe sites.
+    #[test]
+    fn a_mixed_vulgar_fraction_is_not_read_as_a_bigger_number() {
+        let cases = [
+            ("1½ cups flour", 1.5, Unit::Cup),
+            ("1¼ teaspoons salt", 1.25, Unit::Teaspoon),
+            ("2¾ pounds beef", 2.75, Unit::Pound),
+            // The forms that already worked must keep working.
+            ("½ cup sugar", 0.5, Unit::Cup),
+            ("2 1/2 cups milk", 2.5, Unit::Cup),
+            ("3 tablespoons oil", 3.0, Unit::Tablespoon),
+        ];
+        for (line, expected, unit) in cases {
+            let parsed = parse_ingredient_line(line);
+            assert!(
+                (parsed.quantity - expected).abs() < 1e-9,
+                "'{line}' parsed as {} instead of {expected}", parsed.quantity
+            );
+            assert_eq!(parsed.unit, unit, "'{line}' got the wrong unit");
+        }
+    }
+
+    /// Audit 2026-08-05: the receipt parser dropped header and footer lines by
+    /// substring, so "iva" inside "AZEITE OLIVA" made a real product look like
+    /// a VAT summary line. The item vanished from the import with nothing to
+    /// say it had.
+    #[tokio::test]
+    async fn the_receipt_parser_keeps_products_whose_names_contain_footer_words() {
+        let text = "\
+MERCADO TESTE
+AZEITE OLIVA EXTRA VIRGEM 1L 6,49
+BANANA 1,2KG 2,50
+TOTAL 8,99
+IVA 23% 1,21
+";
+        let items = parse_receipt_text(text).await;
+        let names: Vec<String> = items.iter().map(|i| i.ingredient_name.to_lowercase()).collect();
+
+        assert!(
+            names.iter().any(|n| n.contains("oliva")),
+            "the olive oil line was thrown away as a VAT footer: {names:?}"
+        );
+        assert!(names.iter().any(|n| n.contains("banana")), "{names:?}");
+        assert!(
+            !names.iter().any(|n| n.starts_with("total")),
+            "a real footer line survived: {names:?}"
+        );
+        assert_eq!(items.len(), 2, "expected exactly the two products: {names:?}");
     }
 
     /// The reading that got `BACKUP_TABLES` wrong was a human one, so this
