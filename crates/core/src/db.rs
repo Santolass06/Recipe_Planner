@@ -2820,10 +2820,28 @@ pub async fn calculate_cost(db: &Database, recipe_id: i64) -> LibsqlResult<CostB
                             approximation_note = Some(note);
                             q
                         }
-                        None => quantity,
+                        None => {
+                            is_approximate = true;
+                            approximation_note = Some(format!(
+                                "'{name}' é medido em {unit_str} na receita e cobrado em {ingredient_unit}; \
+                                 sem equivalência conhecida, a quantidade foi usada como está"
+                            ));
+                            quantity
+                        }
                     }
                 }
-                None => quantity,
+                // No conversion and no approximate weight: the quantity is used
+                // as if it were already in the priced unit, which is a guess.
+                // It has to be flagged — the approximate path was marked and
+                // this one, which is the worse guess, was showing as exact.
+                None => {
+                    is_approximate = true;
+                    approximation_note = Some(format!(
+                        "'{name}' é medido em {unit_str} na receita e cobrado em {ingredient_unit}; \
+                         sem equivalência conhecida, a quantidade foi usada como está"
+                    ));
+                    quantity
+                }
             },
         };
         let line_cost = quantity_in_ingredient_unit * price_per_unit;
@@ -5204,6 +5222,11 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
     // for them. These are the *estimates* written when the list was drawn up,
     // so this section does not reconcile with total_spent above and the
     // frontend must label it as an estimate (same treatment as by_supplier).
+    //
+    // It used to also require the list's *name* to contain "Planeamento",
+    // "Meal Plan" or "Compras". Renaming a list to anything else dropped it out
+    // of the report with no sign that it had — a section called "by list" has
+    // no business deciding which lists count by what they are called.
     let mut rows = conn.query(
         r#"
         SELECT sl.name, COALESCE(SUM(sli.estimated_cost), 0.0) AS total
@@ -5212,7 +5235,6 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
         WHERE sli.purchased = 1
           AND sli.purchased_at IS NOT NULL
           AND date(sli.purchased_at) >= date(?1)
-          AND (sl.name LIKE '%Planeamento%' OR sl.name LIKE '%Meal Plan%' OR sl.name LIKE '%Compras%')
         GROUP BY sl.name
         ORDER BY total DESC
         LIMIT 20
@@ -5275,12 +5297,6 @@ pub async fn get_cost_report(db: &Database, days: u32) -> LibsqlResult<CostRepor
     })
 }
 
-/// Get waste report for a date range
-/// Note: We don't have explicit waste tracking, so we estimate from stock reductions not linked to recipes
-// ponytail: waste estimation needs a stock-decrease-not-explained-by-recipes
-// history we don't track (no waste_log table); this used to run a query and
-// then discard the result before always returning zero — dead work removed,
-// still honestly empty until waste tracking exists.
 /// What was thrown away, from the `loss` movements (Sprint S4).
 ///
 /// Returned zeros until S3 existed, and honestly so — there was no loss log to
@@ -7349,6 +7365,65 @@ mod audit_2026_07 {
         assert_eq!(
             purchases[0].supplier_id, Some(supplier.id),
             "the purchase came back without the supplier it was linked to"
+        );
+    }
+
+    /// Audit 2026-08-05: when a recipe line's unit cannot be converted into the
+    /// one the ingredient is priced in, and no approximate weight is on record,
+    /// `calculate_cost` uses the raw quantity as if the units matched. That is a
+    /// guess, and it was the only guess in the function not flagged as one —
+    /// the *better* guess (an approximate weight) was marked approximate while
+    /// the worse one showed as an exact cost.
+    #[tokio::test]
+    async fn a_cost_that_had_to_guess_the_unit_says_so() {
+        let db = test_db().await;
+        // Priced per gram, but the recipe asks for it in "bunches", which have
+        // no fixed weight and no entry in approximate_unit_weights.
+        let parsley = create_ingredient(&db, IngredientInput {
+            name: "Salsa".into(), unit: Unit::Gram, price_per_unit: 0.01,
+            category: None, event_id: None,
+        }).await.unwrap();
+        let r = cake(&db, vec![RecipeIngredientInput {
+            ingredient_id: parsley.id, quantity: 2.0, unit: Unit::Bunch,
+        }]).await;
+
+        let cost = calculate_cost(&db, r.recipe.id).await.unwrap();
+        let line = &cost.ingredient_costs[0];
+
+        assert!(line.is_approximate, "a guessed cost was reported as exact");
+        assert!(
+            line.approximation_note.as_deref().is_some_and(|n| n.contains("Salsa")),
+            "the note did not say which ingredient was guessed: {:?}", line.approximation_note
+        );
+    }
+
+    /// Audit 2026-08-05: the cost report's "by list" section only counted lists
+    /// whose *name* contained "Planeamento", "Meal Plan" or "Compras". Renaming
+    /// a list dropped it out of the report with no sign that it had.
+    #[tokio::test]
+    async fn the_cost_report_counts_a_list_whatever_it_is_called() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+
+        let list = create_shopping_list(&db, "Feira de sábado".into(), vec![ShoppingItem {
+            id: 0, ingredient_id: Some(f.id), ingredient_name: "Farinha".into(),
+            ingredient_unit: Unit::Gram, needed_quantity: 500.0, stock_quantity: 0.0,
+            to_buy_quantity: 500.0, category: String::new(), estimated_cost: 1.0,
+            purchased: false, notes: None, purchased_at: None, created_at: Utc::now(),
+        }]).await.unwrap();
+
+        let item_id = list.items[0].id;
+        shopping_list_mark_purchased(&db, ShoppingListMarkPurchasedInput {
+            list_id: list.id.unwrap(), item_id,
+            quantity: 500.0, price_per_unit: 0.002,
+            supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        let report = get_cost_report(&db, 30).await.unwrap();
+        assert!(
+            report.by_recipe.iter().any(|r| r.recipe_name == "Feira de sábado"),
+            "a list vanished from the report because of what it was named: {:?}",
+            report.by_recipe.iter().map(|r| r.recipe_name.clone()).collect::<Vec<_>>()
         );
     }
 
