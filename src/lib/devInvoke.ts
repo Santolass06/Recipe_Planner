@@ -221,6 +221,24 @@ const fixtures: Record<string, unknown | ((args: unknown) => unknown)> = {
       };
     }).sort((a, b) => Number(b.uses_expiring) - Number(a.uses_expiring) || b.coverage - a.coverage),
   edition_get: "family",
+  // Without a fixture this resolved to undefined and CostsPage threw reading
+  // `.total_cost` off it — the browser preview crashed where the real app works.
+  cost_calculate: (args: unknown) => {
+    const recipeId = (args as { recipeId?: number })?.recipeId;
+    const r = recipes.find((x) => x.id === recipeId) ?? recipes[0];
+    const ingredient_costs = (r?.ingredients ?? []).map((line) => {
+      const ing = ingredients.find((i) => i.id === line.ingredient_id);
+      const total = line.quantity * (ing?.price_per_unit ?? 0);
+      return {
+        name: ing?.name ?? "?", quantity: line.quantity, unit: line.unit,
+        price_per_unit: ing?.price_per_unit ?? 0, total_cost: total,
+        is_approximate: false, approximation_note: null,
+      };
+    });
+    const total_cost = ingredient_costs.reduce((sum, c) => sum + c.total_cost, 0);
+    return { total_cost, cost_per_portion: total_cost / (r?.portions || 1), ingredient_costs };
+  },
+  cost_analyze: undefined,
   expiring_items: [
     { ingredient_id: 9, ingredient_name: "Natas 35%", quantity: 1, unit: "liter", expiry_date: now, days_left: 2 },
     { ingredient_id: 8, ingredient_name: "Manteiga", quantity: 0.25, unit: "kilogram", expiry_date: now, days_left: -1 },

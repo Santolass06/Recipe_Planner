@@ -88,9 +88,20 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     [dictionaries, language]
   );
 
+  // Nothing renders until the reference dictionary is in.
+  //
+  // Dictionaries load asynchronously, and until they do `t()` returns the key
+  // itself. That is harmless for text but not for a value handed to an API that
+  // validates it: the calendar feeds `t("calendar.locale")` to
+  // `toLocaleDateString`, which threw `RangeError: Invalid language tag:
+  // calendar.locale` and took the whole page down through the error boundary.
+  // Holding the first paint also removes the flash of raw keys that showed on
+  // every cold load.
+  const ready = dictionaries[referenceLanguage] !== undefined;
+
   return (
     <I18nContext.Provider value={{ language, setLanguage, t }}>
-      {children}
+      {ready ? children : null}
     </I18nContext.Provider>
   );
 }
