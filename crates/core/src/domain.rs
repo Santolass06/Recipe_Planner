@@ -165,6 +165,9 @@ pub struct RecipeIngredientInput {
     #[validate(range(min = 1))]
     #[ts(type = "number")]
     pub ingredient_id: i64,
+    /// A negative line would subtract from what a shopping list orders and
+    /// invert the cost of the recipe it belongs to.
+    #[validate(range(min = 0.0))]
     pub quantity: f64,
     pub unit: Unit,
 }
@@ -195,7 +198,11 @@ pub struct RecipeInput {
     #[validate(range(min = 1, max = 1000))]
     pub portions: u32,
     pub instructions: String,
-    #[validate(length(min = 1))]
+    /// `nested` is what makes each line's own validators run. Without it the
+    /// derive only checks the vector's length, and every rule declared on
+    /// `RecipeIngredientInput` was dead code — SEC-003 wired `.validate()` at
+    /// the command funnel and this half was never reached.
+    #[validate(length(min = 1), nested)]
     pub ingredients: Vec<RecipeIngredientInput>,
     pub prep_time_minutes: Option<u32>,
     pub cook_time_minutes: Option<u32>,

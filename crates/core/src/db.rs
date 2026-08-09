@@ -7601,6 +7601,48 @@ IVA 23% 1,21
         assert_eq!(trends[0].date.format("%Y-%m-%d").to_string(), "2026-01-15");
     }
 
+
+    /// Audit 2026-08-05: SEC-003 wired `.validate()` into the command funnel and
+    /// stopped there. Nothing carried `#[validate(nested)]`, so every rule
+    /// declared on a struct held inside another one never ran — a recipe line
+    /// with a negative id and a negative quantity passed validation while the
+    /// same line validated on its own was rejected.
+    #[test]
+    fn a_recipe_line_is_validated_and_not_just_counted() {
+        use validator::Validate;
+
+        let bad_line = RecipeIngredientInput {
+            ingredient_id: -5,
+            quantity: -100.0,
+            unit: Unit::Gram,
+        };
+        assert!(bad_line.validate().is_err(), "the line's own rules stopped working");
+
+        let recipe = RecipeInput {
+            name: "Bolo".into(), category: "Doces".into(), portions: 4,
+            instructions: String::new(),
+            ingredients: vec![bad_line],
+            prep_time_minutes: None, cook_time_minutes: None, tags: vec![],
+            image_base64: None, event_id: None,
+        };
+        assert!(
+            recipe.validate().is_err(),
+            "the recipe accepted a line that is invalid on its own — nested validation is not running"
+        );
+
+        // A well-formed recipe still passes.
+        let good = RecipeInput {
+            name: "Bolo".into(), category: "Doces".into(), portions: 4,
+            instructions: String::new(),
+            ingredients: vec![RecipeIngredientInput {
+                ingredient_id: 1, quantity: 100.0, unit: Unit::Gram,
+            }],
+            prep_time_minutes: None, cook_time_minutes: None, tags: vec![],
+            image_base64: None, event_id: None,
+        };
+        assert!(good.validate().is_ok(), "a valid recipe was rejected");
+    }
+
     /// The reading that got `BACKUP_TABLES` wrong was a human one, so this
     /// checks the order against the schema itself: every table a row points at
     /// must already have been inserted. Adding a table in the wrong place now
