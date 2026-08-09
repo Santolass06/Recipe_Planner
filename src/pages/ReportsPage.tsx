@@ -380,13 +380,19 @@ function StockTrendsTab({ stockTrends, loading, t }: { stockTrends: StockSnapsho
                 const range = max - min || 1;
                 const color = CATEGORY_COLORS[i % CATEGORY_COLORS.length];
 
-                const path = ingredient.data
-                  .map((d, di) => {
-                    const x = 5 + (di / (ingredient.data.length - 1)) * 90;
-                    const y = 300 - 10 - ((d.value - min) / range) * 280;
-                    return `${di === 0 ? "M" : "L"} ${x} ${y}`;
-                  })
-                  .join(" ");
+                // A single point divides by zero and every coordinate comes out
+                // NaN, so the path draws nothing while the ingredient still
+                // shows in the legend. One movement day is the ordinary case
+                // when the history has just started.
+                const span = Math.max(1, ingredient.data.length - 1);
+                const points = ingredient.data.map((d, di) => ({
+                  x: 5 + (di / span) * 90,
+                  y: 300 - 10 - ((d.value - min) / range) * 280,
+                }));
+                const path = points.length === 1
+                  // A line needs two ends; one reading is drawn flat across.
+                  ? `M 5 ${points[0].y} L 95 ${points[0].y}`
+                  : points.map((p, di) => `${di === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 
                 return (
                   <g key={ingredient.name}>

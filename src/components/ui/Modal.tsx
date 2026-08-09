@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useId, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 interface ModalProps {
@@ -11,6 +11,9 @@ interface ModalProps {
 }
 
 export default function Modal({ open, onClose, title, children, footer, wide }: ModalProps) {
+  // `aria-modal` alone leaves a screen reader announcing an unnamed dialog.
+  const titleId = useId();
+
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => { 
@@ -28,10 +31,11 @@ export default function Modal({ open, onClose, title, children, footer, wide }: 
     <div className="modal-backdrop"
          onClick={onClose}
          role="dialog"
-         aria-modal="true">
+         aria-modal="true"
+         aria-labelledby={titleId}>
       <div className={"modal" + (wide ? " wide" : "")}
            onClick={e => e.stopPropagation()}>
-        <h2 className="modal-title">{title}</h2>
+        <h2 className="modal-title" id={titleId}>{title}</h2>
         {children}
         {footer && <div className="modal-footer">{footer}</div>}
       </div>

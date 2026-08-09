@@ -22,9 +22,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const showToast = useCallback((msg: string, type: ToastType = "info") => {
     const id = ++toastId;
     setToasts((prev) => [...prev, { id, msg, type }]);
+    // Errors and warnings stay longer: they carry the detail the user has to
+    // act on — which receipt lines failed, which ingredient was short — and
+    // three seconds is not enough to read a list of names.
+    const ms = type === "err" ? 9000 : type === "warn" ? 6000 : 3000;
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3000);
+    }, ms);
   }, []);
 
   return (
