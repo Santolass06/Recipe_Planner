@@ -332,6 +332,12 @@ export default function SettingsPage() {
       showToast(t("settings.restoreSuccess", { rows: result.rows_restored }), "ok");
       setImportFile(null);
       setPendingRestore(null);
+      // A restore replaces every table, so everything already loaded into the
+      // app — lists, stock, settings, the ids the open pages hold — is now
+      // stale. Writing on top of that would be writing against rows that no
+      // longer exist. Reload rather than leave the user looking at data the
+      // database no longer has.
+      setTimeout(() => window.location.reload(), 1200);
     } catch (e) {
       console.error("backup_restore", e);
       showToast(t(errKey(e, "settings.importError")), "err");
@@ -358,6 +364,9 @@ export default function SettingsPage() {
       setSettings({});
       showToast(t("settings.deleteAllDataSuccess"), "ok");
       setShowDeleteDataConfirm(false);
+      // Same reason as the restore: every page still holds rows that no longer
+      // exist, and acting on them writes against ids that are gone.
+      setTimeout(() => window.location.reload(), 1200);
     } catch (e) {
       showToast(t(errKey(e, "settings.deleteAllDataError")), "err");
     } finally {
@@ -369,6 +378,7 @@ export default function SettingsPage() {
     setSaving(true);
     try {
       await invoke("seed_demo_data");
+      setTimeout(() => window.location.reload(), 1200);
       showToast(t("settings.demoDataSuccess"), "ok");
     } catch (e) {
       showToast(t(errKey(e, "settings.demoDataError")), "err");
