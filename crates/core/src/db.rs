@@ -1540,23 +1540,102 @@ pub async fn upsert_stock(db: &Database, input: StockInput) -> LibsqlResult<Stoc
     get_stock(db, input.ingredient_id).await
 }
 
-/// Update stock quantity
+/// Set the stock of an ingredient to a counted number.
+///
+/// Records the difference as an `Adjustment` movement rather than writing the
+/// cache directly. Since S2 `stock.quantity` is a cache of the movement sum, so
+/// a direct write leaves the two disagreeing — and the next `stock_reconcile`
+/// resolves that disagreement in favour of the movements, throwing the user's
+/// count away. The adjustment is what makes the count part of the history
+/// instead of a contradiction of it.
+///
+/// Works for an ingredient with no stock row yet: the movement's upsert creates
+/// it, where the old direct UPDATE silently matched nothing and then failed
+/// looking the row back up.
 pub async fn update_stock_quantity(db: &Database, ingredient_id: i64, quantity: f64) -> LibsqlResult<StockItem> {
     let conn = get_conn(db).await?;
-    conn.execute(
-        "UPDATE stock SET quantity = ?1, updated_at = datetime('now') WHERE ingredient_id = ?2",
-        params![quantity, ingredient_id],
-    ).await?;
+
+    let (current, unit) = {
+        let mut rows = conn.query(
+            "SELECT COALESCE((SELECT quantity FROM stock WHERE ingredient_id = ?1), 0.0), i.unit
+             FROM ingredients i WHERE i.id = ?1",
+            params![ingredient_id],
+        ).await?;
+        let row = rows.next().await?.ok_or(libsql::Error::QueryReturnedNoRows)?;
+        (row.get::<f64>(0)?, parse_unit_str(&row.get::<String>(1)?))
+    };
+
+    let delta = quantity - current;
+    if delta != 0.0 {
+        let tx = conn.transaction().await?;
+        stock_movement_add_tx(&tx, StockMovementInput {
+            ingredient_id: Some(ingredient_id),
+            recipe_id: None,
+            movement_type: MovementType::Adjustment,
+            quantity: delta.abs(),
+            unit,
+            unit_cost: None,
+            sale_price: None,
+            reason: Some("contagem manual".to_string()),
+            production_id: None,
+            signed_quantity: Some(delta),
+        }).await?;
+        tx.commit().await?;
+    }
 
     // Release the connection before get_stock opens its own (pool deadlock).
     drop(conn);
     get_stock(db, ingredient_id).await
 }
 
-/// Delete stock
+/// Remove an ingredient from the stock list.
+///
+/// Writes an `Adjustment` back down to zero before dropping the row, so the
+/// movement sum ends where the cache does. Deleting the row alone left the
+/// history behind: the next purchase recreated the row holding only that
+/// purchase while the sum still carried everything before it, and the next
+/// reconcile resurrected a total the user had already thrown away.
+///
+/// The movements themselves are kept. They are the history, and a stock line
+/// being removed today does not mean last month's purchases never happened.
 pub async fn delete_stock(db: &Database, ingredient_id: i64) -> LibsqlResult<()> {
     let conn = get_conn(db).await?;
-    conn.execute("DELETE FROM stock WHERE ingredient_id = ?1", params![ingredient_id]).await?;
+
+    let balance: f64 = {
+        let mut rows = conn.query(
+            "SELECT COALESCE(SUM(quantity), 0.0) FROM stock_movements WHERE ingredient_id = ?1",
+            params![ingredient_id],
+        ).await?;
+        match rows.next().await? {
+            Some(row) => row.get(0)?,
+            None => 0.0,
+        }
+    };
+
+    let tx = conn.transaction().await?;
+    if balance != 0.0 {
+        let unit = {
+            let mut rows = tx.query("SELECT unit FROM ingredients WHERE id = ?1", params![ingredient_id]).await?;
+            match rows.next().await? {
+                Some(row) => parse_unit_str(&row.get::<String>(0)?),
+                None => Unit::Gram,
+            }
+        };
+        stock_movement_add_tx(&tx, StockMovementInput {
+            ingredient_id: Some(ingredient_id),
+            recipe_id: None,
+            movement_type: MovementType::Adjustment,
+            quantity: balance.abs(),
+            unit,
+            unit_cost: None,
+            sale_price: None,
+            reason: Some("stock removido".to_string()),
+            production_id: None,
+            signed_quantity: Some(-balance),
+        }).await?;
+    }
+    tx.execute("DELETE FROM stock WHERE ingredient_id = ?1", params![ingredient_id]).await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -1662,9 +1741,33 @@ async fn stock_movement_add_tx(
         ));
     }
 
-    let quantity = signed_movement_quantity(&input)?;
-    let unit_str = input.unit.to_string();
+    let mut quantity = signed_movement_quantity(&input)?;
+    let mut unit_str = input.unit.to_string();
     let type_str = input.movement_type.to_string();
+
+    // Convert into the ingredient's own unit rather than trusting the caller.
+    // Every caller today already passes it, but nothing forced them to, and a
+    // movement in kilograms added raw to a cache kept in grams is DOM-01 again
+    // in a new table. Making it structural is what stops the next caller.
+    if let Some(ingredient_id) = input.ingredient_id {
+        let (name, ingredient_unit_str) = {
+            let mut rows = conn.query(
+                "SELECT name, unit FROM ingredients WHERE id = ?1",
+                params![ingredient_id],
+            ).await?;
+            let row = rows.next().await?.ok_or(libsql::Error::QueryReturnedNoRows)?;
+            (row.get::<String>(0)?, row.get::<String>(1)?)
+        };
+        let ingredient_unit = parse_unit_str(&ingredient_unit_str);
+        if input.unit != ingredient_unit {
+            // Sign is already decided; convert the magnitude and put it back.
+            let (converted, _) = to_ingredient_unit(
+                input.unit, ingredient_unit, quantity.abs(), 0.0, &name,
+            )?;
+            quantity = converted.copysign(quantity);
+            unit_str = ingredient_unit_str;
+        }
+    }
 
     conn.execute(
         r#"
@@ -1690,19 +1793,18 @@ async fn stock_movement_add_tx(
     // Products (recipe-targeted movements) have no `stock` row to keep in step —
     // there is no per-recipe stock table. Their balance is the movement sum.
     if let Some(ingredient_id) = input.ingredient_id {
-        let (name, ingredient_unit_str) = {
+        let name = {
             let mut rows = conn.query(
-                "SELECT name, unit FROM ingredients WHERE id = ?1",
+                "SELECT name FROM ingredients WHERE id = ?1",
                 params![ingredient_id],
             ).await?;
-            let row = rows.next().await?.ok_or(libsql::Error::QueryReturnedNoRows)?;
-            (row.get::<String>(0)?, row.get::<String>(1)?)
+            rows.next().await?.ok_or(libsql::Error::QueryReturnedNoRows)?.get::<String>(0)?
         };
         conn.execute(
             "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity, updated_at)
              VALUES (?1, ?2, ?3, ?4, 0, datetime('now'))
              ON CONFLICT(ingredient_id) DO UPDATE SET quantity = quantity + ?4, updated_at = datetime('now')",
-            params![ingredient_id, name, ingredient_unit_str, quantity],
+            params![ingredient_id, name, unit_str.clone(), quantity],
         ).await?;
     }
 
@@ -1712,7 +1814,9 @@ async fn stock_movement_add_tx(
         recipe_id: input.recipe_id,
         movement_type: input.movement_type,
         quantity,
-        unit: input.unit,
+        // What was stored, not what was asked for — the two differ whenever the
+        // caller's unit had to be converted into the ingredient's.
+        unit: parse_unit_str(&unit_str),
         unit_cost: input.unit_cost,
         sale_price: input.sale_price,
         reason: input.reason,
@@ -7162,6 +7266,100 @@ mod audit_2026_07 {
     }
 
 
+
+    /// Audit 2026-08-05: since S2, `stock.quantity` is a cache of the movement
+    /// sum — but the manual "Ajustar" path wrote the cache directly with no
+    /// movement behind it. A reconcile then found the two disagreeing and
+    /// "corrected" the cache, silently throwing the user's correction away.
+    #[tokio::test]
+    async fn a_manual_adjustment_survives_a_reconcile() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 1000.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 2.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        // The user counts the shelf and says it is really 700, not 1000.
+        update_stock_quantity(&db, f.id, 700.0).await.unwrap();
+        assert_eq!(get_stock(&db, f.id).await.unwrap().quantity, 700.0);
+
+        stock_reconcile(&db).await.unwrap();
+
+        assert_eq!(
+            get_stock(&db, f.id).await.unwrap().quantity, 700.0,
+            "the reconcile threw away the user's manual count"
+        );
+        assert!(
+            stock_movements_for_ingredient(&db, f.id, 10).await.unwrap()
+                .iter().any(|m| m.movement_type == MovementType::Adjustment),
+            "the adjustment left no trace in the history"
+        );
+    }
+
+    /// Audit 2026-08-05: `stock_movement_add_tx` trusted the unit it was handed
+    /// and added the raw number to a cache kept in another one — DOM-01's exact
+    /// shape, in the table built to replace it. Every caller happened to pass
+    /// the right unit; nothing made them.
+    #[tokio::test]
+    async fn a_movement_in_another_unit_is_converted_not_trusted() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+
+        // A loss of one kilogram against a flour tracked in grams.
+        let movement = stock_movement_add(&db, StockMovementInput {
+            ingredient_id: Some(f.id), recipe_id: None,
+            movement_type: MovementType::Loss, quantity: 1.0, unit: Unit::Kilogram,
+            unit_cost: None, sale_price: None, reason: None, production_id: None,
+            signed_quantity: None,
+        }).await.unwrap();
+
+        assert_eq!(movement.quantity, -1000.0, "the kilogram was stored without conversion");
+        assert_eq!(movement.unit, Unit::Gram, "the movement kept the caller's unit");
+        assert_eq!(get_stock(&db, f.id).await.unwrap().quantity, -1000.0);
+
+        // An unconvertible pair is still refused by name rather than guessed.
+        let err = stock_movement_add(&db, StockMovementInput {
+            ingredient_id: Some(f.id), recipe_id: None,
+            movement_type: MovementType::Loss, quantity: 1.0, unit: Unit::Liter,
+            unit_cost: None, sale_price: None, reason: None, production_id: None,
+            signed_quantity: None,
+        }).await.unwrap_err().to_string();
+        assert!(err.contains("Farinha"), "the refusal did not name the ingredient: {err}");
+    }
+
+    /// Audit 2026-08-05: deleting a stock row left its movements behind. The
+    /// next purchase recreated the row holding just that purchase, while the
+    /// movement sum still carried the whole history — so a reconcile inflated
+    /// the stock back to a total that had already been thrown away.
+    #[tokio::test]
+    async fn deleting_stock_does_not_leave_a_history_that_resurrects_it() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 1000.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 2.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        delete_stock(&db, f.id).await.unwrap();
+
+        // A fresh purchase of 50 after the wipe.
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 50.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 0.1, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+        assert_eq!(get_stock(&db, f.id).await.unwrap().quantity, 50.0);
+
+        stock_reconcile(&db).await.unwrap();
+
+        assert_eq!(
+            get_stock(&db, f.id).await.unwrap().quantity, 50.0,
+            "the reconcile resurrected stock that had been deleted"
+        );
+    }
 
     /// Audit 2026-08-05: `categories` was created with `UNIQUE(name)`, but the
     /// seed lists "Bebidas" as both a recipe category and an ingredient one.
