@@ -102,6 +102,9 @@ export default function ImageUpload({
         setUploading(false);
       }
     };
+    // A read that fails silently leaves the user staring at a picker that did
+    // nothing.
+    reader.onerror = () => showToast(t(errKey(reader.error, "imageUpload.uploadError")), "err");
     reader.readAsDataURL(file);
   };
 

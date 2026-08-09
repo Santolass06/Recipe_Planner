@@ -5656,7 +5656,10 @@ async fn save_base64_image(base64: &str, entity_type: &str, entity_id: i64, data
     } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
         "image/webp"
     } else {
-        "image/jpeg"
+        // Refuse rather than guess. This used to assume JPEG, so a PDF or a
+        // text file was stored as .jpg with an image mime type and rendered as
+        // a broken picture with nothing saying why.
+        return Err("O ficheiro não é uma imagem (JPEG, PNG, GIF ou WebP).".to_string());
     };
 
     // Get extension
@@ -7708,6 +7711,41 @@ IVA 23% 1,21
                 }
             }
         }
+    }
+
+    /// Audit 2026-08-09: the image upload detected the type from magic bytes
+    /// and assumed JPEG for anything it did not recognise, so a PDF or a text
+    /// file was stored as `.jpg` with an image mime type and rendered as a
+    /// broken picture with nothing saying why.
+    #[tokio::test]
+    async fn uploading_something_that_is_not_an_image_is_refused() {
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        let db = test_db().await;
+        let dir = std::env::temp_dir().join("mise_image_probe");
+        let ingredient = flour(&db, Unit::Gram, 0.002).await;
+
+        let not_an_image = STANDARD.encode(b"%PDF-1.7\nnot a picture at all");
+        let err = image_upload(&db, ImageUploadInput {
+            entity_type: ImageEntityType::Ingredient,
+            entity_id: ingredient.id,
+            base64: not_an_image,
+            mime_type: "image/jpeg".to_string(),
+        }, &dir).await.unwrap_err();
+        assert!(err.to_string().contains("imagem"), "the refusal did not explain itself: {err}");
+
+        // A real PNG still goes through.
+        let png = STANDARD.encode([
+            0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13,
+        ]);
+        assert!(
+            image_upload(&db, ImageUploadInput {
+                entity_type: ImageEntityType::Ingredient,
+                entity_id: ingredient.id,
+                base64: png,
+                mime_type: "image/png".to_string(),
+            }, &dir).await.is_ok(),
+            "a valid PNG was refused"
+        );
     }
 
     /// The reading that got `BACKUP_TABLES` wrong was a human one, so this
