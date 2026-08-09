@@ -640,6 +640,7 @@ export const pt = {
     createIngredientError: "Falha ao criar ingrediente: {name}",
     nothingToImport: "Nada para importar",
     purchasesRegistered: "{count} compras registadas e stock actualizado",
+    someLinesFailed: "Não foi possível importar: {names}. As restantes ficaram registadas; corrige estas e tenta outra vez.",
     importError: "Erro ao importar",
     importedNote: "Importado via OCR de talão",
     steps: { upload: "Carregar", extract: "Extração", review: "Revisão", confirm: "Confirmar" },

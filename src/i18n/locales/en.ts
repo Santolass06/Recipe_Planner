@@ -640,6 +640,7 @@ export const en = {
     createIngredientError: "Failed to create ingredient: {name}",
     nothingToImport: "Nothing to import",
     purchasesRegistered: "{count} purchases registered and stock updated",
+    someLinesFailed: "Could not import: {names}. The rest were recorded; fix these and try again.",
     importError: "Error importing",
     importedNote: "Imported via receipt OCR",
     steps: { upload: "Upload", extract: "Extract", review: "Review", confirm: "Confirm" },

@@ -295,35 +295,56 @@ export default function ReceiptScannerPage() {
     const toImport = parsedLines.filter(l => l.include);
     if (toImport.length === 0) { showToast(t("receiptScanner.nothingToImport"), "warn"); return; }
     setProcessing(true);
+    // Each line is its own transaction on the backend, so a failure partway
+    // leaves the earlier ones already written. Retrying the whole receipt would
+    // then import those twice — so the lines that went in are dropped from the
+    // list as they succeed, and only the failures are left to retry.
+    const imported: ParsedLine[] = [];
+    const failed: string[] = [];
     try {
       for (const line of toImport) {
-        const ingId = await findOrCreateIngredient(line);
-        await invoke("stock_purchase_add", {
-          input: {
-            ingredient_id: ingId,
-            quantity: line.quantity,
-            unit: line.unit,
-            price_per_unit: unitPrice(line),
-            total_price: line.price,
-            is_discount: line.is_discount,
-            discount_percent: line.discount_percent,
-            purchase_date: new Date().toISOString(),
-            supplier_id: selectedSupplier ? selectedSupplier : null,
-            notes: t("receiptScanner.importedNote"),
-          },
-        });
+        try {
+          const ingId = await findOrCreateIngredient(line);
+          await invoke("stock_purchase_add", {
+            input: {
+              ingredient_id: ingId,
+              quantity: line.quantity,
+              unit: line.unit,
+              price_per_unit: unitPrice(line),
+              total_price: line.price,
+              is_discount: line.is_discount,
+              discount_percent: line.discount_percent,
+              purchase_date: new Date().toISOString(),
+              expiry_date: null,
+              supplier_id: selectedSupplier ? selectedSupplier : null,
+              notes: t("receiptScanner.importedNote"),
+            },
+          });
+          imported.push(line);
+        } catch (e) {
+          console.error("receipt line", line.name, e);
+          failed.push(line.name);
+        }
       }
-      showToast(t("receiptScanner.purchasesRegistered", { count: toImport.length }), "ok");
+
+      if (imported.length > 0) {
+        showToast(t("receiptScanner.purchasesRegistered", { count: imported.length }), "ok");
+      }
+      if (failed.length > 0) {
+        // Named, not counted: the user has to know which lines to fix.
+        showToast(t("receiptScanner.someLinesFailed", { names: failed.join(", ") }), "err");
+        setParsedLines(l => l.filter(line => !imported.includes(line)));
+        return;
+      }
+
       setImportSummary({
-        count: toImport.length,
-        total: toImport.reduce((s, l) => s + l.price, 0),
+        count: imported.length,
+        total: imported.reduce((s, l) => s + l.price, 0),
       });
       setParsedLines([]);
       setShowResults(false);
       setImage(null);
       setImageFile(null);
-    } catch (e) {
-      showToast(t(errKey(e, "receiptScanner.importError")), "err");
     } finally {
       setProcessing(false);
     }
