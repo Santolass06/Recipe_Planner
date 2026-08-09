@@ -6,6 +6,7 @@ import IngredientAvatar from "../components/IngredientAvatar";
 import ImageUpload from "../components/ImageUpload";
 import { useI18n } from "../i18n";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
+import type { Category } from "../../crates/core/bindings/Category";
 import { UNIT_LABELS_FULL as UNIT_LABELS, UNIT_LABELS_SHORT as UNIT_SHORT } from "../lib/units";
 import { errKey } from "../lib/errors";
 
@@ -18,10 +19,11 @@ const getUnitGroups = (t: T) => [
   { label: t("ingredients.unitGroups.count"), units: ["piece", "dozen"] },
 ];
 
-const EMPTY_FORM = { name: "", unit: "gram", price_per_unit: 0 };
+const EMPTY_FORM = { name: "", unit: "gram", price_per_unit: 0, category_id: "" as number | "" };
 
 export default function IngredientsPage() {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
   const [editing, setEditing] = useState<Ingredient | null>(null);
@@ -42,6 +44,12 @@ export default function IngredientsPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    invoke<Category[]>("categories_list", { kind: "ingredient" })
+      .then(c => setCategories(c ?? []))
+      .catch(e => console.error("categories_list", e));
+  }, []);
+
   function openCreate() {
     setForm(EMPTY_FORM);
     setEditing(null);
@@ -49,7 +57,7 @@ export default function IngredientsPage() {
   }
 
   function openEdit(ing: Ingredient) {
-    setForm({ name: ing.name, unit: ing.unit, price_per_unit: ing.price_per_unit });
+    setForm({ name: ing.name, unit: ing.unit, price_per_unit: ing.price_per_unit, category_id: ing.category_id ?? "" });
     setEditing(ing);
     setModal("edit");
   }
@@ -66,6 +74,7 @@ export default function IngredientsPage() {
             name: form.name.trim(),
             unit: form.unit,
             price_per_unit: form.price_per_unit,
+            category_id: form.category_id === "" ? null : form.category_id,
           },
         });
         showToast(t("ingredients.created"), "ok");
@@ -76,6 +85,7 @@ export default function IngredientsPage() {
             name: form.name.trim(),
             unit: form.unit,
             price_per_unit: form.price_per_unit,
+            category_id: form.category_id === "" ? null : form.category_id,
           },
         });
         showToast(t("ingredients.updated"), "ok");
@@ -256,6 +266,20 @@ export default function IngredientsPage() {
                         <option key={u} value={u}>{UNIT_LABELS[u]}</option>
                       ))}
                     </optgroup>
+                  ))}
+                </select>
+              </div>
+
+              <div className="field">
+                <label htmlFor="ingredient-category">{t("ingredients.colCategory")}</label>
+                <select
+                  id="ingredient-category"
+                  value={form.category_id}
+                  onChange={e => setForm(f => ({ ...f, category_id: e.target.value === "" ? "" : Number(e.target.value) }))}
+                >
+                  <option value="">{t("ingredients.noCategory")}</option>
+                  {categories.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
               </div>

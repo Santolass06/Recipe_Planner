@@ -861,6 +861,10 @@ fn parse_db_datetime_opt(raw: Option<String>) -> Option<DateTime<Utc>> {
 }
 
 /// Map a libsql Row to Ingredient
+/// Map a row to `Ingredient`, with `effective_price_per_unit` copied from the
+/// catalogue price. Only for paths where no purchase history can exist yet
+/// (a just-created ingredient); everything that returns existing ingredients
+/// goes through `row_to_ingredient_priced`.
 fn row_to_ingredient(row: &Row) -> LibsqlResult<Ingredient> {
     let unit_str: String = row.get(2)?;
     let unit = unit_str.parse::<Unit>().unwrap_or(Unit::Gram);
@@ -875,6 +879,7 @@ fn row_to_ingredient(row: &Row) -> LibsqlResult<Ingredient> {
         name: row.get(1)?,
         unit,
         price_per_unit: row.get(3)?,
+        effective_price_per_unit: row.get(3)?,
         category_id: row.get(4)?,
         favorite: row.get(7)?,
         created_at,
@@ -1075,9 +1080,17 @@ pub async fn ingredients_list(db: &Database) -> LibsqlResult<Vec<Ingredient>> {
         (),
     ).await?;
 
+    // Collected before pricing: an open `Rows` holds its read lock, and the
+    // price lookup queries the same connection.
     let mut ingredients = Vec::new();
     while let Some(row) = rows.next().await? {
         ingredients.push(row_to_ingredient(&row)?);
+    }
+    drop(rows);
+
+    for ingredient in &mut ingredients {
+        ingredient.effective_price_per_unit =
+            weighted_avg_stock_price(&conn, ingredient.id, ingredient.price_per_unit).await?;
     }
     Ok(ingredients)
 }
@@ -1091,9 +1104,17 @@ pub async fn event_ingredients_list(db: &Database, event_id: i64) -> LibsqlResul
         params![event_id],
     ).await?;
 
+    // Collected before pricing: an open `Rows` holds its read lock, and the
+    // price lookup queries the same connection.
     let mut ingredients = Vec::new();
     while let Some(row) = rows.next().await? {
         ingredients.push(row_to_ingredient(&row)?);
+    }
+    drop(rows);
+
+    for ingredient in &mut ingredients {
+        ingredient.effective_price_per_unit =
+            weighted_avg_stock_price(&conn, ingredient.id, ingredient.price_per_unit).await?;
     }
     Ok(ingredients)
 }
@@ -1168,7 +1189,7 @@ pub async fn create_ingredient(db: &Database, input: IngredientInput) -> LibsqlR
     let conn = get_conn(db).await?;
     let unit_str = input.unit.to_string();
 
-    let category_id: Option<i64> = input.category.and_then(|c| c.parse().ok());
+    let category_id = input.category_id;
 
     conn.execute(
         "INSERT INTO ingredients (name, unit, price_per_unit, category_id, favorite, event_id)
@@ -1183,8 +1204,11 @@ pub async fn create_ingredient(db: &Database, input: IngredientInput) -> LibsqlR
         params![id],
     ).await?;
     let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
-
-    row_to_ingredient(&row)
+    let mut ingredient = row_to_ingredient(&row)?;
+    drop(rows);
+    ingredient.effective_price_per_unit =
+        weighted_avg_stock_price(&conn, ingredient.id, ingredient.price_per_unit).await?;
+    Ok(ingredient)
 }
 
 /// Update ingredient
@@ -1192,7 +1216,7 @@ pub async fn update_ingredient(db: &Database, id: i64, input: IngredientInput) -
     let conn = get_conn(db).await?;
     let unit_str = input.unit.to_string();
 
-    let category_id: Option<i64> = input.category.and_then(|c| c.parse().ok());
+    let category_id = input.category_id;
 
     conn.execute(
         "UPDATE ingredients SET name = ?1, unit = ?2, price_per_unit = ?3, category_id = ?4, updated_at = datetime('now')
@@ -1206,8 +1230,11 @@ pub async fn update_ingredient(db: &Database, id: i64, input: IngredientInput) -
         params![id],
     ).await?;
     let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
-
-    row_to_ingredient(&row)
+    let mut ingredient = row_to_ingredient(&row)?;
+    drop(rows);
+    ingredient.effective_price_per_unit =
+        weighted_avg_stock_price(&conn, ingredient.id, ingredient.price_per_unit).await?;
+    Ok(ingredient)
 }
 
 /// Delete ingredient
@@ -1232,8 +1259,11 @@ pub async fn toggle_ingredient_favorite(db: &Database, id: i64) -> LibsqlResult<
         params![id],
     ).await?;
     let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
-
-    row_to_ingredient(&row)
+    let mut ingredient = row_to_ingredient(&row)?;
+    drop(rows);
+    ingredient.effective_price_per_unit =
+        weighted_avg_stock_price(&conn, ingredient.id, ingredient.price_per_unit).await?;
+    Ok(ingredient)
 }
 
 /// List all recipes
@@ -2758,27 +2788,63 @@ pub async fn shopping_list_clear_purchased(
 }
 
 
-/// Weighted-average price per unit across an ingredient's purchase history
-/// (Fase 3.1: multiple brands/suppliers in stock, weighted by quantity
-/// bought). Falls back to `ingredients.price_per_unit` when there's no
-/// purchase history yet. ponytail: no lot-depletion tracking exists today
-/// (stock consumption is a manual aggregate set, see PROJECT.md 3.1), so
-/// this weights by quantity ever purchased, not quantity currently on the
-/// shelf — revisit if/when lot-remaining tracking is built.
+/// How far back the weighted average looks. Ninety days is roughly a season of
+/// buying: long enough that a single odd purchase does not swing the number,
+/// short enough that last year's prices stop pretending to be this year's.
+const PRICE_WINDOW_DAYS: i64 = 90;
+
+/// Weighted-average price per unit for an ingredient, weighted by quantity
+/// bought (Fase 3.1: several brands and suppliers in stock at once).
+///
+/// **DOM-05, decided 2026-08-09: a time window, not FIFO.** FIFO needs to know
+/// which lot was consumed, and nothing tracks that — the movements record how
+/// much was used, never from which purchase. A window is a WHERE clause and
+/// answers the question that actually hurt: an ingredient bought at three
+/// prices over two years was being costed at the average of all three.
+///
+/// Three steps, each a fallback for the one before:
+/// 1. purchases inside the window — what the thing costs lately;
+/// 2. every purchase ever — for an ingredient not bought in a while, its own
+///    old prices still beat a catalogue number nobody has revisited;
+/// 3. `ingredients.price_per_unit` — never bought, so nothing else to go on.
+///
+/// Without step 2 an ingredient would jump to the catalogue price the day its
+/// last purchase aged out of the window.
+///
+/// ponytail: weights by quantity purchased, not by what is still on the shelf.
+/// Lot-remaining tracking would change that; it does not exist yet.
 async fn weighted_avg_stock_price(conn: &Connection, ingredient_id: i64, fallback: f64) -> LibsqlResult<f64> {
-    let mut rows = conn.query(
-        "SELECT SUM(quantity * price_per_unit), SUM(quantity) FROM stock_purchases WHERE ingredient_id = ?1",
-        params![ingredient_id],
-    ).await?;
-    if let Some(row) = rows.next().await? {
+    let since = (Utc::now() - chrono::Duration::days(PRICE_WINDOW_DAYS)).to_rfc3339();
+
+    async fn average(conn: &Connection, sql: &str, params: impl libsql::params::IntoParams) -> LibsqlResult<Option<f64>> {
+        let mut rows = conn.query(sql, params).await?;
+        let Some(row) = rows.next().await? else { return Ok(None) };
         let weighted_sum: Option<f64> = row.get(0)?;
         let total_qty: Option<f64> = row.get(1)?;
-        if let (Some(sum), Some(qty)) = (weighted_sum, total_qty) {
-            if qty > 0.0 {
-                return Ok(sum / qty);
-            }
-        }
+        Ok(match (weighted_sum, total_qty) {
+            (Some(sum), Some(qty)) if qty > 0.0 => Some(sum / qty),
+            _ => None,
+        })
     }
+
+    if let Some(price) = average(
+        conn,
+        "SELECT SUM(quantity * price_per_unit), SUM(quantity) FROM stock_purchases
+         WHERE ingredient_id = ?1 AND date(purchase_date) >= date(?2)",
+        params![ingredient_id, since],
+    ).await? {
+        return Ok(price);
+    }
+
+    if let Some(price) = average(
+        conn,
+        "SELECT SUM(quantity * price_per_unit), SUM(quantity) FROM stock_purchases
+         WHERE ingredient_id = ?1",
+        params![ingredient_id],
+    ).await? {
+        return Ok(price);
+    }
+
     Ok(fallback)
 }
 
@@ -4480,6 +4546,27 @@ pub async fn export_data(db: &Database) -> LibsqlResult<ImportData> {
 }
 
 /// Import data
+/// Find the ingredient-kind category with this name, creating it if it is not
+/// there yet. Only the import uses this: everywhere else a category arrives as
+/// an id already.
+async fn resolve_ingredient_category(db: &Database, name: &str) -> LibsqlResult<i64> {
+    let conn = get_conn(db).await?;
+    {
+        let mut rows = conn.query(
+            "SELECT id FROM categories WHERE name = ?1 AND kind = 'ingredient'",
+            params![name],
+        ).await?;
+        if let Some(row) = rows.next().await? {
+            return row.get(0);
+        }
+    }
+    conn.execute(
+        "INSERT INTO categories (name, kind, sort_order) VALUES (?1, 'ingredient', 999)",
+        params![name],
+    ).await?;
+    Ok(conn.last_insert_rowid())
+}
+
 pub async fn import_data(db: &Database, data: ImportData) -> LibsqlResult<ImportResult> {
     let mut result = ImportResult {
         ingredients_created: 0,
@@ -4490,11 +4577,26 @@ pub async fn import_data(db: &Database, data: ImportData) -> LibsqlResult<Import
     };
 
     for ing in data.ingredients {
+        // The export writes the category as a name, so the import is where a
+        // name becomes an id. Resolve-or-create, otherwise an export/import
+        // round trip quietly drops every category it carried.
+        let category_id = match ing.category.as_deref() {
+            Some(name) if !name.trim().is_empty() => {
+                match resolve_ingredient_category(db, name.trim()).await {
+                    Ok(id) => Some(id),
+                    Err(e) => {
+                        result.errors.push(e.to_string());
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
         let input = IngredientInput {
             name: ing.name,
             unit: ing.unit,
             price_per_unit: ing.price_per_unit,
-            category: ing.category,
+            category_id,
             event_id: None,
         };
         match create_ingredient(db, input).await {
@@ -6524,7 +6626,7 @@ mod fase3_stock_tests {
     async fn stock_purchase_round_trips_brand_and_supplier() {
         let db = test_db().await;
         let ingredient = create_ingredient(&db, IngredientInput {
-            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.0, category: None, event_id: None,
+            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.0, category_id: None, event_id: None,
         }).await.unwrap();
         let supplier = create_supplier(&db, SupplierInput {
             name: "Continente".into(), contact: None, notes: None,
@@ -6559,7 +6661,7 @@ mod fase3_stock_tests {
     async fn recipe_cost_uses_weighted_average_across_brands() {
         let db = test_db().await;
         let ingredient = create_ingredient(&db, IngredientInput {
-            name: "Azeite".into(), unit: Unit::Liter, price_per_unit: 10.0, category: None, event_id: None,
+            name: "Azeite".into(), unit: Unit::Liter, price_per_unit: 10.0, category_id: None, event_id: None,
         }).await.unwrap();
 
         // 1L at 4€ + 3L at 8€ -> weighted avg = (4 + 24) / 4 = 7€/L
@@ -6587,7 +6689,7 @@ mod fase3_stock_tests {
     async fn marking_shopping_item_purchased_creates_a_lot() {
         let db = test_db().await;
         let ingredient = create_ingredient(&db, IngredientInput {
-            name: "Leite".into(), unit: Unit::Liter, price_per_unit: 1.0, category: None, event_id: None,
+            name: "Leite".into(), unit: Unit::Liter, price_per_unit: 1.0, category_id: None, event_id: None,
         }).await.unwrap();
         let list = create_shopping_list(&db, "Lista".into(), vec![]).await.unwrap();
         let item = shopping_list_add_item(&db, list.id.unwrap(), ShoppingItemInput {
@@ -6617,7 +6719,7 @@ mod fase3_stock_tests {
     async fn event_recipe_copy_is_isolated_from_catalog() {
         let db = test_db().await;
         let ingredient = create_ingredient(&db, IngredientInput {
-            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.0, category: None, event_id: None,
+            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.0, category_id: None, event_id: None,
         }).await.unwrap();
         let base = create_recipe(&db, RecipeInput {
             name: "Pão".into(), category: "Pão".into(), portions: 4,
@@ -6667,7 +6769,7 @@ mod fase3_stock_tests {
     async fn event_exclusive_recipe_can_be_promoted_to_catalog() {
         let db = test_db().await;
         let ingredient = create_ingredient(&db, IngredientInput {
-            name: "Ovos".into(), unit: Unit::Piece, price_per_unit: 0.2, category: None, event_id: None,
+            name: "Ovos".into(), unit: Unit::Piece, price_per_unit: 0.2, category_id: None, event_id: None,
         }).await.unwrap();
         let event = create_event(&db, EventInput {
             name: "Aniversário".into(), event_date: None, notes: None,
@@ -6701,7 +6803,7 @@ mod fase3_stock_tests {
     async fn promoting_recipe_with_duplicate_name_appends_event_name() {
         let db = test_db().await;
         let ingredient = create_ingredient(&db, IngredientInput {
-            name: "Farinha".into(), unit: Unit::Gram, price_per_unit: 0.002, category: None, event_id: None,
+            name: "Farinha".into(), unit: Unit::Gram, price_per_unit: 0.002, category_id: None, event_id: None,
         }).await.unwrap();
         let event = create_event(&db, EventInput {
             name: "Casamento".into(), event_date: None, notes: None,
@@ -6734,7 +6836,7 @@ mod fase3_stock_tests {
     async fn event_ingredient_copy_is_stock_isolated_from_catalog() {
         let db = test_db().await;
         let catalog = create_ingredient(&db, IngredientInput {
-            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.0, category: None, event_id: None,
+            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.0, category_id: None, event_id: None,
         }).await.unwrap();
         let event = create_event(&db, EventInput {
             name: "Casamento".into(), event_date: Some("2026-08-01".into()), notes: None,
@@ -6791,7 +6893,7 @@ mod fase3_stock_tests {
         }).await.unwrap();
 
         let exclusive = create_ingredient(&db, IngredientInput {
-            name: "Bolo especial".into(), unit: Unit::Piece, price_per_unit: 5.0, category: None,
+            name: "Bolo especial".into(), unit: Unit::Piece, price_per_unit: 5.0, category_id: None,
             event_id: Some(event.id),
         }).await.unwrap();
 
@@ -6819,11 +6921,11 @@ mod fase3_stock_tests {
         }).await.unwrap();
 
         create_ingredient(&db, IngredientInput {
-            name: "Farinha".into(), unit: Unit::Gram, price_per_unit: 0.002, category: None, event_id: None,
+            name: "Farinha".into(), unit: Unit::Gram, price_per_unit: 0.002, category_id: None, event_id: None,
         }).await.unwrap();
 
         let exclusive = create_ingredient(&db, IngredientInput {
-            name: "Farinha".into(), unit: Unit::Gram, price_per_unit: 0.003, category: None,
+            name: "Farinha".into(), unit: Unit::Gram, price_per_unit: 0.003, category_id: None,
             event_id: Some(event.id),
         }).await.unwrap();
 
@@ -6941,7 +7043,7 @@ mod fase3_stock_tests {
     async fn recipe_import_from_url_matches_existing_ingredient_by_name() {
         let db = test_db().await;
         create_ingredient(&db, IngredientInput {
-            name: "Rice".into(), unit: Unit::Gram, price_per_unit: 0.002, category: None, event_id: None,
+            name: "Rice".into(), unit: Unit::Gram, price_per_unit: 0.002, category_id: None, event_id: None,
         }).await.unwrap();
 
         // Exercise the same ingredient-matching path recipe_import_from_url uses,
@@ -7033,7 +7135,7 @@ mod fase3_stock_tests {
     async fn recipe_ingredients_round_trip_through_export_and_import() {
         let db = test_db().await;
         let flour = create_ingredient(&db, IngredientInput {
-            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.0, category: None, event_id: None,
+            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.0, category_id: None, event_id: None,
         }).await.unwrap();
         create_recipe(&db, RecipeInput {
             name: "Pão".into(),
@@ -7089,7 +7191,7 @@ mod crud_base_tests {
         let db = test_db().await;
 
         let created = create_ingredient(&db, IngredientInput {
-            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.2, category: None, event_id: None,
+            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 1.2, category_id: None, event_id: None,
         }).await.unwrap();
         assert_eq!(created.name, "Farinha");
         assert_eq!(created.unit, Unit::Kilogram);
@@ -7099,7 +7201,7 @@ mod crud_base_tests {
         assert!(listed.iter().any(|i| i.id == created.id));
 
         let updated = update_ingredient(&db, created.id, IngredientInput {
-            name: "Farinha Integral".into(), unit: Unit::Gram, price_per_unit: 2.5, category: None, event_id: None,
+            name: "Farinha Integral".into(), unit: Unit::Gram, price_per_unit: 2.5, category_id: None, event_id: None,
         }).await.unwrap();
         assert_eq!(updated.name, "Farinha Integral");
         assert_eq!(updated.unit, Unit::Gram);
@@ -7119,7 +7221,7 @@ mod crud_base_tests {
     async fn recipe_crud_round_trip() {
         let db = test_db().await;
         let ingredient = create_ingredient(&db, IngredientInput {
-            name: "Ovo".into(), unit: Unit::Piece, price_per_unit: 0.2, category: None, event_id: None,
+            name: "Ovo".into(), unit: Unit::Piece, price_per_unit: 0.2, category_id: None, event_id: None,
         }).await.unwrap();
 
         let created = create_recipe(&db, RecipeInput {
@@ -7161,7 +7263,7 @@ mod crud_base_tests {
     async fn stock_crud_round_trip() {
         let db = test_db().await;
         let ingredient = create_ingredient(&db, IngredientInput {
-            name: "Açúcar".into(), unit: Unit::Kilogram, price_per_unit: 0.9, category: None, event_id: None,
+            name: "Açúcar".into(), unit: Unit::Kilogram, price_per_unit: 0.9, category_id: None, event_id: None,
         }).await.unwrap();
 
         let created = upsert_stock(&db, StockInput {
@@ -7222,7 +7324,7 @@ mod crud_base_tests {
     async fn receipt_confirm_converts_quantity_into_ingredient_unit() {
         let db = test_db().await;
         let ingredient = create_ingredient(&db, IngredientInput {
-            name: "Farinha".into(), unit: Unit::Gram, price_per_unit: 0.002, category: None, event_id: None,
+            name: "Farinha".into(), unit: Unit::Gram, price_per_unit: 0.002, category_id: None, event_id: None,
         }).await.unwrap();
 
         let conn = get_conn(&db).await.unwrap();
@@ -7276,7 +7378,7 @@ mod audit_2026_07 {
 
     async fn flour(db: &Database, unit: Unit, price: f64) -> Ingredient {
         create_ingredient(db, IngredientInput {
-            name: "Farinha".into(), unit, price_per_unit: price, category: None, event_id: None,
+            name: "Farinha".into(), unit, price_per_unit: price, category_id: None, event_id: None,
         }).await.unwrap()
     }
 
@@ -7423,7 +7525,7 @@ mod audit_2026_07 {
         // no fixed weight and no entry in approximate_unit_weights.
         let parsley = create_ingredient(&db, IngredientInput {
             name: "Salsa".into(), unit: Unit::Gram, price_per_unit: 0.01,
-            category: None, event_id: None,
+            category_id: None, event_id: None,
         }).await.unwrap();
         let r = cake(&db, vec![RecipeIngredientInput {
             ingredient_id: parsley.id, quantity: 2.0, unit: Unit::Bunch,
@@ -7748,6 +7850,161 @@ IVA 23% 1,21
         );
     }
 
+    /// Advisory 2026-08-09: `IngredientInput.category` was named as if it took
+    /// a name while the code parsed it as an id, and the frontend never sent it
+    /// at all — so no ingredient had a category and both `by_category` reports
+    /// grouped everything into one empty bucket. Now an id, end to end.
+    #[tokio::test]
+    async fn an_ingredient_keeps_the_category_it_was_given_and_the_report_groups_by_it() {
+        let db = test_db().await;
+        let category = categories_list(&db, Some("ingredient")).await.unwrap()
+            .into_iter().find(|c| c.name == "Bebidas").expect("the drinks category exists");
+
+        let milk = create_ingredient(&db, IngredientInput {
+            name: "Leite".into(), unit: Unit::Liter, price_per_unit: 0.8,
+            category_id: Some(category.id), event_id: None,
+        }).await.unwrap();
+        assert_eq!(milk.category_id, Some(category.id), "the category was dropped on the way in");
+
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: milk.id, quantity: 10.0, unit: Unit::Liter,
+            price_per_unit: 0.8, total_price: 8.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        let report = get_cost_report(&db, 30).await.unwrap();
+        let line = report.by_category.iter().find(|c| c.category == "Bebidas")
+            .unwrap_or_else(|| panic!(
+                "spending did not group under its category: {:?}",
+                report.by_category.iter().map(|c| c.category.clone()).collect::<Vec<_>>()
+            ));
+        assert!((line.total - 8.0).abs() < 1e-9);
+    }
+
+    /// The export writes the category as a name and the import is where a name
+    /// becomes an id again. Without that step a round trip lost every category.
+    #[tokio::test]
+    async fn a_category_survives_an_export_and_import_round_trip() {
+        let db = test_db().await;
+        let category = categories_list(&db, Some("ingredient")).await.unwrap()
+            .into_iter().find(|c| c.name == "Bebidas").unwrap();
+        create_ingredient(&db, IngredientInput {
+            name: "Leite".into(), unit: Unit::Liter, price_per_unit: 0.8,
+            category_id: Some(category.id), event_id: None,
+        }).await.unwrap();
+
+        let exported = export_data(&db).await.unwrap();
+        assert_eq!(exported.ingredients[0].category.as_deref(), Some("Bebidas"));
+
+        // Into a database that has never seen this data.
+        let fresh = test_db().await;
+        import_data(&fresh, exported).await.unwrap();
+
+        let restored = ingredients_list(&fresh).await.unwrap()
+            .into_iter().find(|i| i.name == "Leite").expect("the ingredient came back");
+        let restored_category = categories_list(&fresh, Some("ingredient")).await.unwrap()
+            .into_iter().find(|c| Some(c.id) == restored.category_id);
+        assert_eq!(
+            restored_category.map(|c| c.name), Some("Bebidas".to_string()),
+            "the category did not survive the round trip"
+        );
+    }
+
+    /// DOM-05 (#29), decided 2026-08-09: the weighted average looks at a
+    /// ninety-day window, not at every purchase ever made. Each step of the
+    /// fallback chain is checked on its own, because the middle one is the easy
+    /// one to leave out — and without it an ingredient jumps to a stale
+    /// catalogue price the day its last purchase ages out.
+    #[tokio::test]
+    async fn the_recipe_price_follows_a_window_and_falls_back_in_order() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.005).await; // catalogue price
+        let conn = get_conn(&db).await.unwrap();
+
+        let r = cake(&db, vec![RecipeIngredientInput {
+            ingredient_id: f.id, quantity: 1000.0, unit: Unit::Gram,
+        }]).await;
+
+        // Step 3: never bought — the catalogue is all there is.
+        assert!(
+            (calculate_cost(&db, r.recipe.id).await.unwrap().total_cost - 5.0).abs() < 1e-9,
+            "an ingredient with no purchases should cost the catalogue price"
+        );
+
+        // An old purchase at 0.001, well outside the window.
+        let old = (Utc::now() - chrono::Duration::days(400)).to_rfc3339();
+        conn.execute(
+            "INSERT INTO stock_purchases (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date)
+             VALUES (?1, 1000.0, 'gram', 0.001, 1.0, 0, 0.0, ?2)",
+            params![f.id, old],
+        ).await.unwrap();
+
+        // Step 2: nothing inside the window, so its own old prices still beat
+        // the catalogue.
+        assert!(
+            (calculate_cost(&db, r.recipe.id).await.unwrap().total_cost - 1.0).abs() < 1e-9,
+            "with only old purchases the price should still come from them, not from the catalogue"
+        );
+
+        // A recent purchase at 0.004.
+        let recent = (Utc::now() - chrono::Duration::days(5)).to_rfc3339();
+        conn.execute(
+            "INSERT INTO stock_purchases (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date)
+             VALUES (?1, 1000.0, 'gram', 0.004, 4.0, 0, 0.0, ?2)",
+            params![f.id, recent],
+        ).await.unwrap();
+
+        // Step 1: the window wins, and the 400-day-old purchase no longer drags
+        // the average down to 0.0025.
+        assert!(
+            (calculate_cost(&db, r.recipe.id).await.unwrap().total_cost - 4.0).abs() < 1e-9,
+            "the old purchase is still being averaged in"
+        );
+    }
+
+    /// Advisory 2026-08-09: the recipe cost was worked out in two places from
+    /// two different prices — the recipes screen from the catalogue number, the
+    /// costs page from the backend's weighted average — so the same recipe
+    /// showed two costs. The invariant that fixes it: every `Ingredient` the
+    /// frontend receives carries `effective_price_per_unit`, and that is the
+    /// number the frontend costs with.
+    #[tokio::test]
+    async fn every_ingredient_carries_the_price_the_backend_costs_with() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.005).await; // catalogue says 0.005
+
+        // Never bought: the effective price is the catalogue price.
+        let listed = ingredients_list(&db).await.unwrap()
+            .into_iter().find(|i| i.id == f.id).unwrap();
+        assert_eq!(listed.effective_price_per_unit, 0.005);
+
+        // Bought at 0.002, which is what it really costs now.
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 1000.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 2.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        let priced = ingredients_list(&db).await.unwrap()
+            .into_iter().find(|i| i.id == f.id).unwrap();
+        assert_eq!(priced.price_per_unit, 0.005, "the catalogue price must stay as typed");
+        assert_eq!(
+            priced.effective_price_per_unit, 0.002,
+            "the effective price did not follow the purchase history"
+        );
+
+        // And it is the same number the backend costs a recipe at, which is the
+        // whole point — the two screens agree because they use one price.
+        let r = cake(&db, vec![RecipeIngredientInput {
+            ingredient_id: f.id, quantity: 1000.0, unit: Unit::Gram,
+        }]).await;
+        let cost = calculate_cost(&db, r.recipe.id).await.unwrap();
+        assert!(
+            (cost.total_cost - 1000.0 * priced.effective_price_per_unit).abs() < 1e-9,
+            "the backend costed the recipe at a price the ingredient does not report"
+        );
+    }
+
     /// The reading that got `BACKUP_TABLES` wrong was a human one, so this
     /// checks the order against the schema itself: every table a row points at
     /// must already have been inserted. Adding a table in the wrong place now
@@ -8046,7 +8303,7 @@ IVA 23% 1,21
         let f = flour(&db, Unit::Gram, 0.002).await;
         let caviar = create_ingredient(&db, IngredientInput {
             name: "Caviar".into(), unit: Unit::Gram, price_per_unit: 5.0,
-            category: None, event_id: None,
+            category_id: None, event_id: None,
         }).await.unwrap();
 
         let doable = cake(&db, vec![RecipeIngredientInput { ingredient_id: f.id, quantity: 200.0, unit: Unit::Gram }]).await;
@@ -8140,7 +8397,7 @@ IVA 23% 1,21
         let f = flour(&db, Unit::Gram, 0.002).await;
         let sugar = create_ingredient(&db, IngredientInput {
             name: "Açúcar".into(), unit: Unit::Gram, price_per_unit: 0.001,
-            category: None, event_id: None,
+            category_id: None, event_id: None,
         }).await.unwrap();
         let r = create_recipe(&db, RecipeInput {
             name: "Bolachas".into(), category: "Doces".into(), portions: 40,
@@ -8299,7 +8556,7 @@ IVA 23% 1,21
         // An ingredient whose stock predates the movements table.
         let legacy = create_ingredient(&db, IngredientInput {
             name: "Sal".into(), unit: Unit::Gram, price_per_unit: 0.001,
-            category: None, event_id: None,
+            category_id: None, event_id: None,
         }).await.unwrap();
         let conn = get_conn(&db).await.unwrap();
         conn.execute(
@@ -8436,7 +8693,7 @@ IVA 23% 1,21
         let f = flour(&db, Unit::Gram, 0.002).await;
         let sugar = create_ingredient(&db, IngredientInput {
             name: "Açúcar".into(), unit: Unit::Gram, price_per_unit: 0.001,
-            category: None, event_id: None,
+            category_id: None, event_id: None,
         }).await.unwrap();
 
         // A movement that is not a purchase advances `stock`'s rowid sequence
@@ -8512,7 +8769,7 @@ IVA 23% 1,21
         let f = flour(&db, Unit::Gram, 0.002).await;
         let sugar = create_ingredient(&db, IngredientInput {
             name: "Açúcar".into(), unit: Unit::Gram, price_per_unit: 0.001,
-            category: None, event_id: None,
+            category_id: None, event_id: None,
         }).await.unwrap();
         let r = cake(&db, vec![
             RecipeIngredientInput { ingredient_id: f.id, quantity: 500.0, unit: Unit::Gram },
@@ -8633,7 +8890,7 @@ IVA 23% 1,21
         }).await.unwrap();
         let event_ingredient = create_ingredient(&db, IngredientInput {
             name: "Açúcar de evento".into(), unit: Unit::Gram, price_per_unit: 0.001,
-            category: Some("Doces".into()), event_id: Some(event.id),
+            category_id: None, event_id: Some(event.id),
         }).await.unwrap();
         create_recipe(&db, RecipeInput {
             name: "Bolo do casamento".into(), category: "Doces".into(), portions: 40,
@@ -8738,7 +8995,7 @@ IVA 23% 1,21
         let f = flour(&db, Unit::Kilogram, 2.0).await;
         let sugar = create_ingredient(&db, IngredientInput {
             name: "Açúcar".into(), unit: Unit::Kilogram, price_per_unit: 1.0,
-            category: None, event_id: None,
+            category_id: None, event_id: None,
         }).await.unwrap();
 
         let recipe = cake(&db, vec![
@@ -8818,7 +9075,7 @@ IVA 23% 1,21
         let db = test_db().await;
         let eggs = create_ingredient(&db, IngredientInput {
             name: "Ovos".into(), unit: Unit::Piece, price_per_unit: 0.3,
-            category: None, event_id: None,
+            category_id: None, event_id: None,
         }).await.unwrap();
 
         let result = stock_purchase_add(&db, StockPurchaseInput {

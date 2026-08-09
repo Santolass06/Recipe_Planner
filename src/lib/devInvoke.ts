@@ -13,7 +13,10 @@ const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in 
 const now = new Date().toISOString();
 
 function ingredient(id: number, name: string, unit: string, price: number, category_id: number, favorite = false) {
-  return { id, name, unit, price_per_unit: price, category_id, favorite, created_at: now, updated_at: now };
+  // effective_price_per_unit mirrors the invariant on the Rust `Ingredient`:
+  // every one handed to the frontend carries it. With no purchase history in
+  // the mocks it equals the catalogue price, which is the real fallback too.
+  return { id, name, unit, price_per_unit: price, effective_price_per_unit: price, category_id, favorite, created_at: now, updated_at: now };
 }
 
 const ingredients = [
@@ -221,6 +224,23 @@ const fixtures: Record<string, unknown | ((args: unknown) => unknown)> = {
       };
     }).sort((a, b) => Number(b.uses_expiring) - Number(a.uses_expiring) || b.coverage - a.coverage),
   edition_get: "family",
+  // Without this, the `_list` suffix rule returns [] and the category picker
+  // is empty in the browser preview.
+  categories_list: (args: unknown) => {
+    const kind = (args as { kind?: string })?.kind;
+    const all = [
+      { id: 1, name: "Hortícolas", kind: "ingredient", color: "#2d6a4f", icon: "🥦", sort_order: 0, created_at: now },
+      { id: 2, name: "Frutas", kind: "ingredient", color: "#f77f00", icon: "🍎", sort_order: 1, created_at: now },
+      { id: 3, name: "Carnes e Peixes", kind: "ingredient", color: "#d62828", icon: "🥩", sort_order: 2, created_at: now },
+      { id: 4, name: "Lacticínios", kind: "ingredient", color: "#fcbf49", icon: "🧀", sort_order: 3, created_at: now },
+      { id: 5, name: "Pantry (Secos)", kind: "ingredient", color: "#e9c46a", icon: "🌾", sort_order: 4, created_at: now },
+      { id: 6, name: "Condimentos", kind: "ingredient", color: "#7209b7", icon: "🧂", sort_order: 5, created_at: now },
+      { id: 7, name: "Bebidas", kind: "ingredient", color: "#40916c", icon: "🥛", sort_order: 6, created_at: now },
+      { id: 8, name: "Outros", kind: "ingredient", color: "#9e9e9e", icon: "📦", sort_order: 7, created_at: now },
+      { id: 9, name: "Sopas", kind: "recipe", color: "#40916c", icon: "🍲", sort_order: 1, created_at: now },
+    ];
+    return kind ? all.filter((c) => c.kind === kind) : all;
+  },
   // Without a fixture this resolved to undefined and CostsPage threw reading
   // `.total_cost` off it — the browser preview crashed where the real app works.
   cost_calculate: (args: unknown) => {

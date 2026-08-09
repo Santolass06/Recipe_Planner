@@ -282,7 +282,10 @@ export default function ReceiptScannerPage() {
           name: line.name,
           unit: line.unit,
           price_per_unit: unitPrice(line),
-          category: "outros",
+          // No category: the scanner has no way to know which one, and the
+          // report's "Sem categoria" bucket is now an honest answer. This used
+          // to send the string "outros", which the backend silently discarded.
+          category_id: null,
         },
       });
       const newId = newIngredient.id;

@@ -343,6 +343,8 @@ export const pt = {
     empty: "Sem ingredientes",
     noResultsDesc: "Tenta outra pesquisa.",
     emptyDesc: "Adiciona o primeiro ingrediente para começar.",
+    colCategory: "Categoria",
+    noCategory: "Sem categoria",
     colUnit: "Unidade",
     actionsAriaLabel: "Ações do ingrediente",
     confirmDeleteAria: "Confirmar eliminação",
