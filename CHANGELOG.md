@@ -1303,3 +1303,24 @@ cargo test --workspace 2>&1 | grep "^test " | grep -vc export_bindings
 ```
 
 ---
+
+## Auditoria 2026-08 (ronda 3, delta)
+
+Relatório completo em `audit/AUDIT-2026-08.md`; plano em
+`audit/plano-2026-08.md`. Fechou as frentes que a auditoria anterior
+auto-declarara parciais (runtime, comando-a-comando) e reabriu S5 como falso
+(`PRD-02`).
+
+**Estado:** auditoria COMPLETA, achados todos corrigidos — `7c5ef4a` (código +
+testes de regressão) e `bb3d0e3` (relatório e plano).
+
+Auditoria 2026-08: corrigidos DOM-07/DOM-08/PRD-02 (P0), DOM-12/CMD-02 (P1) e
+DOM-10/DOM-11/CMD-06/CMD-07 (P3); gating Family/Pro aplicado; ver commits
+`7c5ef4a` e `bb3d0e3`.
+
+Em aberto, com motivo: `PERF-01` (N+1 em `calculate_cost`, reaberto como falso
+em S4), `S0.4` (rotação do PAT — ⏳) e o resto da passagem de 2026-08-09 ainda
+por reverificar (validação de structs, atomicidade de receitas, backup, datas,
+i18n).
+
+---

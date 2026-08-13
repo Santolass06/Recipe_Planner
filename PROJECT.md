@@ -193,7 +193,7 @@ lista com esse ingrediente somado uma só vez e já descontado do stock.
 
 ---
 
-### S2 — Movimentos de stock: schema e registo ⬜
+### S2 — Movimentos de stock: schema e registo ✅ `4635b11` (S2.3 adiado)
 
 O item estruturante, primeira metade: a tabela e a escrita, sem UI nova.
 Desenho completo em [[#Desenho — Movimentos de stock]].
@@ -225,7 +225,7 @@ prova real está nos testes.
 
 ---
 
-### S3 — Movimentos de stock: consumo, produção, perda, venda ⬜
+### S3 — Movimentos de stock: consumo, produção, perda, venda ✅ `f7c88e3`
 
 Segunda metade: é aqui que o stock passa a saber descer.
 
@@ -250,7 +250,7 @@ perda aparece no histórico.
 
 ---
 
-### S4 — Os relatórios que os movimentos desbloqueiam ⬜
+### S4 — Os relatórios que os movimentos desbloqueiam ✅ `12eeb24`
 
 Tudo o que estava vazio por falta de dados passa a ter dados.
 
@@ -272,7 +272,7 @@ modelo de dados.
 
 ---
 
-### S5 — Instrumentação e flag de edição ⬜
+### S5 — Instrumentação e flag de edição ✅
 
 - **S5.1** Emissores automáticos de `usage_events`. A tabela existe desde
   2026-07-10 e está vazia de propósito; **só agora** há eventos com
