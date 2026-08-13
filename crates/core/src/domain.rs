@@ -703,18 +703,20 @@ impl Edition {
     /// The gating matrix, in one place instead of scattered across screens.
     pub fn allows(self, feature: EditionFeature) -> bool {
         match feature {
-            // Family covers everything about running a kitchen for yourself.
+            // Family runs a kitchen: recipes, pantry, lists, planner, receipts,
+            // suggestions, waste. Costs & margins, suppliers & quotes and
+            // events are what the business edition adds (PRD-02).
             EditionFeature::Recipes
             | EditionFeature::Stock
             | EditionFeature::ShoppingLists
             | EditionFeature::MealPlanning
-            | EditionFeature::Events
             | EditionFeature::ReceiptScanner
             | EditionFeature::Suggestions
-            | EditionFeature::WasteReport
-            | EditionFeature::CostReport => true,
-            // Selling is what makes it a business.
-            EditionFeature::Production
+            | EditionFeature::WasteReport => true,
+            // Events, costs and selling are what make it a business.
+            EditionFeature::Events
+            | EditionFeature::CostReport
+            | EditionFeature::Production
             | EditionFeature::Sales
             | EditionFeature::SupplierComparison
             | EditionFeature::EventBudget => self == Edition::Pro,
@@ -1716,5 +1718,40 @@ mod unit_parse_tests {
     #[test]
     fn unknown_string_is_rejected() {
         assert!("not_a_unit".parse::<Unit>().is_err());
+    }
+}
+
+#[cfg(test)]
+mod edition_gating_tests {
+    use super::{Edition, EditionFeature};
+
+    /// PRD-02: Family must hide what the business edition monetises — costs &
+    /// margin, suppliers & quotes, and events. The matrix used to let Family
+    /// into `Events` and `CostReport`, so those screens shipped to the edition
+    /// that must not see them.
+    #[test]
+    fn family_hides_costs_suppliers_and_events() {
+        for feature in [
+            EditionFeature::Events,
+            EditionFeature::CostReport,
+            EditionFeature::SupplierComparison,
+            EditionFeature::EventBudget,
+            EditionFeature::Production,
+            EditionFeature::Sales,
+        ] {
+            assert!(!Edition::Family.allows(feature), "Family should not allow {feature:?}");
+            assert!(Edition::Pro.allows(feature), "Pro should allow {feature:?}");
+        }
+        for feature in [
+            EditionFeature::Recipes,
+            EditionFeature::Stock,
+            EditionFeature::ShoppingLists,
+            EditionFeature::MealPlanning,
+            EditionFeature::ReceiptScanner,
+            EditionFeature::Suggestions,
+            EditionFeature::WasteReport,
+        ] {
+            assert!(Edition::Family.allows(feature), "Family should allow {feature:?}");
+        }
     }
 }

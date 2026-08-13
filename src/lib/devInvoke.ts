@@ -171,6 +171,10 @@ function shoppingListFromRecipes(args: unknown): unknown {
 }
 
 /** command name -> canned response (or function of args) */
+// Mirrors the persistence that `edition_set`/`edition_get` back to in the real
+// app, so the Family/Pro gating (PRD-02) is coherent and testable in the
+// browser preview: toggling the edition in SettingsPage reflects everywhere.
+let devEdition: "family" | "pro" = "family";
 const fixtures: Record<string, unknown | ((args: unknown) => unknown)> = {
   dashboard_stats: dashboardStats,
   dashboard_recent_activity: activity,
@@ -223,7 +227,12 @@ const fixtures: Record<string, unknown | ((args: unknown) => unknown)> = {
         missing, cost_per_portion: 2.5, uses_expiring: r.id === 2,
       };
     }).sort((a, b) => Number(b.uses_expiring) - Number(a.uses_expiring) || b.coverage - a.coverage),
-  edition_get: "family",
+  edition_get: () => devEdition,
+  edition_set: (args: unknown) => {
+    const next = (args as { edition?: string })?.edition;
+    devEdition = next === "pro" ? "pro" : "family";
+    return undefined;
+  },
   // Without this, the `_list` suffix rule returns [] and the category picker
   // is empty in the browser preview.
   categories_list: (args: unknown) => {

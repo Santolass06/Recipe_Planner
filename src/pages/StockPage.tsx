@@ -486,12 +486,9 @@ export default function StockPage() {
     }
     setLoading(true);
     try {
-      await invoke("stock_upsert", {
-        input: {
-          ingredient_id: form.ingredient_id,
-          quantity: form.quantity,
-          min_quantity: form.min_quantity,
-        },
+      await invoke("stock_update_quantity", {
+        ingredient_id: form.ingredient_id,
+        quantity: form.quantity,
       });
       showToast(modal === "create" ? t("stock.created") : t("stock.updated"), "ok");
       closeModal();

@@ -4,6 +4,7 @@ import { useToast } from "../components/ui/Toast";
 import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
 import { useI18n } from "../i18n";
+import { useEdition, isProEdition } from "../lib/edition";
 import type { CostReport } from "../../crates/core/bindings/CostReport";
 import type { WasteReport } from "../../crates/core/bindings/WasteReport";
 import type { StockSnapshot } from "../../crates/core/bindings/StockSnapshot";
@@ -643,12 +644,28 @@ function PricesTab({
 
 
 export default function ReportsPage() {
-  const [activeTab, setActiveTab] = useState("costs");
-  const [days, setDays] = useState(30);
-  const [loading, setLoading] = useState(false);
-
   const { showToast } = useToast();
   const { t } = useI18n();
+  const edition = useEdition();
+  const isPro = isProEdition(edition);
+
+  // CostReport (the "custos" tab) is a Pro-only feature (PRD-02); Family edition
+  // must not offer it. The remaining tabs are always available.
+  const tabs = isPro
+    ? getTabs(t)
+    : getTabs(t).filter((tab) => tab.id !== "costs");
+
+  const [activeTab, setActiveTab] = useState("waste");
+  // "waste" is always available, so the initial selection is valid for both
+  // editions. Recover only if the active tab was filtered out — e.g. edition
+  // downgraded to Family while the Costs tab was active.
+  useEffect(() => {
+    if (!tabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab(tabs[0]?.id ?? "waste");
+    }
+  }, [isPro, activeTab]);
+  const [days, setDays] = useState(30);
+  const [loading, setLoading] = useState(false);
 
   // Data states
   const [costReport, setCostReport] = useState<CostReport | null>(null);
@@ -753,7 +770,7 @@ export default function ReportsPage() {
       />
 
       <div className="tab-list">
-        {getTabs(t).map((tab) => (
+        {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
