@@ -211,6 +211,7 @@ const fixtures: Record<string, unknown | ((args: unknown) => unknown)> = {
     return { production_id: "preview", movements, shortfalls };
   },
   stock_loss_record: { id: 1, ingredient_id: 1, recipe_id: null, movement_type: "loss", quantity: -1, unit: "gram", unit_cost: null, sale_price: null, reason: null, production_id: null, created_by: null, created_at: now },
+  stock_sale_record: { id: 2, ingredient_id: 1, recipe_id: null, movement_type: "sale", quantity: -1, unit: "gram", unit_cost: null, sale_price: 1.5, reason: null, production_id: null, created_by: null, created_at: now },
   stock_movements_for_ingredient: [],
   // Sprint S4 previews.
   suggest_recipes: () =>

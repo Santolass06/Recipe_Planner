@@ -12,6 +12,7 @@ import type { StockItem } from "../../crates/core/bindings/StockItem";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import type { Supplier } from "../../crates/core/bindings/Supplier";
 import type { StockPurchase } from "../../crates/core/bindings/StockPurchase";
+import type { Recipe } from "../../crates/core/bindings/Recipe";
 import { UNIT_LABELS_FULL as UNIT_LABELS, convertUnit } from "../lib/units";
 import { errKey } from "../lib/errors";
 
@@ -39,7 +40,7 @@ function levelPct(quantity: number, min: number) {
   return quantity > 0 ? 100 : 0;
 }
 
-function StockTable({ items, ingredients, onEdit, onDelete, onPurchase, onLoss, t }: any) {
+function StockTable({ items, ingredients, onEdit, onDelete, onPurchase, onLoss, onSell, t }: any) {
   const getIngredientName = (id: number) => ingredients.find((i: any) => i.id === id)?.name ?? "—";
   const getIngredientUnit = (id: number) => ingredients.find((i: any) => i.id === id)?.unit ?? "";
 
@@ -82,6 +83,9 @@ function StockTable({ items, ingredients, onEdit, onDelete, onPurchase, onLoss, 
                       </button>
                       <button className="btn-icon" onClick={(e) => { e.stopPropagation(); onPurchase(item); }} title={t("stock.registerPurchase")}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12V7H5V7M16 7V4M8 7V4M3 18H21M7 18V12M17 18V12M7 12H17"/></svg>
+                      </button>
+                      <button className="btn-icon" onClick={(e) => { e.stopPropagation(); onSell(item); }} title={t("stock.sell.action")}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.59 13.41 12 22 2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
                       </button>
                       <button className="btn-icon" onClick={(e) => { e.stopPropagation(); onLoss(item); }} title={t("stock.loss.action")}>
                         <span className="ms" style={{ fontSize: 14 }}>delete_sweep</span>
@@ -146,6 +150,69 @@ function StockModal({
           <label className="field-label" htmlFor="stock-min">{t("stock.modal.minQty")}</label>
           <input id="stock-min" type="number" className="input input-num" min="0" step="0.01" value={form.min_quantity} onChange={e => setForm((f: any) => ({ ...f, min_quantity: parseFloat(e.target.value) || 0 }))} />
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+function SellModal({
+  open, onClose, form, setForm, loading, handleSave, ingredientName, unitLabel, t
+}: {
+  open: boolean;
+  onClose: () => void;
+  form: { quantity: number; sale_price: number };
+  setForm: any;
+  loading: boolean;
+  handleSave: () => void;
+  ingredientName: string;
+  unitLabel: string;
+  t: T;
+}) {
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={t("stock.sell.title", { name: ingredientName })}
+      footer={
+        <>
+          <button className="btn btn-secondary" onClick={onClose}>{t("common.cancel")}</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={loading || !(form.quantity > 0) || !(form.sale_price >= 0)}>
+            {loading ? t("stock.sell.selling") : t("stock.sell.submit")}
+          </button>
+        </>
+      }
+    >
+      <p className="text-4" style={{ marginBottom: "var(--space-3)" }}>{t("stock.sell.desc")}</p>
+      <div className="field">
+        <label className="field-label" htmlFor="sell-quantity">{t("stock.sell.quantity")}</label>
+        <input
+          id="sell-quantity"
+          className="input input-num"
+          type="number"
+          min="0"
+          step="any"
+          value={form.quantity}
+          onChange={e => setForm((f: any) => ({ ...f, quantity: parseFloat(e.target.value) || 0 }))}
+          disabled={loading}
+          style={{ maxWidth: 180 }}
+        />
+      </div>
+      <div className="field">
+        <label className="field-label" htmlFor="sell-price">{t("stock.sell.pricePerUnit")}</label>
+        <input
+          id="sell-price"
+          className="input input-num"
+          type="number"
+          min="0"
+          step="any"
+          value={form.sale_price}
+          onChange={e => setForm((f: any) => ({ ...f, sale_price: parseFloat(e.target.value) || 0 }))}
+          disabled={loading}
+          style={{ maxWidth: 180 }}
+        />
+        <p className="text-4 mono" style={{ marginTop: "var(--space-1)" }}>
+          {unitLabel} · {t("stock.sell.total")} <strong>{(form.quantity * form.sale_price).toFixed(2)} €</strong>
+        </p>
       </div>
     </Modal>
   );
@@ -326,6 +393,7 @@ function PurchaseModal({
 export default function StockPage() {
   const [stock, setStock] = useState<StockItem[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
@@ -335,9 +403,14 @@ export default function StockPage() {
   const [purchases, setPurchases] = useState<StockPurchase[]>([]);
   const [loadingPurchases, setLoadingPurchases] = useState(false);
   const [lossTarget, setLossTarget] = useState<{ id: number; name: string; unit: string } | null>(null);
+  const [lossMode, setLossMode] = useState<"ingredient" | "recipe">("ingredient");
+  const [lossRecipeId, setLossRecipeId] = useState(0);
   const [lossQuantity, setLossQuantity] = useState("");
   const [lossReason, setLossReason] = useState("");
   const [lossBusy, setLossBusy] = useState(false);
+  const [sellTarget, setSellTarget] = useState<{ ingredient_id: number; name: string; unit: string; unitLabel: string } | null>(null);
+  const [sellForm, setSellForm] = useState({ quantity: 0, sale_price: 0 });
+  const [sellBusy, setSellBusy] = useState(false);
   const [purchaseForm, setPurchaseForm] = useState<{
     ingredient_id: number;
     quantity: number;
@@ -375,12 +448,14 @@ export default function StockPage() {
 
   const load = useCallback(async () => {
     try {
-      const [stockData, ingredientsData] = await Promise.all([
+      const [stockData, ingredientsData, recipesData] = await Promise.all([
         invoke<StockItem[]>("stock_list"),
         invoke<Ingredient[]>("ingredients_list"),
+        invoke<Recipe[]>("recipes_list"),
       ]);
       setStock(stockData);
       setIngredients(ingredientsData);
+      setRecipes(recipesData);
     } catch (e) {
       showToast(t(errKey(e, "stock.loadError")), "err");
     }
@@ -428,6 +503,8 @@ export default function StockPage() {
   const openLossModal = (item: StockItem) => {
     const ing = ingredients.find(i => i.id === item.ingredient_id);
     setLossTarget({ id: item.ingredient_id, name: item.ingredient_name, unit: ing?.unit ?? item.ingredient_unit });
+    setLossMode("ingredient");
+    setLossRecipeId(0);
     setLossQuantity("");
     setLossReason("");
   };
@@ -436,22 +513,67 @@ export default function StockPage() {
     if (!lossTarget) return;
     setLossBusy(true);
     try {
+      const isRecipe = lossMode === "recipe";
+      const name = isRecipe ? (recipes.find(r => r.id === lossRecipeId)?.name ?? "") : lossTarget.name;
       await invoke("stock_loss_record", {
-        input: {
-          ingredient_id: lossTarget.id,
-          recipe_id: null,
-          quantity: Number(lossQuantity),
-          unit: lossTarget.unit,
-          reason: lossReason.trim() || null,
-        },
+        input: isRecipe
+          ? {
+              ingredient_id: null,
+              recipe_id: lossRecipeId,
+              quantity: Number(lossQuantity),
+              unit: "piece",
+              reason: lossReason.trim() || null,
+            }
+          : {
+              ingredient_id: lossTarget.id,
+              recipe_id: null,
+              quantity: Number(lossQuantity),
+              unit: lossTarget.unit,
+              reason: lossReason.trim() || null,
+            },
       });
       setLossTarget(null);
-      showToast(t("stock.loss.done", { name: lossTarget.name }), "ok");
+      showToast(t("stock.loss.done", { name }), "ok");
       load();
-    } catch (e) {
-      showToast(t(errKey(e, "stock.loss.error")), "err");
+    } catch (err) {
+      showToast(typeof err === "string" && err ? err : t(errKey(err, "stock.loss.error")), "err");
     } finally {
       setLossBusy(false);
+    }
+  }
+
+  const openSellModal = (item: StockItem) => {
+    const ing = ingredients.find(i => i.id === item.ingredient_id);
+    const unit = ing?.unit ?? item.ingredient_unit;
+    setSellTarget({ ingredient_id: item.ingredient_id, name: item.ingredient_name, unit, unitLabel: UNIT_LABELS[unit] ?? unit });
+    setSellForm({ quantity: 0, sale_price: ing?.price_per_unit ?? 0 });
+  };
+
+  async function handleSell() {
+    if (!sellTarget) return;
+    if (!(sellForm.quantity > 0) || !(sellForm.sale_price >= 0)) {
+      showToast(t("stock.sell.quantityError"), "warn");
+      return;
+    }
+    setSellBusy(true);
+    try {
+      await invoke("stock_sale_record", {
+        input: {
+          ingredient_id: sellTarget.ingredient_id,
+          recipe_id: null,
+          quantity: sellForm.quantity,
+          unit: sellTarget.unit,
+          sale_price: sellForm.sale_price,
+          reason: null,
+        },
+      });
+      setSellTarget(null);
+      showToast(t("stock.sell.done", { name: sellTarget.name }), "ok");
+      load();
+    } catch (err) {
+      showToast(typeof err === "string" && err ? err : t(errKey(err, "stock.sell.error")), "err");
+    } finally {
+      setSellBusy(false);
     }
   }
 
@@ -559,6 +681,10 @@ export default function StockPage() {
 
   const getIngredientName = (id: number) => ingredients.find(i => i.id === id)?.name ?? "—";
 
+  const lossName = lossMode === "recipe"
+    ? (recipes.find(r => r.id === lossRecipeId)?.name ?? "")
+    : (lossTarget?.name ?? "");
+
   const filtered = stock.filter(s =>
     getIngredientName(s.ingredient_id).toLowerCase().includes(search.toLowerCase())
   );
@@ -607,6 +733,7 @@ export default function StockPage() {
           onDelete={setConfirmDelete}
           onPurchase={openPurchaseModal}
           onLoss={openLossModal}
+          onSell={openSellModal}
           t={t}
         />
       )}
@@ -614,14 +741,14 @@ export default function StockPage() {
       <Modal
         open={lossTarget !== null}
         onClose={() => setLossTarget(null)}
-        title={t("stock.loss.title", { name: lossTarget?.name ?? "" })}
+        title={t("stock.loss.title", { name: lossName })}
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => setLossTarget(null)}>{t("common.cancel")}</button>
             <button
               className="btn btn-primary"
               onClick={handleLoss}
-              disabled={lossBusy || !(Number(lossQuantity) > 0)}
+              disabled={lossBusy || !(Number(lossQuantity) > 0) || (lossMode === "recipe" && !lossRecipeId)}
             >
               {lossBusy ? t("stock.loss.loading") : t("stock.loss.submit")}
             </button>
@@ -629,6 +756,25 @@ export default function StockPage() {
         }
       >
         <p className="text-4" style={{ marginBottom: "var(--space-3)" }}>{t("stock.loss.desc")}</p>
+        <div className="tab-list" style={{ marginBottom: "var(--space-4)" }}>
+          <button type="button" className={`tab-item${lossMode === "ingredient" ? " active" : ""}`} onClick={() => setLossMode("ingredient")} disabled={lossBusy}>
+            {t("stock.loss.ingredient")}
+          </button>
+          <button type="button" className={`tab-item${lossMode === "recipe" ? " active" : ""}`} onClick={() => setLossMode("recipe")} disabled={lossBusy}>
+            {t("stock.loss.product")}
+          </button>
+        </div>
+        {lossMode === "recipe" && (
+          <div className="field">
+            <label className="field-label" htmlFor="loss-recipe">{t("stock.loss.product")}</label>
+            <select id="loss-recipe" className="select" value={lossRecipeId} onChange={e => setLossRecipeId(parseInt(e.target.value) || 0)} disabled={lossBusy}>
+              <option value={0}>{t("stock.loss.productPlaceholder")}</option>
+              {recipes.map(r => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="field">
           <label className="field-label" htmlFor="loss-quantity">{t("stock.loss.quantity")}</label>
           <input
@@ -642,6 +788,9 @@ export default function StockPage() {
             disabled={lossBusy}
             style={{ maxWidth: 180 }}
           />
+          <p className="text-4 mono" style={{ marginTop: "var(--space-1)" }}>
+            {lossMode === "recipe" ? (UNIT_LABELS.piece ?? "piece") : (UNIT_LABELS[lossTarget?.unit ?? ""] ?? lossTarget?.unit)}
+          </p>
         </div>
         <div className="field">
           <label className="field-label" htmlFor="loss-reason">{t("stock.loss.reason")}</label>
@@ -655,6 +804,20 @@ export default function StockPage() {
           />
         </div>
       </Modal>
+
+      {sellTarget && (
+        <SellModal
+          open
+          onClose={() => setSellTarget(null)}
+          form={sellForm}
+          setForm={setSellForm}
+          loading={sellBusy}
+          handleSave={handleSell}
+          ingredientName={sellTarget.name}
+          unitLabel={sellTarget.unitLabel}
+          t={t}
+        />
+      )}
 
       {modal && (
         <StockModal

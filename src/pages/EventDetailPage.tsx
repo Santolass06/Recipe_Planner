@@ -10,6 +10,7 @@ import { useI18n } from "../i18n";
 import type { Event } from "../../crates/core/bindings/Event";
 import type { RecipeWithIngredients as Recipe } from "../../crates/core/bindings/RecipeWithIngredients";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
+import type { EventBudget } from "../../crates/core/bindings/EventBudget";
 import { RecipeFormContent, computeCostLines, eur, EMPTY_FORM } from "./RecipesPage";
 import { UNIT_LABELS_SHORT as UNIT_SHORT } from "../lib/units";
 import { errKey } from "../lib/errors";
@@ -47,6 +48,15 @@ export default function EventDetailPage() {
   const [purchaseModal, setPurchaseModal] = useState<Ingredient | null>(null);
   const [purchaseForm, setPurchaseForm] = useState({ quantity: 0, price_per_unit: 0, purchase_date: new Date().toISOString().slice(0, 10) });
   const [purchaseSaving, setPurchaseSaving] = useState(false);
+  const [budget, setBudget] = useState<EventBudget | null>(null);
+
+  const loadBudget = useCallback(async () => {
+    try {
+      setBudget(await invoke<EventBudget>("event_budget", { eventId }));
+    } catch (e) {
+      showToast(t(errKey(e, "events.budgetLoadError")), "err");
+    }
+  }, [eventId, showToast, t]);
 
   const load = useCallback(async () => {
     try {
@@ -57,15 +67,17 @@ export default function EventDetailPage() {
         invoke<Ingredient[]>("ingredients_list"),
         invoke<Ingredient[]>("event_ingredients_list", { eventId }),
       ]);
-      setEvent(events.find(e => e.id === eventId) ?? null);
+      const found = events.find(e => e.id === eventId) ?? null;
+      setEvent(found);
       setRecipes(eventRecipes);
       setCatalog(catalogRecipes);
       setCatalogIngredients(catalogIngs);
       setEventIngredients(eventIngs);
+      if (found) void loadBudget();
     } catch (e) {
       showToast(t(errKey(e, "events.loadError")), "err");
     }
-  }, [eventId, showToast, t]);
+  }, [eventId, showToast, t, loadBudget]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -415,6 +427,44 @@ export default function EventDetailPage() {
           ))}
         </div>
       )}
+
+      <div style={{ marginTop: 32, marginBottom: 16 }}>
+        <h2 style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>{t("events.budgetTitle")}</h2>
+      </div>
+      <div role="list" aria-label={t("events.budgetAriaLabel")} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
+        <article className="item-card" role="listitem" style={{ alignItems: "flex-start", padding: 20 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 11, background: "var(--inset)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+            <span className="ms" style={{ fontSize: 23, color: "var(--approx)" }}>receipt_long</span>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>{t("events.budgetPlanned")}</div>
+            <div className="mono" style={{ fontSize: 16, fontWeight: 600, color: "var(--ink)", marginTop: 8 }}>{eur(budget?.planned_cost ?? 0)}</div>
+          </div>
+        </article>
+        <article className="item-card" role="listitem" style={{ alignItems: "flex-start", padding: 20 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 11, background: "var(--inset)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+            <span className="ms" style={{ fontSize: 23, color: "var(--ember)" }}>shopping_cart</span>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>{t("events.budgetActual")}</div>
+            <div className="mono" style={{ fontSize: 16, fontWeight: 600, color: "var(--ink)", marginTop: 8 }}>{eur(budget?.actual_cost ?? 0)}</div>
+          </div>
+        </article>
+        <article className="item-card" role="listitem" style={{ alignItems: "flex-start", padding: 20 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 11, background: "var(--inset)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+            <span className="ms" style={{ fontSize: 23, color: "var(--ink-3)" }}>compare_arrows</span>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>{t("events.budgetDiff")}</div>
+            <div className="mono" style={{ fontSize: 16, fontWeight: 600, marginTop: 8, color: (budget?.variance ?? 0) > 0 ? "var(--red)" : "var(--green)" }}>
+              {eur(budget?.variance ?? 0)}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>
+              {(budget?.variance ?? 0) > 0 ? t("events.budgetOver") : t("events.budgetUnder")}
+            </div>
+          </div>
+        </article>
+      </div>
 
       <Modal
         open={ingredientPickerOpen}
