@@ -267,6 +267,8 @@ export const pt = {
       loading: "A registar…",
       done: "Perda de {name} registada.",
       error: "Não foi possível registar a perda.",
+      confirmTitle: "Registar perda de {name}?",
+      confirmBody: "Registar {qty} {unit} de {name} como perda. Saem do stock e contam no relatório de desperdício. Esta ação não pode ser desfeita.",
     },
     registerPurchase: "Registar compra",
     statusOut: "Esgotado",

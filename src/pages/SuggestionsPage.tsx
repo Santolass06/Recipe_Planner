@@ -5,6 +5,8 @@ import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
 import { useToast } from "../components/ui/Toast";
 import { useI18n } from "../i18n";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
+import { UNIT_LABELS_SHORT as UNIT_SHORT } from "../lib/units";
 import type { RecipeSuggestion } from "../../crates/core/bindings/RecipeSuggestion";
 import type { ExpiringItem } from "../../crates/core/bindings/ExpiringItem";
 import type { ProductionResult } from "../../crates/core/bindings/ProductionResult";
@@ -21,6 +23,7 @@ export default function SuggestionsPage() {
   const [expiring, setExpiring] = useState<ExpiringItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [pendingWriteOff, setPendingWriteOff] = useState<ExpiringItem | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,7 +57,7 @@ export default function SuggestionsPage() {
       );
       load();
     } catch (err) {
-      showToast(t(errKey(err, "recipes.cook.error")), "err");
+      showToast(typeof err === "string" && err ? err : t(errKey(err, "recipes.cook.error")), "err");
     } finally {
       setBusyId(null);
     }
@@ -75,7 +78,7 @@ export default function SuggestionsPage() {
       showToast(t("stock.loss.done", { name: item.ingredient_name }), "ok");
       load();
     } catch (err) {
-      showToast(t(errKey(err, "stock.loss.error")), "err");
+      showToast(typeof err === "string" && err ? err : t(errKey(err, "stock.loss.error")), "err");
     } finally {
       setBusyId(null);
     }
@@ -111,7 +114,7 @@ export default function SuggestionsPage() {
                 </div>
                 <button
                   className="btn btn-secondary btn-sm"
-                  onClick={() => writeOff(item)}
+                  onClick={() => setPendingWriteOff(item)}
                   disabled={busyId === item.ingredient_id}
                 >
                   {t("suggestions.writeOff")}
@@ -182,6 +185,18 @@ export default function SuggestionsPage() {
           </div>
         )}
       </section>
+
+      <ConfirmDialog
+        open={pendingWriteOff !== null}
+        title={t("stock.loss.confirmTitle", { name: pendingWriteOff?.ingredient_name ?? "" })}
+        body={t("stock.loss.confirmBody", { name: pendingWriteOff?.ingredient_name ?? "", qty: pendingWriteOff?.quantity ?? 0, unit: UNIT_SHORT[pendingWriteOff?.unit ?? ""] ?? pendingWriteOff?.unit ?? "" })}
+        onConfirm={() => {
+          if (pendingWriteOff) writeOff(pendingWriteOff);
+          setPendingWriteOff(null);
+        }}
+        onCancel={() => setPendingWriteOff(null)}
+        danger
+      />
     </div>
   );
 }

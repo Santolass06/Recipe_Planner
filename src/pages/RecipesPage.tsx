@@ -13,6 +13,7 @@ import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import type { ShoppingList } from "../../crates/core/bindings/ShoppingList";
 import type { ProductionResult } from "../../crates/core/bindings/ProductionResult";
 import type { StockShortfall } from "../../crates/core/bindings/StockShortfall";
+import type { StockItem } from "../../crates/core/bindings/StockItem";
 import type { RecipeImportPreview } from "../../crates/core/bindings/RecipeImportPreview";
 import { UNIT_LABELS_FULL as UNIT_LABELS, UNIT_LABELS_SHORT as UNIT_SHORT, convertUnit } from "../lib/units";
 import { errKey } from "../lib/errors";
@@ -588,6 +589,7 @@ function RecipeModal({
 export default function RecipesPage() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [stock, setStock] = useState<StockItem[]>([]);
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
   const [editing, setEditing] = useState<Recipe | null>(null);
@@ -614,12 +616,14 @@ export default function RecipesPage() {
 
   const load = useCallback(async () => {
     try {
-      const [recipesData, ingredientsData] = await Promise.all([
+      const [recipesData, ingredientsData, stockData] = await Promise.all([
         invoke<Recipe[]>("recipes_list"),
         invoke<Ingredient[]>("ingredients_list"),
+        invoke<StockItem[]>("stock_list"),
       ]);
       setRecipes(recipesData);
       setIngredients(ingredientsData);
+      setStock(stockData);
     } catch (e) {
       showToast(t(errKey(e, "recipes.loadError")), "err");
     }
@@ -811,7 +815,7 @@ export default function RecipesPage() {
       );
       load();
     } catch (e) {
-      showToast(t(errKey(e, "recipes.cook.error")), "err");
+      showToast(typeof e === "string" && e ? e : t(errKey(e, "recipes.cook.error")), "err");
     } finally {
       setCookBusy(false);
     }
@@ -840,6 +844,32 @@ export default function RecipesPage() {
       setListBusy(false);
     }
   }
+
+  const cookBalance = useMemo(() => {
+    if (!selected || !(Number(cookMultiplier) > 0)) return { coverage: 0, missing: [] as StockShortfall[] };
+    const mult = Number(cookMultiplier);
+    const lines = selected.ingredients ?? [];
+    const missing: StockShortfall[] = [];
+    let comparable = 0;
+    let covered = 0;
+    for (const line of lines) {
+      const heldItem = stock.find(s => s.ingredient_id === line.ingredient_id);
+      const held = heldItem?.quantity ?? 0;
+      const stockUnit = heldItem?.ingredient_unit ?? line.unit;
+      const converted = convertUnit(line.quantity * mult, line.unit, stockUnit);
+      if (converted === null) continue;
+      comparable++;
+      if (converted <= held) covered++;
+      else missing.push({
+        ingredient_id: line.ingredient_id,
+        ingredient_name: line.ingredient_name,
+        needed: line.quantity * mult,
+        available: held,
+        unit: line.unit,
+      });
+    }
+    return { coverage: comparable ? covered / comparable : 1, missing };
+  }, [selected, cookMultiplier, stock]);
 
   return (
     <div className="content" style={{ padding: 0, height: "100%", maxWidth: "none" }}>
@@ -1009,6 +1039,22 @@ export default function RecipesPage() {
           </label>
           <p className="text-4 mono" style={{ marginTop: "var(--space-1)" }}>{t("recipes.cook.yieldsProductHint")}</p>
         </div>
+
+        {selected && Number(cookMultiplier) > 0 && (
+          <div style={{ marginTop: "var(--space-3)" }}>
+            <div className="text-4 mono" style={{ marginBottom: 6 }}>
+              {t("suggestions.coverage", { pct: Math.round(cookBalance.coverage * 100) })}
+            </div>
+            <div style={{ height: 4, background: "var(--inset)", borderRadius: 3, marginBottom: cookBalance.missing.length > 0 ? 8 : 0 }}>
+              <div style={{ height: "100%", width: `${Math.round(cookBalance.coverage * 100)}%`, background: cookBalance.coverage === 1 ? "var(--green, var(--ember))" : "var(--amber)", borderRadius: 3 }} />
+            </div>
+            {cookBalance.missing.length > 0 && (
+              <div className="text-4 mono">
+                {t("suggestions.missing")}: {cookBalance.missing.map(m => m.ingredient_name).join(", ")}
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
 
       <Modal

@@ -267,6 +267,8 @@ export const en = {
       loading: "Recording…",
       done: "Loss of {name} recorded.",
       error: "Could not record the loss.",
+      confirmTitle: "Record loss for {name}?",
+      confirmBody: "Record {qty} {unit} of {name} as a loss. It leaves stock and counts towards the waste report. This action cannot be undone.",
     },
     registerPurchase: "Register Purchase",
     statusOut: "Out of Stock",

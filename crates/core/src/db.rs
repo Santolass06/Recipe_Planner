@@ -2857,39 +2857,73 @@ const PRICE_WINDOW_DAYS: i64 = 90;
 ///
 /// ponytail: weights by quantity purchased, not by what is still on the shelf.
 /// Lot-remaining tracking would change that; it does not exist yet.
-async fn weighted_avg_stock_price(conn: &Connection, ingredient_id: i64, fallback: f64) -> LibsqlResult<f64> {
+/// Weighted-average price per unit for many ingredients at once. Same three
+/// steps as `weighted_avg_stock_price`, but built for a recipe: the per-line
+/// lookups that `calculate_cost` used to make were N+1 (or 2N) queries per
+/// recipe, one per ingredient. Here the whole window and whole history are
+/// each a single grouped query (PERF-01, 2026-08).
+async fn weighted_avg_stock_prices(
+    conn: &Connection,
+    ingredient_ids: &[i64],
+    mut catalogue_price: impl FnMut(i64) -> f64,
+) -> LibsqlResult<HashMap<i64, f64>> {
+    let mut prices = HashMap::new();
+    if ingredient_ids.is_empty() {
+        return Ok(prices);
+    }
+
+    async fn load_prices(conn: &Connection, sql: &str) -> LibsqlResult<HashMap<i64, f64>> {
+        let mut rows = conn.query(sql, ()).await?;
+        let mut out = HashMap::new();
+        while let Some(row) = rows.next().await? {
+            let ingredient_id: i64 = row.get(0)?;
+            let weighted_sum: Option<f64> = row.get(1)?;
+            let total_qty: Option<f64> = row.get(2)?;
+            if let (Some(sum), Some(qty)) = (weighted_sum, total_qty) {
+                if qty > 0.0 {
+                    out.insert(ingredient_id, sum / qty);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    // ids come from the DB, since from our own code — inlining the id list is
+    // the same pattern `recipes_list` uses for its IN clause.
+    let ids_str = ingredient_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",");
     let since = (Utc::now() - chrono::Duration::days(PRICE_WINDOW_DAYS)).to_rfc3339();
 
-    async fn average(conn: &Connection, sql: &str, params: impl libsql::params::IntoParams) -> LibsqlResult<Option<f64>> {
-        let mut rows = conn.query(sql, params).await?;
-        let Some(row) = rows.next().await? else { return Ok(None) };
-        let weighted_sum: Option<f64> = row.get(0)?;
-        let total_qty: Option<f64> = row.get(1)?;
-        Ok(match (weighted_sum, total_qty) {
-            (Some(sum), Some(qty)) if qty > 0.0 => Some(sum / qty),
-            _ => None,
-        })
+    // Step 1: purchases inside the window — what the thing costs lately.
+    prices.extend(load_prices(conn, &format!(
+        "SELECT ingredient_id, SUM(quantity * price_per_unit), SUM(quantity) FROM stock_purchases
+         WHERE ingredient_id IN ({ids_str}) AND date(purchase_date) >= date('{since}')
+         GROUP BY ingredient_id"
+    )).await?);
+
+    // Step 2: every purchase ever, for the ingredients the window missed.
+    let missing: Vec<i64> = ingredient_ids.iter().copied().filter(|id| !prices.contains_key(id)).collect();
+    if !missing.is_empty() {
+        let missing_str = missing.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",");
+        prices.extend(load_prices(conn, &format!(
+            "SELECT ingredient_id, SUM(quantity * price_per_unit), SUM(quantity) FROM stock_purchases
+             WHERE ingredient_id IN ({missing_str})
+             GROUP BY ingredient_id"
+        )).await?);
     }
 
-    if let Some(price) = average(
-        conn,
-        "SELECT SUM(quantity * price_per_unit), SUM(quantity) FROM stock_purchases
-         WHERE ingredient_id = ?1 AND date(purchase_date) >= date(?2)",
-        params![ingredient_id, since],
-    ).await? {
-        return Ok(price);
+    // Step 3: catalogue price — never bought, so nothing else to go on.
+    for id in ingredient_ids {
+        prices.entry(*id).or_insert_with(|| catalogue_price(*id));
     }
 
-    if let Some(price) = average(
-        conn,
-        "SELECT SUM(quantity * price_per_unit), SUM(quantity) FROM stock_purchases
-         WHERE ingredient_id = ?1",
-        params![ingredient_id],
-    ).await? {
-        return Ok(price);
-    }
+    Ok(prices)
+}
 
-    Ok(fallback)
+/// Single-ingredient variant, used only where one price is needed (and thus
+/// no N+1 to batch away).
+async fn weighted_avg_stock_price(conn: &Connection, ingredient_id: i64, fallback: f64) -> LibsqlResult<f64> {
+    let mut prices = weighted_avg_stock_prices(conn, &[ingredient_id], |_| fallback).await?;
+    Ok(prices.remove(&ingredient_id).unwrap_or(fallback))
 }
 
 /// Calculate recipe cost
@@ -2917,6 +2951,28 @@ pub async fn calculate_cost(db: &Database, recipe_id: i64) -> LibsqlResult<CostB
         params![recipe_id],
     ).await?;
 
+    // Collected before pricing: the price lookup runs more queries on the
+    // same connection, and pricing all lines up front is two queries total
+    // instead of one (or two) per line (PERF-01).
+    let mut ingredient_lines = Vec::new();
+    while let Some(row) = rows.next().await? {
+        ingredient_lines.push((
+            row.get::<String>(0)?,
+            row.get::<f64>(1)?,
+            row.get::<String>(2)?,
+            row.get::<f64>(3)?,
+            row.get::<String>(4)?,
+            row.get::<i64>(5)?,
+        ));
+    }
+    drop(rows);
+
+    let ids: Vec<i64> = ingredient_lines.iter().map(|l| l.5).collect();
+    let catalogue_prices: HashMap<i64, f64> = ingredient_lines.iter().map(|l| (l.5, l.3)).collect();
+    let prices = weighted_avg_stock_prices(&conn, &ids, |id| {
+        catalogue_prices.get(&id).copied().unwrap_or(0.0)
+    }).await?;
+
     let mut ingredient_costs = Vec::new();
     let mut total_cost = 0.0_f64;
 
@@ -2924,14 +2980,10 @@ pub async fn calculate_cost(db: &Database, recipe_id: i64) -> LibsqlResult<CostB
         unit_str.parse().unwrap_or(Unit::Gram)
     }
 
-    while let Some(row) = rows.next().await? {
-        let name: String = row.get(0)?;
-        let quantity: f64 = row.get(1)?;
-        let unit_str: String = row.get(2)?;
+    for (name, quantity, unit_str, _, ingredient_unit_str, ingredient_id) in ingredient_lines {
         let unit = parse_unit(&unit_str);
-        let ingredient_id: i64 = row.get(5)?;
-        let price_per_unit = weighted_avg_stock_price(&conn, ingredient_id, row.get(3)?).await?;
-        let ingredient_unit = parse_unit(&row.get::<String>(4)?);
+        let price_per_unit = prices[&ingredient_id];
+        let ingredient_unit = parse_unit(&ingredient_unit_str);
 
         // Convert the recipe line's quantity into the ingredient's priced
         // unit before multiplying — otherwise "150 g" of an ingredient
@@ -6781,6 +6833,64 @@ mod fase3_stock_tests {
 
         let cost = calculate_cost(&db, recipe.recipe.id).await.unwrap();
         assert!((cost.total_cost - 14.0).abs() < 0.001, "expected 2L * 7€/L = 14€, got {}", cost.total_cost);
+    }
+
+    /// PERF-01 (2026-08): `calculate_cost` used to run one (or two) price
+    /// queries per recipe line — N+1 for a recipe with N ingredients. The
+    /// prices are now batched (two queries total through
+    /// `weighted_avg_stock_prices`). This regression proves the batched
+    /// compute returns exactly what the per-line lookups returned across all
+    /// three fallback steps — window, history, catalogue — in a single recipe.
+    #[tokio::test]
+    async fn recipe_cost_batches_price_lookups_across_ingredients() {
+        let db = test_db().await;
+
+        async fn ingredient(db: &Database, name: &str, catalogue: f64) -> Ingredient {
+            create_ingredient(db, IngredientInput {
+                name: name.into(), unit: Unit::Kilogram, price_per_unit: catalogue,
+                category_id: None, event_id: None,
+            }).await.unwrap()
+        }
+
+        async fn purchase(db: &Database, id: i64, qty: f64, price: f64, days_ago: i64) {
+            stock_purchase_add(db, StockPurchaseInput {
+                ingredient_id: id, quantity: qty, unit: Unit::Kilogram,
+                price_per_unit: price, total_price: qty * price, is_discount: false,
+                discount_percent: 0.0,
+                purchase_date: Utc::now() - chrono::Duration::days(days_ago),
+                expiry_date: None, supplier_id: None, brand: None, notes: None,
+            }).await.unwrap();
+        }
+
+        // Window price: 2kg@5 + 3kg@10 -> (10 + 30) / 5 = 8€/kg.
+        let farinha = ingredient(&db, "Farinha", 100.0).await;
+        purchase(&db, farinha.id, 2.0, 5.0, 2).await;
+        purchase(&db, farinha.id, 3.0, 10.0, 2).await;
+        // History fallback: only purchase is 200 days old -> 3€/kg.
+        let arroz = ingredient(&db, "Arroz", 2.0).await;
+        purchase(&db, arroz.id, 4.0, 3.0, 200).await;
+        // Catalogue fallback: never bought -> catalogue price 2€/kg.
+        let sal = ingredient(&db, "Sal", 2.0).await;
+
+        let recipe = create_recipe(&db, RecipeInput {
+            name: "Mistura".into(), category: "Geral".into(), portions: 1,
+            instructions: String::new(), prep_time_minutes: None, cook_time_minutes: None,
+            tags: vec![], image_base64: None, event_id: None,
+            ingredients: vec![
+                RecipeIngredientInput { ingredient_id: farinha.id, quantity: 1.0, unit: Unit::Kilogram },
+                RecipeIngredientInput { ingredient_id: arroz.id, quantity: 2.0, unit: Unit::Kilogram },
+                RecipeIngredientInput { ingredient_id: sal.id, quantity: 0.5, unit: Unit::Kilogram },
+            ],
+        }).await.unwrap();
+
+        let cost = calculate_cost(&db, recipe.recipe.id).await.unwrap();
+        let expected = 1.0 * 8.0 + 2.0 * 3.0 + 0.5 * 2.0; // 15.0
+        assert!(
+            (cost.total_cost - expected).abs() < 0.001,
+            "expected {expected} (window + history + catalogue), got {}",
+            cost.total_cost
+        );
+        assert_eq!(cost.ingredient_costs.len(), 3, "one cost row per recipe line");
     }
 
     #[tokio::test]
