@@ -377,9 +377,12 @@ esconder e proibir, e esconder chega. Se um dia houver licenciamento a sério,
 aí sim é outra conversa, e o custo de a ter adiado é zero.
 
 **A matriz de gating** (que ecrã, que relatório, que comando pertence a que
-edição) escreve-se quando a flag for introduzida, não antes. Constrói-se
-sozinha à medida que as features aparecem — desde que o schema tenha nascido
-certo, e agora vai nascer.
+edição) foi escrita em 2026-08-13 (PRD-02, auditoria ronda 3): Family cobre
+receitas, stock, listas, planeamento, scanner, sugestões e desperdício;
+Eventos, Custos, Fornecedores e a produção/venda ficam em Pro. Aplicada em
+três sítios — `Edition::allows` (Rust, a fonte da verdade), a sidebar
+(esconde), e um loader guard no router (redireciona para `/` se alguém tentar
+entrar numa rota Pro por URL direta em Family).
 
 
 ---

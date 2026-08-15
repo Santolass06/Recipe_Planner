@@ -152,8 +152,8 @@ impl AppDb {
         mise_core::db::upsert_stock(&self.db, input).await.map_err(user_error)
     }
 
-    pub async fn update_stock_quantity(&self, ingredient_id: i64, quantity: f64) -> Result<StockItem, String> {
-        mise_core::db::update_stock_quantity(&self.db, ingredient_id, quantity).await.map_err(user_error)
+    pub async fn update_stock_quantity(&self, ingredient_id: i64, quantity: f64, min_quantity: Option<f64>) -> Result<StockItem, String> {
+        mise_core::db::update_stock_quantity(&self.db, ingredient_id, quantity, min_quantity).await.map_err(user_error)
     }
 
     pub async fn delete_stock(&self, ingredient_id: i64) -> Result<(), String> {
@@ -765,8 +765,9 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
         ingredient_id: i64,
         quantity: f64,
+        min_quantity: Option<f64>,
     ) -> Result<StockItem, String> {
-        db.update_stock_quantity(ingredient_id, quantity).await.map_err(user_error)
+        db.update_stock_quantity(ingredient_id, quantity, min_quantity).await.map_err(user_error)
     }
 
     #[tauri::command]

@@ -1616,22 +1616,28 @@ pub async fn upsert_stock(db: &Database, input: StockInput) -> LibsqlResult<Stoc
 /// Works for an ingredient with no stock row yet: the movement's upsert creates
 /// it, where the old direct UPDATE silently matched nothing and then failed
 /// looking the row back up.
-pub async fn update_stock_quantity(db: &Database, ingredient_id: i64, quantity: f64) -> LibsqlResult<StockItem> {
+pub async fn update_stock_quantity(
+    db: &Database,
+    ingredient_id: i64,
+    quantity: f64,
+    min_quantity: Option<f64>,
+) -> LibsqlResult<StockItem> {
     let conn = get_conn(db).await?;
 
-    let (current, unit) = {
+    let (current, name, unit_str) = {
         let mut rows = conn.query(
-            "SELECT COALESCE((SELECT quantity FROM stock WHERE ingredient_id = ?1), 0.0), i.unit
+            "SELECT COALESCE((SELECT quantity FROM stock WHERE ingredient_id = ?1), 0.0), i.name, i.unit
              FROM ingredients i WHERE i.id = ?1",
             params![ingredient_id],
         ).await?;
         let row = rows.next().await?.ok_or(libsql::Error::QueryReturnedNoRows)?;
-        (row.get::<f64>(0)?, parse_unit_str(&row.get::<String>(1)?))
+        (row.get::<f64>(0)?, row.get::<String>(1)?, row.get::<String>(2)?)
     };
+    let unit = parse_unit_str(&unit_str);
 
     let delta = quantity - current;
+    let tx = conn.transaction().await?;
     if delta != 0.0 {
-        let tx = conn.transaction().await?;
         stock_movement_add_tx(&tx, StockMovementInput {
             ingredient_id: Some(ingredient_id),
             recipe_id: None,
@@ -1644,8 +1650,27 @@ pub async fn update_stock_quantity(db: &Database, ingredient_id: i64, quantity: 
             production_id: None,
             signed_quantity: Some(delta),
         }).await?;
-        tx.commit().await?;
     }
+    // min_quantity is a threshold the user sets directly, not part of the
+    // movement ledger — written straight to the cache. Found while merging the
+    // 2026-08-13 audit round: DOM-08's fix pointed the "Ajustar" UI at this
+    // command instead of `upsert_stock`, and this parameter was missing —
+    // upsert_stock wrote min_quantity, this command silently didn't, so the
+    // "Quantidade mínima" field in the same modal stopped saving.
+    // ON CONFLICT DO UPDATE only touches min_quantity/updated_at — if the
+    // movement above already created the row, quantity is left exactly as it
+    // set it; if this is the only change (delta == 0), the INSERT branch's
+    // quantity = 0 is only ever used for a row that has none yet, i.e. current
+    // was already 0.
+    if let Some(min_quantity) = min_quantity {
+        tx.execute(
+            "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity, updated_at)
+             VALUES (?1, ?2, ?3, 0, ?4, datetime('now'))
+             ON CONFLICT(ingredient_id) DO UPDATE SET min_quantity = ?4, updated_at = datetime('now')",
+            params![ingredient_id, name, unit_str, min_quantity],
+        ).await?;
+    }
+    tx.commit().await?;
 
     // Release the connection before get_stock opens its own (pool deadlock).
     drop(conn);
@@ -7491,7 +7516,7 @@ mod crud_base_tests {
         let all_stock = stock_list(&db).await.unwrap();
         assert_eq!(all_stock.iter().filter(|s| s.ingredient_id == ingredient.id).count(), 1);
 
-        let quantity_set = update_stock_quantity(&db, ingredient.id, 3.0).await.unwrap();
+        let quantity_set = update_stock_quantity(&db, ingredient.id, 3.0, None).await.unwrap();
         assert_eq!(quantity_set.quantity, 3.0);
 
         delete_stock(&db, ingredient.id).await.unwrap();
@@ -7672,7 +7697,7 @@ mod audit_2026_07 {
         }).await.unwrap();
 
         // The user counts the shelf and says it is really 700, not 1000.
-        update_stock_quantity(&db, f.id, 700.0).await.unwrap();
+        update_stock_quantity(&db, f.id, 700.0, None).await.unwrap();
         assert_eq!(get_stock(&db, f.id).await.unwrap().quantity, 700.0);
 
         stock_reconcile(&db).await.unwrap();
@@ -9353,6 +9378,34 @@ mod audit_2026_08 {
         create_ingredient(db, IngredientInput {
             name: "Farinha".into(), unit, price_per_unit: price, category_id: None, event_id: None,
         }).await.unwrap()
+    }
+
+    /// Found merging the 2026-08-13 round into main: DOM-08's fix pointed the
+    /// "Ajustar" UI at `stock_update_quantity` instead of the old `stock_upsert`
+    /// — correct for the quantity-as-Adjustment-movement invariant, but
+    /// `stock_upsert` also wrote `min_quantity` and the replacement command
+    /// took no such parameter, so the "Quantidade mínima" field in the same
+    /// modal silently stopped saving. Also covers setting `min_quantity` alone,
+    /// with the counted quantity unchanged.
+    #[tokio::test]
+    async fn update_stock_quantity_also_saves_the_min_quantity_threshold() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+
+        let stock = update_stock_quantity(&db, f.id, 500.0, Some(50.0)).await.unwrap();
+        assert_eq!(stock.quantity, 500.0);
+        assert_eq!(stock.min_quantity, 50.0, "min_quantity was not saved alongside the counted quantity");
+
+        // Editing only the threshold, quantity unchanged — must not record a
+        // zero-magnitude Adjustment movement, and must not touch the count.
+        let before = stock_movements_for_ingredient(&db, f.id, 20).await.unwrap().len();
+        let stock = update_stock_quantity(&db, f.id, 500.0, Some(80.0)).await.unwrap();
+        assert_eq!(stock.quantity, 500.0, "an unrelated min_quantity edit changed the counted quantity");
+        assert_eq!(stock.min_quantity, 80.0);
+        assert_eq!(
+            stock_movements_for_ingredient(&db, f.id, 20).await.unwrap().len(), before,
+            "editing only the threshold recorded a spurious movement"
+        );
     }
 
     /// DOM-07: `stock_purchase_add_tx` (db.rs:6100) was built to record a

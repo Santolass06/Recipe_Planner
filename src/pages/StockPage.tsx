@@ -608,9 +608,14 @@ export default function StockPage() {
     }
     setLoading(true);
     try {
+      // Scalar Tauri command args (not a nested `input:` struct) need camelCase
+      // top-level keys — Tauri's IPC matches JS object keys to Rust parameter
+      // names by converting camelCase, so a snake_case key here silently fails
+      // to bind and the argument comes through as missing/default in Rust.
       await invoke("stock_update_quantity", {
-        ingredient_id: form.ingredient_id,
+        ingredientId: form.ingredient_id,
         quantity: form.quantity,
+        minQuantity: form.min_quantity,
       });
       showToast(modal === "create" ? t("stock.created") : t("stock.updated"), "ok");
       closeModal();

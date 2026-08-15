@@ -1311,16 +1311,30 @@ Relatório completo em `audit/AUDIT-2026-08.md`; plano em
 auto-declarara parciais (runtime, comando-a-comando) e reabriu S5 como falso
 (`PRD-02`).
 
-**Estado:** auditoria COMPLETA, achados todos corrigidos — `7c5ef4a` (código +
-testes de regressão) e `bb3d0e3` (relatório e plano).
+**Estado final: auditoria COMPLETA, achados todos corrigidos**, em três
+lotes — `7c5ef4a` (código + testes de regressão dos P0/P1/P3), `70c3c91`
+(PERF-01 reaberto e fechado, UX-03/04/05, SEC-002) e `56add8a` (UI de venda,
+perda de produto e orçamento de evento, que os comandos de backend já
+suportavam sem ecrã).
 
-Auditoria 2026-08: corrigidos DOM-07/DOM-08/PRD-02 (P0), DOM-12/CMD-02 (P1) e
-DOM-10/DOM-11/CMD-06/CMD-07 (P3); gating Family/Pro aplicado; ver commits
-`7c5ef4a` e `bb3d0e3`.
+Corrigidos: DOM-07/DOM-08/PRD-02 (P0), DOM-12/CMD-02 (P1), DOM-10/DOM-11/
+CMD-06/CMD-07 (P3), PERF-01 (reaberto como falso em S4, fechado com
+`calculate_cost` a passar de N+1 para duas queries por receita). Gating
+Family/Pro aplicado na sidebar, no router (loader guard) e em ReportsPage.
 
-Em aberto, com motivo: `PERF-01` (N+1 em `calculate_cost`, reaberto como falso
-em S4), `S0.4` (rotação do PAT — ⏳) e o resto da passagem de 2026-08-09 ainda
-por reverificar (validação de structs, atomicidade de receitas, backup, datas,
-i18n).
+**Achado a fechar o merge, não desta ronda:** o fix de DOM-08 trocou
+`stock_upsert` por `stock_update_quantity` na UI de "Ajustar", mas o comando
+novo não tinha parâmetro de `min_quantity` — o mesmo campo que `stock_upsert`
+gravava. O botão continuava certo para a quantidade contada e silenciosamente
+parou de guardar o limiar de stock baixo. Corrigido antes do merge para
+`main`, com teste de regressão; a chamada também levava as chaves de topo em
+snake_case, que a convenção do Tauri v2 deste projeto exige em camelCase para
+argumentos escalares (só campos dentro de um `input: {}` ficam em
+snake_case) — corrigido no mesmo commit.
+
+Em aberto, com motivo: `S0.4` (rotação do PAT — ⏳, ainda por confirmar) e a
+passagem de 2026-08-09 continua reverificada e válida (validação de structs,
+atomicidade de receitas, backup, datas, i18n — nenhuma regressão encontrada
+nesta ronda).
 
 ---
