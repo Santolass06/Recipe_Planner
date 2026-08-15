@@ -333,7 +333,7 @@ export default function DashboardPage() {
   const navigateToMealPlanner = useCallback(() => navigate("/planeamento"), [navigate]);
   const navigateToCalendar = useCallback(() => navigate("/calendario"), [navigate]);
   const navigateToShopping = useCallback(() => navigate("/compras"), [navigate]);
-  const navigateToRecipes = useCallback(() => navigate("/receitas/nova"), [navigate]);
+  const navigateToRecipes = useCallback(() => navigate("/receitas", { state: { openCreate: true } }), [navigate]);
 
   if (loading) {
     return (

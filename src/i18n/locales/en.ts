@@ -683,10 +683,12 @@ export const en = {
     },
     uploadStep: {
       title: "Photograph or upload the receipt",
+      titleUploadOnly: "Upload the receipt",
       desc: "We extract the items automatically. Review and correct before importing to stock. Supports JPG, PNG, WebP — OCR runs locally in the browser (Portuguese).",
       chooseFile: "Choose File",
       useCamera: "Use Camera",
       hint: "Desktop: use \"Choose File\". Mobile: \"Use Camera\" opens the rear camera.",
+      hintUploadOnly: "Choose a JPG, PNG, or WebP file.",
     },
     extractStep: {
       receiptLabel: "RECEIPT",

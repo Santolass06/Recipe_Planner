@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { invoke } from "../lib/devInvoke";
 import ImageUpload from "../components/ImageUpload";
 import Modal from "../components/ui/Modal";
@@ -587,6 +588,8 @@ function RecipeModal({
 // --- Main Page ---
 
 export default function RecipesPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [stock, setStock] = useState<StockItem[]>([]);
@@ -658,6 +661,17 @@ export default function RecipesPage() {
     setEditing(null);
     setModal("create");
   }
+
+  // Dashboard's "Nova receita" quick action navigates here with this flag
+  // instead of a dedicated route, since recipe creation is a modal, not a
+  // page — a `/receitas/nova` route never existed to send it to.
+  useEffect(() => {
+    if ((location.state as { openCreate?: boolean } | null)?.openCreate) {
+      openCreate();
+      navigate(location.pathname, { replace: true, state: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function openEdit(recipe: Recipe) {
     setForm({

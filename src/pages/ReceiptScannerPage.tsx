@@ -455,7 +455,9 @@ export default function ReceiptScannerPage() {
           <div style={{ width: 64, height: 64, borderRadius: 16, background: "var(--ember-soft)", display: "grid", placeItems: "center", margin: "0 auto" }}>
             <span className="ms" style={{ fontSize: 32, color: "var(--ember)" }} aria-hidden="true">photo_camera</span>
           </div>
-          <div style={{ fontFamily: "var(--serif)", fontSize: 22, color: "var(--ink)", marginTop: 18 }}>{t("receiptScanner.uploadStep.title")}</div>
+          <div style={{ fontFamily: "var(--serif)", fontSize: 22, color: "var(--ink)", marginTop: 18 }}>
+            {t(CAMERA_AVAILABLE ? "receiptScanner.uploadStep.title" : "receiptScanner.uploadStep.titleUploadOnly")}
+          </div>
           <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6, maxWidth: 380, marginLeft: "auto", marginRight: "auto", lineHeight: 1.5 }}>
             {t("receiptScanner.uploadStep.desc")}
           </div>
@@ -472,7 +474,9 @@ export default function ReceiptScannerPage() {
               </button>
             )}
           </div>
-          <p style={{ margin: "16px 0 0", fontSize: 11, color: "var(--ink-3)", lineHeight: 1.6 }}>{t("receiptScanner.uploadStep.hint")}</p>
+          <p style={{ margin: "16px 0 0", fontSize: 11, color: "var(--ink-3)", lineHeight: 1.6 }}>
+            {t(CAMERA_AVAILABLE ? "receiptScanner.uploadStep.hint" : "receiptScanner.uploadStep.hintUploadOnly")}
+          </p>
         </div>
       ) : image && !showResults ? (
         /* step 1: extract */

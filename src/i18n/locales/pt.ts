@@ -683,10 +683,12 @@ export const pt = {
     },
     uploadStep: {
       title: "Fotografa ou carrega o talão",
+      titleUploadOnly: "Carrega o talão",
       desc: "Extraímos os itens automaticamente. Revê e corrige antes de importar para o stock. Suporta JPG, PNG, WebP — o OCR corre localmente no browser (português).",
       chooseFile: "Escolher ficheiro",
       useCamera: "Usar câmara",
       hint: "Desktop: usa \"Escolher ficheiro\". Mobile: \"Usar câmara\" abre a câmara traseira.",
+      hintUploadOnly: "Escolhe um ficheiro JPG, PNG ou WebP.",
     },
     extractStep: {
       receiptLabel: "TALÃO",
