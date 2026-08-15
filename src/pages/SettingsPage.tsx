@@ -3,6 +3,7 @@ import { useToast } from "../components/ui/Toast";
 import { invoke, openExternal } from "../lib/devInvoke";
 import { useI18n } from "../i18n";
 import type { Edition } from "../../crates/core/bindings/Edition";
+import { setEditionCache } from "../lib/edition";
 import { applyTheme } from "../theme";
 import type { ProblemReportInput } from "../../crates/core/bindings/ProblemReportInput";
 import { errKey } from "../lib/errors";
@@ -192,6 +193,7 @@ export default function SettingsPage() {
     setEdition(next);
     try {
       await invoke("edition_set", { edition: next });
+      setEditionCache(next);
       showToast(t("settings.editionChanged"), "ok");
     } catch (e) {
       setEdition(previous);

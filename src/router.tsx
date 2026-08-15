@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, redirect } from "react-router-dom";
 import Layout from "./components/Layout";
 import DashboardPage from "./pages/DashboardPage";
 import IngredientsPage from "./pages/IngredientsPage";
@@ -16,6 +16,23 @@ import SuggestionsPage from "./pages/SuggestionsPage";
 import ReportsPage from "./pages/ReportsPage";
 import ReceiptScannerPage from "./pages/ReceiptScannerPage";
 import HelpPage from "./pages/HelpPage";
+import { invoke } from "./lib/devInvoke";
+import type { Edition } from "../crates/core/bindings/Edition";
+import { isProEdition } from "./lib/edition";
+
+/**
+ * Loader guard (PRD-02): Pro-only routes redirect to Home when the edition is
+ * not Pro. Running in a loader (rather than a render-time component) keeps the
+ * redirect flush-free — navigation to the route is cancelled before it paints.
+ *
+ * (React Router v7's `redirect` takes a `ResponseInit`/status, not a
+ * `{ replace }` option, so a plain home redirect is the idiomatic guard.)
+ */
+const requireProLoader = async () => {
+  const edition = await invoke<Edition>("edition_get");
+  if (!isProEdition(edition)) throw redirect("/");
+  return null;
+};
 
 export const router = createBrowserRouter([
   {
@@ -26,16 +43,16 @@ export const router = createBrowserRouter([
       { path: "dashboard", element: <DashboardPage /> },
       { path: "ingredientes", element: <IngredientsPage /> },
       { path: "receitas", element: <RecipesPage /> },
-      { path: "custos", element: <CostsPage /> },
+      { path: "custos", element: <CostsPage />, loader: requireProLoader },
       { path: "armazem", element: <StockPage /> },
       { path: "compras", element: <ShoppingListPage /> },
-      { path: "eventos", element: <EventsPage /> },
-      { path: "eventos/:id", element: <EventDetailPage /> },
+      { path: "eventos", element: <EventsPage />, loader: requireProLoader },
+      { path: "eventos/:id", element: <EventDetailPage />, loader: requireProLoader },
       { path: "planeamento", element: <MealPlannerPage /> },
       { path: "calendario", element: <CalendarPage /> },
       { path: "sugestoes", element: <SuggestionsPage /> },
       { path: "relatorios", element: <ReportsPage /> },
-      { path: "fornecedores", element: <SuppliersPage /> },
+      { path: "fornecedores", element: <SuppliersPage />, loader: requireProLoader },
       { path: "scanner", element: <ReceiptScannerPage /> },
       { path: "definicoes", element: <SettingsPage /> },
       { path: "ajuda", element: <HelpPage /> },

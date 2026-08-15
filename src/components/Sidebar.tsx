@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { useI18n } from "../i18n";
+import { useEdition, isProEdition, PRO_ONLY_PATHS } from "../lib/edition";
 
 type NavItemProps = { icon: string; label: string; to: string; end?: boolean };
 
@@ -18,8 +19,9 @@ function NavItem({ icon, label, to, end }: NavItemProps) {
 
 export default function Sidebar() {
   const { t } = useI18n();
+  const edition = useEdition();
 
-  const groups: { label: string; items: NavItemProps[] }[] = [
+  const rawGroups: { label: string; items: NavItemProps[] }[] = [
     { label: t("nav.kitchen"), items: [
       { to: "/", end: true, icon: "dashboard", label: t("nav.dashboard") },
     ] },
@@ -48,6 +50,14 @@ export default function Sidebar() {
       { to: "/ajuda", icon: "help", label: t("nav.help") },
     ] },
   ];
+
+  // Family edition must not surface Pro-only sections (PRD-02).
+  const groups = isProEdition(edition)
+    ? rawGroups
+    : rawGroups.map((g) => ({
+        ...g,
+        items: g.items.filter((it) => !PRO_ONLY_PATHS.includes(it.to)),
+      }));
 
   return (
     <aside className="sidebar">

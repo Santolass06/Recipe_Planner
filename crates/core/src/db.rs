@@ -831,6 +831,14 @@ pub mod migrations {
 /// so. Every reader used to try RFC3339 alone and fall back to *now* — so every
 /// row created by the default showed as having been created this instant, and
 /// the price-trend chart drew every point on today.
+///
+/// CMD-07 (audit 2026-08): an unreadable date still falls back to `Utc::now()`.
+/// Accepted as-is deliberately: ~35 call sites read display fields through this,
+/// a `Result` would touch all of them for a value only columns that are already
+/// corrupt can produce, and the worst case is a wrong "created at" in a visual —
+/// no data is written or destroyed. If a `Result` is ever wanted, the plumbing
+/// lives in `parse_db_datetime_opt` below, which keeps "no date" and "unreadable
+/// date" distinguishable for columns that are legitimately empty.
 fn parse_db_datetime(raw: &str) -> DateTime<Utc> {
     if let Ok(dt) = DateTime::parse_from_rfc3339(raw) {
         return dt.with_timezone(&Utc);
@@ -1608,22 +1616,28 @@ pub async fn upsert_stock(db: &Database, input: StockInput) -> LibsqlResult<Stoc
 /// Works for an ingredient with no stock row yet: the movement's upsert creates
 /// it, where the old direct UPDATE silently matched nothing and then failed
 /// looking the row back up.
-pub async fn update_stock_quantity(db: &Database, ingredient_id: i64, quantity: f64) -> LibsqlResult<StockItem> {
+pub async fn update_stock_quantity(
+    db: &Database,
+    ingredient_id: i64,
+    quantity: f64,
+    min_quantity: Option<f64>,
+) -> LibsqlResult<StockItem> {
     let conn = get_conn(db).await?;
 
-    let (current, unit) = {
+    let (current, name, unit_str) = {
         let mut rows = conn.query(
-            "SELECT COALESCE((SELECT quantity FROM stock WHERE ingredient_id = ?1), 0.0), i.unit
+            "SELECT COALESCE((SELECT quantity FROM stock WHERE ingredient_id = ?1), 0.0), i.name, i.unit
              FROM ingredients i WHERE i.id = ?1",
             params![ingredient_id],
         ).await?;
         let row = rows.next().await?.ok_or(libsql::Error::QueryReturnedNoRows)?;
-        (row.get::<f64>(0)?, parse_unit_str(&row.get::<String>(1)?))
+        (row.get::<f64>(0)?, row.get::<String>(1)?, row.get::<String>(2)?)
     };
+    let unit = parse_unit_str(&unit_str);
 
     let delta = quantity - current;
+    let tx = conn.transaction().await?;
     if delta != 0.0 {
-        let tx = conn.transaction().await?;
         stock_movement_add_tx(&tx, StockMovementInput {
             ingredient_id: Some(ingredient_id),
             recipe_id: None,
@@ -1636,8 +1650,27 @@ pub async fn update_stock_quantity(db: &Database, ingredient_id: i64, quantity: 
             production_id: None,
             signed_quantity: Some(delta),
         }).await?;
-        tx.commit().await?;
     }
+    // min_quantity is a threshold the user sets directly, not part of the
+    // movement ledger — written straight to the cache. Found while merging the
+    // 2026-08-13 audit round: DOM-08's fix pointed the "Ajustar" UI at this
+    // command instead of `upsert_stock`, and this parameter was missing —
+    // upsert_stock wrote min_quantity, this command silently didn't, so the
+    // "Quantidade mínima" field in the same modal stopped saving.
+    // ON CONFLICT DO UPDATE only touches min_quantity/updated_at — if the
+    // movement above already created the row, quantity is left exactly as it
+    // set it; if this is the only change (delta == 0), the INSERT branch's
+    // quantity = 0 is only ever used for a row that has none yet, i.e. current
+    // was already 0.
+    if let Some(min_quantity) = min_quantity {
+        tx.execute(
+            "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity, updated_at)
+             VALUES (?1, ?2, ?3, 0, ?4, datetime('now'))
+             ON CONFLICT(ingredient_id) DO UPDATE SET min_quantity = ?4, updated_at = datetime('now')",
+            params![ingredient_id, name, unit_str, min_quantity],
+        ).await?;
+    }
+    tx.commit().await?;
 
     // Release the connection before get_stock opens its own (pool deadlock).
     drop(conn);
@@ -1800,6 +1833,13 @@ async fn stock_movement_add_tx(
     let mut quantity = signed_movement_quantity(&input)?;
     let mut unit_str = input.unit.to_string();
     let type_str = input.movement_type.to_string();
+    // CMD-06: a price is per unit, so it must follow the quantity into the
+    // ingredient's unit — a cost typed in €/kg stored raw landed in
+    // stock_movements as if it were €/g, wrong by the same 1000× that DOM-01
+    // corrected for the quantity. Default to what the caller asked for; only
+    // the conversion path below rewrites them.
+    let mut unit_cost = input.unit_cost;
+    let mut sale_price = input.sale_price;
 
     // Convert into the ingredient's own unit rather than trusting the caller.
     // Every caller today already passes it, but nothing forced them to, and a
@@ -1822,6 +1862,13 @@ async fn stock_movement_add_tx(
             )?;
             quantity = converted.copysign(quantity);
             unit_str = ingredient_unit_str;
+            // Same per-unit invariant `to_ingredient_unit` keeps for prices:
+            // quantity × unit_cost is what stays constant, so the per-unit cost
+            // scales with the quantity conversion.
+            if converted != 0.0 {
+                unit_cost = unit_cost.map(|c| input.quantity.abs() * c / converted);
+                sale_price = sale_price.map(|p| input.quantity.abs() * p / converted);
+            }
         }
     }
 
@@ -1837,8 +1884,8 @@ async fn stock_movement_add_tx(
             type_str,
             quantity,
             unit_str.clone(),
-            input.unit_cost,
-            input.sale_price,
+            unit_cost,
+            sale_price,
             input.reason.clone(),
             input.production_id.clone(),
             Utc::now().to_rfc3339(),
@@ -1873,8 +1920,8 @@ async fn stock_movement_add_tx(
         // What was stored, not what was asked for — the two differ whenever the
         // caller's unit had to be converted into the ingredient's.
         unit: parse_unit_str(&unit_str),
-        unit_cost: input.unit_cost,
-        sale_price: input.sale_price,
+        unit_cost,
+        sale_price,
         reason: input.reason,
         production_id: input.production_id,
         created_by: None,
@@ -2049,7 +2096,9 @@ pub async fn record_usage_event(db: &Database, event_type: &str, payload: &serde
 pub async fn suggest_recipes(db: &Database, limit: u32) -> LibsqlResult<Vec<RecipeSuggestion>> {
     let conn = get_conn(db).await?;
 
-    let expiring: std::collections::HashSet<i64> = expiring_items(db, 7).await?
+    // Share the connection: `expiring_items` opening its own while `conn` is
+    // still held deadlocks libsql's pool (CMD-02, db.rs:1592).
+    let expiring: std::collections::HashSet<i64> = expiring_items_tx(&conn, 7).await?
         .into_iter().map(|item| item.ingredient_id).collect();
 
     let recipes: Vec<(i64, String, String, u32)> = {
@@ -2131,16 +2180,29 @@ pub async fn suggest_recipes(db: &Database, limit: u32) -> LibsqlResult<Vec<Reci
 /// missing date means nobody tracked it, not that it never goes off.
 pub async fn expiring_items(db: &Database, within_days: u32) -> LibsqlResult<Vec<ExpiringItem>> {
     let conn = get_conn(db).await?;
+    expiring_items_tx(&conn, within_days).await
+}
+
+/// Same as `expiring_items`, on a caller-supplied connection. Every internal
+/// caller that already holds a `&Connection` must use this one — opening a
+/// second connection while the first is still held deadlocks libsql's pool
+/// (CMD-02; the same caveat as db.rs:1592).
+async fn expiring_items_tx(conn: &Connection, within_days: u32) -> LibsqlResult<Vec<ExpiringItem>> {
     let cutoff = (Utc::now() + chrono::Duration::days(within_days as i64)).to_rfc3339();
 
+    // DOM-12: report what is actually left, not what was bought. SUM(sp.quantity)
+    // counted purchases — consumptions never touch `stock_purchases`, so an
+    // ingredient with 2 kg bought and 1 kg cooked showed as 2 kg about to rot.
+    // `stock.quantity` is the real balance, kept in the ingredient's own unit.
     let mut rows = conn.query(
-        r#"SELECT sp.ingredient_id, i.name, SUM(sp.quantity), i.unit, MIN(sp.expiry_date)
+        r#"SELECT sp.ingredient_id, i.name, COALESCE(s.quantity, 0.0), i.unit, MIN(sp.expiry_date)
            FROM stock_purchases sp
            JOIN ingredients i ON sp.ingredient_id = i.id
+           LEFT JOIN stock s ON s.ingredient_id = sp.ingredient_id
            WHERE sp.expiry_date IS NOT NULL
              AND i.event_id IS NULL
              AND date(sp.expiry_date) <= date(?1)
-           GROUP BY sp.ingredient_id, i.name, i.unit
+           GROUP BY sp.ingredient_id, i.name, i.unit, s.quantity
            ORDER BY MIN(sp.expiry_date) ASC"#,
         params![cutoff],
     ).await?;
@@ -2495,6 +2557,13 @@ pub async fn create_shopping_list_from_recipes(
     db: &Database,
     input: ShoppingListFromRecipesInput,
 ) -> LibsqlResult<ShoppingList> {
+    // DOM-11: the validator's `range(min = 0.0)` admits zero, which would build
+    // a shopping list of nothing. This command must refuse it outright.
+    if input.portions_multiplier <= 0.0 {
+        return Err(libsql::Error::Misuse(
+            "portions_multiplier must be greater than zero".to_string(),
+        ));
+    }
     let conn = get_conn(db).await?;
     let weights: Vec<(i64, f64)> = input
         .recipe_ids
@@ -2813,39 +2882,73 @@ const PRICE_WINDOW_DAYS: i64 = 90;
 ///
 /// ponytail: weights by quantity purchased, not by what is still on the shelf.
 /// Lot-remaining tracking would change that; it does not exist yet.
-async fn weighted_avg_stock_price(conn: &Connection, ingredient_id: i64, fallback: f64) -> LibsqlResult<f64> {
+/// Weighted-average price per unit for many ingredients at once. Same three
+/// steps as `weighted_avg_stock_price`, but built for a recipe: the per-line
+/// lookups that `calculate_cost` used to make were N+1 (or 2N) queries per
+/// recipe, one per ingredient. Here the whole window and whole history are
+/// each a single grouped query (PERF-01, 2026-08).
+async fn weighted_avg_stock_prices(
+    conn: &Connection,
+    ingredient_ids: &[i64],
+    mut catalogue_price: impl FnMut(i64) -> f64,
+) -> LibsqlResult<HashMap<i64, f64>> {
+    let mut prices = HashMap::new();
+    if ingredient_ids.is_empty() {
+        return Ok(prices);
+    }
+
+    async fn load_prices(conn: &Connection, sql: &str) -> LibsqlResult<HashMap<i64, f64>> {
+        let mut rows = conn.query(sql, ()).await?;
+        let mut out = HashMap::new();
+        while let Some(row) = rows.next().await? {
+            let ingredient_id: i64 = row.get(0)?;
+            let weighted_sum: Option<f64> = row.get(1)?;
+            let total_qty: Option<f64> = row.get(2)?;
+            if let (Some(sum), Some(qty)) = (weighted_sum, total_qty) {
+                if qty > 0.0 {
+                    out.insert(ingredient_id, sum / qty);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    // ids come from the DB, since from our own code — inlining the id list is
+    // the same pattern `recipes_list` uses for its IN clause.
+    let ids_str = ingredient_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",");
     let since = (Utc::now() - chrono::Duration::days(PRICE_WINDOW_DAYS)).to_rfc3339();
 
-    async fn average(conn: &Connection, sql: &str, params: impl libsql::params::IntoParams) -> LibsqlResult<Option<f64>> {
-        let mut rows = conn.query(sql, params).await?;
-        let Some(row) = rows.next().await? else { return Ok(None) };
-        let weighted_sum: Option<f64> = row.get(0)?;
-        let total_qty: Option<f64> = row.get(1)?;
-        Ok(match (weighted_sum, total_qty) {
-            (Some(sum), Some(qty)) if qty > 0.0 => Some(sum / qty),
-            _ => None,
-        })
+    // Step 1: purchases inside the window — what the thing costs lately.
+    prices.extend(load_prices(conn, &format!(
+        "SELECT ingredient_id, SUM(quantity * price_per_unit), SUM(quantity) FROM stock_purchases
+         WHERE ingredient_id IN ({ids_str}) AND date(purchase_date) >= date('{since}')
+         GROUP BY ingredient_id"
+    )).await?);
+
+    // Step 2: every purchase ever, for the ingredients the window missed.
+    let missing: Vec<i64> = ingredient_ids.iter().copied().filter(|id| !prices.contains_key(id)).collect();
+    if !missing.is_empty() {
+        let missing_str = missing.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",");
+        prices.extend(load_prices(conn, &format!(
+            "SELECT ingredient_id, SUM(quantity * price_per_unit), SUM(quantity) FROM stock_purchases
+             WHERE ingredient_id IN ({missing_str})
+             GROUP BY ingredient_id"
+        )).await?);
     }
 
-    if let Some(price) = average(
-        conn,
-        "SELECT SUM(quantity * price_per_unit), SUM(quantity) FROM stock_purchases
-         WHERE ingredient_id = ?1 AND date(purchase_date) >= date(?2)",
-        params![ingredient_id, since],
-    ).await? {
-        return Ok(price);
+    // Step 3: catalogue price — never bought, so nothing else to go on.
+    for id in ingredient_ids {
+        prices.entry(*id).or_insert_with(|| catalogue_price(*id));
     }
 
-    if let Some(price) = average(
-        conn,
-        "SELECT SUM(quantity * price_per_unit), SUM(quantity) FROM stock_purchases
-         WHERE ingredient_id = ?1",
-        params![ingredient_id],
-    ).await? {
-        return Ok(price);
-    }
+    Ok(prices)
+}
 
-    Ok(fallback)
+/// Single-ingredient variant, used only where one price is needed (and thus
+/// no N+1 to batch away).
+async fn weighted_avg_stock_price(conn: &Connection, ingredient_id: i64, fallback: f64) -> LibsqlResult<f64> {
+    let mut prices = weighted_avg_stock_prices(conn, &[ingredient_id], |_| fallback).await?;
+    Ok(prices.remove(&ingredient_id).unwrap_or(fallback))
 }
 
 /// Calculate recipe cost
@@ -2873,6 +2976,28 @@ pub async fn calculate_cost(db: &Database, recipe_id: i64) -> LibsqlResult<CostB
         params![recipe_id],
     ).await?;
 
+    // Collected before pricing: the price lookup runs more queries on the
+    // same connection, and pricing all lines up front is two queries total
+    // instead of one (or two) per line (PERF-01).
+    let mut ingredient_lines = Vec::new();
+    while let Some(row) = rows.next().await? {
+        ingredient_lines.push((
+            row.get::<String>(0)?,
+            row.get::<f64>(1)?,
+            row.get::<String>(2)?,
+            row.get::<f64>(3)?,
+            row.get::<String>(4)?,
+            row.get::<i64>(5)?,
+        ));
+    }
+    drop(rows);
+
+    let ids: Vec<i64> = ingredient_lines.iter().map(|l| l.5).collect();
+    let catalogue_prices: HashMap<i64, f64> = ingredient_lines.iter().map(|l| (l.5, l.3)).collect();
+    let prices = weighted_avg_stock_prices(&conn, &ids, |id| {
+        catalogue_prices.get(&id).copied().unwrap_or(0.0)
+    }).await?;
+
     let mut ingredient_costs = Vec::new();
     let mut total_cost = 0.0_f64;
 
@@ -2880,14 +3005,10 @@ pub async fn calculate_cost(db: &Database, recipe_id: i64) -> LibsqlResult<CostB
         unit_str.parse().unwrap_or(Unit::Gram)
     }
 
-    while let Some(row) = rows.next().await? {
-        let name: String = row.get(0)?;
-        let quantity: f64 = row.get(1)?;
-        let unit_str: String = row.get(2)?;
+    for (name, quantity, unit_str, _, ingredient_unit_str, ingredient_id) in ingredient_lines {
         let unit = parse_unit(&unit_str);
-        let ingredient_id: i64 = row.get(5)?;
-        let price_per_unit = weighted_avg_stock_price(&conn, ingredient_id, row.get(3)?).await?;
-        let ingredient_unit = parse_unit(&row.get::<String>(4)?);
+        let price_per_unit = prices[&ingredient_id];
+        let ingredient_unit = parse_unit(&ingredient_unit_str);
 
         // Convert the recipe line's quantity into the ingredient's priced
         // unit before multiplying — otherwise "150 g" of an ingredient
@@ -4874,6 +4995,13 @@ pub async fn delete_meal_entry(db: &Database, id: i64) -> LibsqlResult<()> {
 /// was then compared against a stock of `500` grams and came out as "nothing to
 /// buy". Same defect family as DOM-01, in a feature that shipped.
 pub async fn generate_shopping_list_from_meal_plan(db: &Database, plan_id: i64, portions_multiplier: f64) -> LibsqlResult<MealPlanShoppingList> {
+    // DOM-11: same guard as the hand-picked path — zero portions is a no-op
+    // shopping list, not a valid one.
+    if portions_multiplier <= 0.0 {
+        return Err(libsql::Error::Misuse(
+            "portions_multiplier must be greater than zero".to_string(),
+        ));
+    }
     let plan = get_meal_plan(db, plan_id).await?;
     let conn = get_conn(db).await?;
 
@@ -6203,10 +6331,44 @@ pub async fn stock_purchases_list(db: &Database, ingredient_id: i64) -> LibsqlRe
     Ok(purchases)
 }
 
-/// Delete stock purchase (does NOT revert stock quantity - manual adjustment needed)
+/// Delete stock purchase, reversing the stock it raised.
+///
+/// Deleting only the `stock_purchases` row left the cache and the movement
+/// history saying the stock was still there (DOM-10). Movements are history,
+/// so the reversal is itself a movement — an `Adjustment` — which keeps
+/// `stock.quantity` (a cache of the movement sum) in step with the ledger.
 pub async fn stock_purchase_delete(db: &Database, id: i64) -> LibsqlResult<()> {
     let conn = get_conn(db).await?;
+    let mut rows = conn.query(
+        "SELECT ingredient_id, quantity, unit FROM stock_purchases WHERE id = ?1",
+        params![id],
+    ).await?;
+    let row = match rows.next().await? {
+        Some(row) => row,
+        // Deleting a row that is already gone stays a no-op, like the DELETE did.
+        None => return Ok(()),
+    };
+    let ingredient_id: i64 = row.get(0)?;
+    let quantity: f64 = row.get(1)?;
+    let unit_str: String = row.get(2)?;
+    drop(rows);
+
     conn.execute("DELETE FROM stock_purchases WHERE id = ?1", params![id]).await?;
+    // The purchase row stores quantity in the ingredient's own unit, so the
+    // reversal is exact: sign flips the magnitude `stock_movement_add_tx`
+    // re-checks against the ingredient's unit rather than trusting it.
+    stock_movement_add_tx(&conn, StockMovementInput {
+        ingredient_id: Some(ingredient_id),
+        recipe_id: None,
+        movement_type: MovementType::Adjustment,
+        quantity,
+        unit: parse_unit_str(&unit_str),
+        unit_cost: None,
+        sale_price: None,
+        reason: Some("purchase_deleted".to_string()),
+        production_id: None,
+        signed_quantity: Some(-quantity),
+    }).await?;
     Ok(())
 }
 
@@ -6528,16 +6690,29 @@ pub async fn receipt_confirm(db: &Database, input: ReceiptConfirmInput) -> Libsq
                 item.notes.clone(),
             ],
         ).await?;
-        
-        // Update stock quantity (in the ingredient's own unit, see conversion above)
-        tx.execute(
-            "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity, updated_at)
-             VALUES (?1, ?2, ?3, ?4, 0, datetime('now'))
-             ON CONFLICT(ingredient_id) DO UPDATE SET quantity = quantity + ?4, updated_at = datetime('now')",
-            params![ingredient_id, ingredient_name, ingredient_unit_str, quantity_in_ingredient_unit],
-        ).await?;
-        
+
+        // Read straight after the insert it belongs to — the movement below
+        // inserts rows of its own, so reading `last_insert_rowid()` after it
+        // would return the movement's id, not this purchase's (db.rs:6147).
         let purchase_id = tx.last_insert_rowid();
+
+        // The purchase is also a movement, and the movement owns the stock
+        // cache. Raising `stock.quantity` here without the Purchase movement
+        // that backs it made the cache diverge from the movement sum for every
+        // receipt confirmed since S2, until stock_reconcile threw it away
+        // (DOM-07). Same funnel as `stock_purchase_add_tx`:
+        stock_movement_add_tx(&tx, StockMovementInput {
+            ingredient_id: Some(ingredient_id),
+            recipe_id: None,
+            movement_type: MovementType::Purchase,
+            quantity: quantity_in_ingredient_unit,
+            unit: ingredient_unit,
+            unit_cost: Some(price_in_ingredient_unit),
+            sale_price: None,
+            reason: Some("receipt_confirm".to_string()),
+            production_id: None,
+            signed_quantity: None,
+        }).await?;
         
         // Return created purchase
         let mut rows = tx.query(
@@ -6683,6 +6858,64 @@ mod fase3_stock_tests {
 
         let cost = calculate_cost(&db, recipe.recipe.id).await.unwrap();
         assert!((cost.total_cost - 14.0).abs() < 0.001, "expected 2L * 7€/L = 14€, got {}", cost.total_cost);
+    }
+
+    /// PERF-01 (2026-08): `calculate_cost` used to run one (or two) price
+    /// queries per recipe line — N+1 for a recipe with N ingredients. The
+    /// prices are now batched (two queries total through
+    /// `weighted_avg_stock_prices`). This regression proves the batched
+    /// compute returns exactly what the per-line lookups returned across all
+    /// three fallback steps — window, history, catalogue — in a single recipe.
+    #[tokio::test]
+    async fn recipe_cost_batches_price_lookups_across_ingredients() {
+        let db = test_db().await;
+
+        async fn ingredient(db: &Database, name: &str, catalogue: f64) -> Ingredient {
+            create_ingredient(db, IngredientInput {
+                name: name.into(), unit: Unit::Kilogram, price_per_unit: catalogue,
+                category_id: None, event_id: None,
+            }).await.unwrap()
+        }
+
+        async fn purchase(db: &Database, id: i64, qty: f64, price: f64, days_ago: i64) {
+            stock_purchase_add(db, StockPurchaseInput {
+                ingredient_id: id, quantity: qty, unit: Unit::Kilogram,
+                price_per_unit: price, total_price: qty * price, is_discount: false,
+                discount_percent: 0.0,
+                purchase_date: Utc::now() - chrono::Duration::days(days_ago),
+                expiry_date: None, supplier_id: None, brand: None, notes: None,
+            }).await.unwrap();
+        }
+
+        // Window price: 2kg@5 + 3kg@10 -> (10 + 30) / 5 = 8€/kg.
+        let farinha = ingredient(&db, "Farinha", 100.0).await;
+        purchase(&db, farinha.id, 2.0, 5.0, 2).await;
+        purchase(&db, farinha.id, 3.0, 10.0, 2).await;
+        // History fallback: only purchase is 200 days old -> 3€/kg.
+        let arroz = ingredient(&db, "Arroz", 2.0).await;
+        purchase(&db, arroz.id, 4.0, 3.0, 200).await;
+        // Catalogue fallback: never bought -> catalogue price 2€/kg.
+        let sal = ingredient(&db, "Sal", 2.0).await;
+
+        let recipe = create_recipe(&db, RecipeInput {
+            name: "Mistura".into(), category: "Geral".into(), portions: 1,
+            instructions: String::new(), prep_time_minutes: None, cook_time_minutes: None,
+            tags: vec![], image_base64: None, event_id: None,
+            ingredients: vec![
+                RecipeIngredientInput { ingredient_id: farinha.id, quantity: 1.0, unit: Unit::Kilogram },
+                RecipeIngredientInput { ingredient_id: arroz.id, quantity: 2.0, unit: Unit::Kilogram },
+                RecipeIngredientInput { ingredient_id: sal.id, quantity: 0.5, unit: Unit::Kilogram },
+            ],
+        }).await.unwrap();
+
+        let cost = calculate_cost(&db, recipe.recipe.id).await.unwrap();
+        let expected = 1.0 * 8.0 + 2.0 * 3.0 + 0.5 * 2.0; // 15.0
+        assert!(
+            (cost.total_cost - expected).abs() < 0.001,
+            "expected {expected} (window + history + catalogue), got {}",
+            cost.total_cost
+        );
+        assert_eq!(cost.ingredient_costs.len(), 3, "one cost row per recipe line");
     }
 
     #[tokio::test]
@@ -7283,7 +7516,7 @@ mod crud_base_tests {
         let all_stock = stock_list(&db).await.unwrap();
         assert_eq!(all_stock.iter().filter(|s| s.ingredient_id == ingredient.id).count(), 1);
 
-        let quantity_set = update_stock_quantity(&db, ingredient.id, 3.0).await.unwrap();
+        let quantity_set = update_stock_quantity(&db, ingredient.id, 3.0, None).await.unwrap();
         assert_eq!(quantity_set.quantity, 3.0);
 
         delete_stock(&db, ingredient.id).await.unwrap();
@@ -7464,7 +7697,7 @@ mod audit_2026_07 {
         }).await.unwrap();
 
         // The user counts the shelf and says it is really 700, not 1000.
-        update_stock_quantity(&db, f.id, 700.0).await.unwrap();
+        update_stock_quantity(&db, f.id, 700.0, None).await.unwrap();
         assert_eq!(get_stock(&db, f.id).await.unwrap().quantity, 700.0);
 
         stock_reconcile(&db).await.unwrap();
@@ -8190,15 +8423,16 @@ IVA 23% 1,21
 
         assert_eq!(get_edition(&db).await.unwrap(), Edition::Family, "a fresh install should be Family");
 
-        // Family runs a kitchen; it just does not sell.
+        // Family runs a kitchen; events, costs and selling stay with Pro.
         for feature in [
             EditionFeature::Recipes, EditionFeature::Stock, EditionFeature::ShoppingLists,
-            EditionFeature::MealPlanning, EditionFeature::Events, EditionFeature::ReceiptScanner,
-            EditionFeature::Suggestions, EditionFeature::WasteReport, EditionFeature::CostReport,
+            EditionFeature::MealPlanning, EditionFeature::ReceiptScanner,
+            EditionFeature::Suggestions, EditionFeature::WasteReport,
         ] {
             assert!(Edition::Family.allows(feature), "Family should allow {feature:?}");
         }
         for feature in [
+            EditionFeature::Events, EditionFeature::CostReport,
             EditionFeature::Production, EditionFeature::Sales,
             EditionFeature::SupplierComparison, EditionFeature::EventBudget,
         ] {
@@ -9116,5 +9350,294 @@ IVA 23% 1,21
             report.by_category.iter().map(|c| c.total).sum::<f64>(), 6.0,
             "the category breakdown must add up to the total it is a breakdown of"
         );
+    }
+}
+
+/// Regression tests for the 2026-08-13 audit round (see `audit/AUDIT-2026-08.md`).
+/// Scope: the six movement types S2/S3 added to `stock_movements`, and whether
+/// every writer of `stock.quantity` actually goes through `stock_movement_add_tx`
+/// (db.rs:1790) the way the cache-is-a-derived-sum invariant requires. New module
+/// name (not `audit_2026_07`) so this round stays diffable against the last one.
+/// Each test was written to fail against the code as it stood and asserts the
+/// behaviour the app should have — do not "fix" these by relaxing the assertions.
+#[cfg(test)]
+mod audit_2026_08 {
+    use super::*;
+
+    async fn test_db() -> Database {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("mise_audit_2026_08_{unique}.db"));
+        let db = Builder::new_local(path.to_str().unwrap()).build().await.unwrap();
+        let _ = get_conn(&db).await.unwrap().query("PRAGMA journal_mode = WAL;", ()).await.unwrap();
+        run_migrations(&db).await.unwrap();
+        db
+    }
+
+    async fn flour(db: &Database, unit: Unit, price: f64) -> Ingredient {
+        create_ingredient(db, IngredientInput {
+            name: "Farinha".into(), unit, price_per_unit: price, category_id: None, event_id: None,
+        }).await.unwrap()
+    }
+
+    /// Found merging the 2026-08-13 round into main: DOM-08's fix pointed the
+    /// "Ajustar" UI at `stock_update_quantity` instead of the old `stock_upsert`
+    /// — correct for the quantity-as-Adjustment-movement invariant, but
+    /// `stock_upsert` also wrote `min_quantity` and the replacement command
+    /// took no such parameter, so the "Quantidade mínima" field in the same
+    /// modal silently stopped saving. Also covers setting `min_quantity` alone,
+    /// with the counted quantity unchanged.
+    #[tokio::test]
+    async fn update_stock_quantity_also_saves_the_min_quantity_threshold() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+
+        let stock = update_stock_quantity(&db, f.id, 500.0, Some(50.0)).await.unwrap();
+        assert_eq!(stock.quantity, 500.0);
+        assert_eq!(stock.min_quantity, 50.0, "min_quantity was not saved alongside the counted quantity");
+
+        // Editing only the threshold, quantity unchanged — must not record a
+        // zero-magnitude Adjustment movement, and must not touch the count.
+        let before = stock_movements_for_ingredient(&db, f.id, 20).await.unwrap().len();
+        let stock = update_stock_quantity(&db, f.id, 500.0, Some(80.0)).await.unwrap();
+        assert_eq!(stock.quantity, 500.0, "an unrelated min_quantity edit changed the counted quantity");
+        assert_eq!(stock.min_quantity, 80.0);
+        assert_eq!(
+            stock_movements_for_ingredient(&db, f.id, 20).await.unwrap().len(), before,
+            "editing only the threshold recorded a spurious movement"
+        );
+    }
+
+    /// DOM-07: `stock_purchase_add_tx` (db.rs:6100) was built to record a
+    /// `Purchase` movement alongside every purchase — but `receipt_confirm`
+    /// (db.rs:6450) is a second, older writer of `stock_purchases` and
+    /// `stock.quantity` that was never wired to the same funnel. It raises the
+    /// cache directly (db.rs:6532-6538) and creates no movement at all, so
+    /// every receipt confirmed since S2 breaks "`stock.quantity` = SUM(movements)"
+    /// silently, until the next `stock_reconcile()` throws the number away.
+    #[tokio::test]
+    async fn receipt_confirm_must_record_a_purchase_movement() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Kilogram, 2.0).await;
+
+        let conn = get_conn(&db).await.unwrap();
+        conn.execute(
+            "INSERT INTO receipt_imports (image_path, status) VALUES ('test.jpg', 'scanned')",
+            (),
+        ).await.unwrap();
+        let import_id = conn.last_insert_rowid();
+
+        receipt_confirm(&db, ReceiptConfirmInput {
+            import_id,
+            items: vec![ParsedReceiptItem {
+                ingredient_name: "Farinha".into(),
+                quantity: 1.0,
+                unit: Unit::Kilogram,
+                price_per_unit: 2.0,
+                total_price: 2.0,
+                is_discount: false,
+                discount_percent: 0.0,
+                matched_ingredient_id: Some(f.id),
+                confidence: 1.0,
+                brand: None,
+                notes: None,
+            }],
+            supplier_id: None,
+        }).await.unwrap();
+
+        let stock = get_stock(&db, f.id).await.unwrap();
+        assert_eq!(stock.quantity, 1.0, "a confirmed receipt line must raise the ingredient's stock");
+
+        let movements = stock_movements_for_ingredient(&db, f.id, 10).await.unwrap();
+        assert!(
+            movements.iter().any(|m| m.movement_type == MovementType::Purchase),
+            "receipt_confirm raised stock.quantity without recording the Purchase movement that is \
+             supposed to back it — stock_reconcile() will find the cache and the movement sum \
+             disagreeing the next time it runs, on every receipt anyone has ever confirmed since S2"
+        );
+    }
+
+    /// Hipótese refutada (não era achado): `backfill_purchase_movements`
+    /// (db.rs:590) dedupes by `(ingredient_id, purchase_date, quantity)`, not
+    /// `stock_purchases.id`, and two of the three purchase forms in the
+    /// frontend (`StockPage.tsx`, `EventDetailPage.tsx`) send a date-only
+    /// picker value suffixed with `T00:00:00Z` — so two genuinely different
+    /// purchases of the same ingredient/quantity/day look identical to the
+    /// `NOT EXISTS`. Read alone this looked like a collision, but SQLite
+    /// evaluates the `NOT EXISTS` subquery of a single `INSERT ... SELECT`
+    /// against a snapshot taken before the statement starts, not against rows
+    /// the same statement has already inserted for earlier source rows — so
+    /// both purchases survive one backfill run. Kept as a regression test,
+    /// not a fix, in case that snapshot behaviour ever changes.
+    #[tokio::test]
+    async fn same_day_duplicate_purchases_both_survive_one_backfill_run() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Kilogram, 2.0).await;
+        let conn = get_conn(&db).await.unwrap();
+
+        // What StockPage.tsx:540-542 and EventDetailPage.tsx:149 actually send:
+        // the date-only picker value with a fixed midnight-UTC time appended.
+        let same_day = "2026-08-01T00:00:00Z";
+        for _ in 0..2 {
+            conn.execute(
+                "INSERT INTO stock_purchases \
+                 (ingredient_id, quantity, unit, price_per_unit, total_price, is_discount, discount_percent, purchase_date) \
+                 VALUES (?1, 1.0, 'kilogram', 2.0, 2.0, 0, 0.0, ?2)",
+                params![f.id, same_day],
+            ).await.unwrap();
+        }
+
+        backfill_purchase_movements(&conn).await.unwrap();
+
+        let movements = stock_movements_for_ingredient(&db, f.id, 10).await.unwrap();
+        let purchase_count = movements.iter().filter(|m| m.movement_type == MovementType::Purchase).count();
+        assert_eq!(
+            purchase_count, 2,
+            "two distinct same-day, same-quantity purchases of the same ingredient collided in the \
+             backfill's NOT EXISTS dedupe and only one movement survived — if this ever fails, the \
+             dedupe (keyed on ingredient_id/purchase_date/quantity, never on stock_purchases.id) has \
+             started dropping real purchases"
+        );
+    }
+
+    /// DOM-10: `stock_purchase_delete` (db.rs:6207) used to DELETE the
+    /// `stock_purchases` row and stop — the cache stayed raised and the
+    /// Purchase movement stayed in the ledger, so the stock number and the
+    /// movement sum disagreed. The fix writes an `Adjustment` movement that
+    /// reverses the purchase, keeping `stock.quantity` == SUM(movements).
+    #[tokio::test]
+    async fn deleting_a_purchase_reverses_stock_so_cache_matches_movements() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+
+        let purchase = stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 500.0, unit: Unit::Gram,
+            price_per_unit: 0.002, total_price: 1.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), expiry_date: None, supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+        assert_eq!(get_stock(&db, f.id).await.unwrap().quantity, 500.0);
+
+        stock_purchase_delete(&db, purchase.id).await.unwrap();
+
+        let stock = get_stock(&db, f.id).await.unwrap();
+        assert_eq!(
+            stock.quantity, 0.0,
+            "deleting a purchase must reverse the stock it raised, not leave it as if the stock were still there"
+        );
+
+        let movements = stock_movements_for_ingredient(&db, f.id, 10).await.unwrap();
+        let sum: f64 = movements.iter().map(|m| m.quantity).sum();
+        assert!(
+            (sum - stock.quantity).abs() < 1e-9,
+            "after deleting a purchase, cache ({}) and movement sum ({}) disagree",
+            stock.quantity, sum
+        );
+        assert!(
+            movements.iter().any(|m| m.movement_type == MovementType::Adjustment),
+            "the reversal was not recorded as an Adjustment movement"
+        );
+    }
+
+    /// DOM-12: `expiring_items` (db.rs:2132) reported SUM(sp.quantity) — what
+    /// was bought — not what is left. Consumptions never touch `stock_purchases`,
+    /// so an ingredient with 2 kg bought and 1 kg cooked showed up as 2 kg about
+    /// to rot. It must report the real balance from `stock.quantity`.
+    #[tokio::test]
+    async fn expiring_items_reports_remaining_stock_not_purchased() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Kilogram, 2.0).await;
+
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 2.0, unit: Unit::Kilogram,
+            price_per_unit: 2.0, total_price: 4.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), expiry_date: Some(Utc::now() + chrono::Duration::days(3)),
+            supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+        stock_movement_add(&db, StockMovementInput {
+            ingredient_id: Some(f.id), recipe_id: None,
+            movement_type: MovementType::Consumption, quantity: 1.0, unit: Unit::Kilogram,
+            unit_cost: None, sale_price: None, reason: Some("teste".to_string()),
+            production_id: None, signed_quantity: None,
+        }).await.unwrap();
+        assert_eq!(get_stock(&db, f.id).await.unwrap().quantity, 1.0);
+
+        let expiring = expiring_items(&db, 7).await.unwrap();
+        assert_eq!(expiring.len(), 1);
+        assert_eq!(
+            expiring[0].quantity, 1.0,
+            "expiring_items reported 2.0 kg — the purchased amount — for an ingredient with only 1.0 kg left"
+        );
+    }
+
+    /// CMD-06: `stock_movement_add_tx` (db.rs:1790) converted the quantity into
+    /// the ingredient's unit but stored `unit_cost`/`sale_price` raw — a cost
+    /// typed as €/kg landed in `stock_movements` as if it were €/g, wrong by
+    /// the same factor DOM-01 corrected for the quantity. A price is per unit,
+    /// so it must follow the quantity conversion.
+    #[tokio::test]
+    async fn movement_cost_is_converted_to_the_ingredients_unit() {
+        let db = test_db().await;
+        // Tracked in grams, but the movement is written in kilograms.
+        let f = flour(&db, Unit::Gram, 0.002).await;
+
+        stock_movement_add(&db, StockMovementInput {
+            ingredient_id: Some(f.id), recipe_id: None,
+            movement_type: MovementType::Purchase, quantity: 1.0, unit: Unit::Kilogram,
+            unit_cost: Some(2.0), sale_price: None, reason: Some("teste".to_string()),
+            production_id: None, signed_quantity: None,
+        }).await.unwrap();
+
+        let movement = stock_movements_for_ingredient(&db, f.id, 10).await.unwrap()
+            .into_iter().find(|m| m.movement_type == MovementType::Purchase).unwrap();
+        assert_eq!(movement.quantity, 1000.0, "the quantity was not converted to grams");
+        assert_eq!(movement.unit, Unit::Gram);
+        let cost = movement.unit_cost.unwrap();
+        assert!(
+            (cost - 0.002).abs() < 1e-9,
+            "unit_cost was stored as €/kg ({cost}) instead of €/g — a per-unit price must scale with the quantity"
+        );
+    }
+
+    /// DOM-11: `portions_multiplier` had `range(min = 0.0)`, which admits zero —
+    /// a shopping list for nothing. Both commands must refuse `<= 0.0`.
+    #[tokio::test]
+    async fn portions_multiplier_zero_is_rejected() {
+        let db = test_db().await;
+        let err = create_shopping_list_from_recipes(&db, ShoppingListFromRecipesInput {
+            recipe_ids: vec![], portions_multiplier: 0.0, name: None,
+        }).await;
+        assert!(
+            err.is_err(),
+            "create_shopping_list_from_recipes accepted portions_multiplier = 0"
+        );
+        let err = generate_shopping_list_from_meal_plan(&db, 999, 0.0).await;
+        assert!(
+            err.is_err(),
+            "generate_shopping_list_from_meal_plan accepted portions_multiplier = 0"
+        );
+    }
+
+    /// CMD-02: `expiring_items` opened a second connection on a `&Database`
+    /// while `suggest_recipes` was holding its own — libsql's pool deadlocks on
+    /// that (db.rs:1592) and the UI hung. The fix gave it a `_tx` form that
+    /// runs on a caller-supplied connection; this pins that signature so the
+    /// refactor cannot be reverted silently.
+    #[tokio::test]
+    async fn expiring_items_runs_on_a_caller_connection() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Kilogram, 2.0).await;
+        stock_purchase_add(&db, StockPurchaseInput {
+            ingredient_id: f.id, quantity: 2.0, unit: Unit::Kilogram,
+            price_per_unit: 2.0, total_price: 4.0, is_discount: false, discount_percent: 0.0,
+            purchase_date: Utc::now(), expiry_date: Some(Utc::now() + chrono::Duration::days(3)),
+            supplier_id: None, brand: None, notes: None,
+        }).await.unwrap();
+
+        let conn = get_conn(&db).await.unwrap();
+        let items = expiring_items_tx(&conn, 7).await.unwrap();
+        drop(conn);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].ingredient_id, f.id);
     }
 }
