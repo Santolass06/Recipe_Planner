@@ -2472,15 +2472,22 @@ async fn needed_ingredients_for(
             let price_per_unit: f64 = row.get(5)?;
             let category: String = row.get(6)?;
 
-            // Reused so an unconvertible pair fails with the same message the
-            // purchase paths already give, naming the ingredient.
-            let (quantity, _) = to_ingredient_unit(
+            // A descriptive unit like "clove" has no fixed size, so this
+            // tries an approximate weight lookup before giving up — this
+            // used to be `to_ingredient_unit(...)?` with no such fallback,
+            // which hard-failed the entire caller (suggest_recipes included
+            // every other recipe in that failure) for any recipe using
+            // "alho" in cloves. Still refuses (Err) when there is truly no
+            // known equivalence — same guarantee as before, just reached
+            // less often now.
+            let (quantity, _, _) = convert_recipe_line(
+                conn,
+                &name,
+                &line_unit,
                 parse_unit_str(&line_unit),
                 parse_unit_str(&ingredient_unit_str),
                 line_quantity * weight,
-                price_per_unit,
-                &name,
-            )?;
+            ).await?;
 
             needed
                 .entry(ingredient_id)
@@ -3012,47 +3019,24 @@ pub async fn calculate_cost(db: &Database, recipe_id: i64) -> LibsqlResult<CostB
 
         // Convert the recipe line's quantity into the ingredient's priced
         // unit before multiplying — otherwise "150 g" of an ingredient
-        // priced per kilogram would cost 1000x too much. When the units
-        // aren't convertible (e.g. "clove" has no fixed physical size),
-        // fall back to an approximate weight lookup before giving up and
-        // using the quantity as-is.
-        let mut is_approximate = false;
-        let mut approximation_note: Option<String> = None;
-        let quantity_in_ingredient_unit = match unit.convert_to(ingredient_unit, quantity) {
-            Some(q) => q,
-            None => match lookup_approximate_grams_per_unit(&conn, &name, &unit_str).await? {
-                Some((grams_per_unit, note)) => {
-                    let quantity_in_grams = quantity * grams_per_unit;
-                    match Unit::Gram.convert_to(ingredient_unit, quantity_in_grams) {
-                        Some(q) => {
-                            is_approximate = true;
-                            approximation_note = Some(note);
-                            q
-                        }
-                        None => {
-                            is_approximate = true;
-                            approximation_note = Some(format!(
-                                "'{name}' é medido em {unit_str} na receita e cobrado em {ingredient_unit}; \
-                                 sem equivalência conhecida, a quantidade foi usada como está"
-                            ));
-                            quantity
-                        }
-                    }
-                }
-                // No conversion and no approximate weight: the quantity is used
-                // as if it were already in the priced unit, which is a guess.
-                // It has to be flagged — the approximate path was marked and
-                // this one, which is the worse guess, was showing as exact.
-                None => {
-                    is_approximate = true;
-                    approximation_note = Some(format!(
+        // priced per kilogram would cost 1000x too much. Unlike
+        // needed_ingredients_for, this only ever displays a number, so a
+        // total miss (no conversion, no approximate weight) falls back to
+        // using the quantity as-is instead of failing the whole cost — it
+        // has to be flagged, since that guess is worse than the approximate
+        // one and was previously showing as exact.
+        let (quantity_in_ingredient_unit, is_approximate, approximation_note) =
+            match convert_recipe_line(&conn, &name, &unit_str, unit, ingredient_unit, quantity).await {
+                Ok(result) => result,
+                Err(_) => (
+                    quantity,
+                    true,
+                    Some(format!(
                         "'{name}' é medido em {unit_str} na receita e cobrado em {ingredient_unit}; \
                          sem equivalência conhecida, a quantidade foi usada como está"
-                    ));
-                    quantity
-                }
-            },
-        };
+                    )),
+                ),
+            };
         let line_cost = quantity_in_ingredient_unit * price_per_unit;
         total_cost += line_cost;
 
@@ -3110,6 +3094,47 @@ async fn lookup_approximate_grams_per_unit(
     } else {
         Ok(None)
     }
+}
+
+/// Convert a recipe line's quantity from the unit it was written in to the
+/// unit the ingredient is tracked in. Falls back to an approximate weight
+/// lookup (`approximate_unit_weights`) for descriptive units with no fixed
+/// physical size (clove, pinch, bunch, slice) when the exact conversion
+/// isn't available. Returns `Err` when neither works — a caller that writes
+/// stock or a shopping list (`needed_ingredients_for`) must refuse rather
+/// than guess (S1.3: `an_unconvertible_recipe_line_is_refused_and_writes_nothing`);
+/// `calculate_cost`, which only ever displays a number, catches that case
+/// itself and shows a flagged estimate instead — guessing a quantity is
+/// fine to show, not fine to write.
+///
+/// Shared so the two tiers that ARE a real answer (exact conversion, or a
+/// known approximate weight) behave identically everywhere a recipe line is
+/// expanded (suggestions, cooking, shopping lists, event budgets, cost
+/// display) — not correct in one and a hard failure in the rest, which is
+/// what happened before this existed: a recipe using "alho" in cloves
+/// (seeded demo data, a real ingredient tracked in kilogram, with a seeded
+/// approximate-weight entry) crashed `suggest_recipes`, while
+/// `calculate_cost` already handled it.
+async fn convert_recipe_line(
+    conn: &Connection,
+    ingredient_name: &str,
+    from_unit_str: &str,
+    from_unit: Unit,
+    to_unit: Unit,
+    quantity: f64,
+) -> LibsqlResult<(f64, bool, Option<String>)> {
+    if let Some(q) = from_unit.convert_to(to_unit, quantity) {
+        return Ok((q, false, None));
+    }
+    if let Some((grams_per_unit, note)) = lookup_approximate_grams_per_unit(conn, ingredient_name, from_unit_str).await? {
+        let quantity_in_grams = quantity * grams_per_unit;
+        if let Some(q) = Unit::Gram.convert_to(to_unit, quantity_in_grams) {
+            return Ok((q, true, Some(note)));
+        }
+    }
+    Err(libsql::Error::Misuse(format!(
+        "unit mismatch: '{ingredient_name}' is tracked in {to_unit} and cannot be bought in {from_unit}"
+    )))
 }
 
 /// Analyze recipe cost with margin (returns same breakdown; margin is
@@ -9639,5 +9664,46 @@ mod audit_2026_08 {
 
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].ingredient_id, f.id);
+    }
+
+    /// Found live (2026-08-16): the shipped app's "O que cozinhar" page failed
+    /// to load at all — every recipe using "alho" in cloves (an ingredient
+    /// tracked in kilogram, exactly the seed demo data) made
+    /// `needed_ingredients_for` hard-fail via `to_ingredient_unit(...)?`
+    /// ("clove" has no fixed physical size, so `Unit::convert_to` returns
+    /// `None`), which aborted `suggest_recipes` for every other recipe in the
+    /// same call, not just the one using cloves. `calculate_cost` already had
+    /// a fallback for this (an approximate-weight lookup) — it was never
+    /// applied to `needed_ingredients_for`, the sibling every other recipe
+    /// expansion (suggestions, cooking, shopping lists, event budgets) routes
+    /// through. Covers both the read path (suggestions) and the write path
+    /// (cooking), since both used to crash the same way.
+    #[tokio::test]
+    async fn recipe_with_a_clove_ingredient_does_not_break_suggestions_or_cooking() {
+        let db = test_db().await;
+        let alho = create_ingredient(&db, IngredientInput {
+            name: "Alho".into(), unit: Unit::Kilogram, price_per_unit: 3.0,
+            category_id: None, event_id: None,
+        }).await.unwrap();
+        let outra = flour(&db, Unit::Kilogram, 2.0).await;
+
+        let recipe = create_recipe(&db, RecipeInput {
+            name: "Frango com Alho".into(), category: "Geral".into(), portions: 4,
+            instructions: String::new(), prep_time_minutes: None, cook_time_minutes: None,
+            tags: vec![], image_base64: None, event_id: None,
+            ingredients: vec![
+                RecipeIngredientInput { ingredient_id: alho.id, quantity: 3.0, unit: Unit::Clove },
+                RecipeIngredientInput { ingredient_id: outra.id, quantity: 0.5, unit: Unit::Kilogram },
+            ],
+        }).await.unwrap();
+
+        let suggestions = suggest_recipes(&db, 12).await
+            .expect("a recipe using an unconvertible unit must not fail suggestions for every recipe");
+        assert!(suggestions.iter().any(|s| s.recipe_id == recipe.recipe.id));
+
+        let result = recipe_produce(&db, ProductionInput {
+            recipe_id: recipe.recipe.id, multiplier: 1.0, yields_product: false, reason: None,
+        }).await.expect("cooking a recipe with a clove-unit ingredient must not fail");
+        assert!(result.shortfalls.iter().any(|s| s.ingredient_id == alho.id), "no stock was ever added, so it should be short");
     }
 }

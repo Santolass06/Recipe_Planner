@@ -1348,3 +1348,36 @@ atomicidade de receitas, backup, datas, i18n — nenhuma regressão encontrada
 nesta ronda).
 
 ---
+
+## Correção: "O que cozinhar" não carregava (2026-08-16)
+
+Reportado pelo utilizador na app instalada (v0.1.14): a página de sugestões
+mostrava "Não foi possível carregar as sugestões." sempre, para qualquer
+stock. Reproduzido diretamente contra a base de dados real do utilizador
+(cópia, consultas só de leitura).
+
+**Causa:** `needed_ingredients_for` (db.rs) — partilhada por `suggest_recipes`,
+`recipe_produce`, `create_shopping_list_from_recipes` e `get_event_budget` —
+chamava `to_ingredient_unit(...)?` sem nenhum fallback. Isso falha sempre que
+uma linha de receita usa uma unidade descritiva sem peso fixo ("dente", ex.
+"3 dentes de alho") contra um ingrediente guardado por peso (kg) — o próprio
+seed de demonstração tem isto (`Alho` em kg, usado em "dente" em três
+receitas). Um `?` dentro do loop sobre *todas* as receitas propagava o erro
+de uma receita para a lista inteira — "O que cozinhar" ficava vazio mesmo
+havendo receitas totalmente cobertas por stock. `recipe_produce` ("Cozinhei
+isto") tinha exatamente o mesmo bug, só que ainda não reportado.
+
+`calculate_cost` já tinha a correção certa desde a auditoria 2026-08 — uma
+consulta a `approximate_unit_weights` (tabela seedada com "alho"/"dente" →
+~5g) antes de desistir — mas nunca foi propagada ao `needed_ingredients_for`,
+o irmão de que as outras quatro operações dependem. Extraída para
+`convert_recipe_line`, partilhada pelas duas: as camadas que são uma resposta
+real (conversão exata, depois peso aproximado) aplicam-se em todo o lado;
+"sem equivalência nenhuma conhecida" continua a recusar em
+`needed_ingredients_for` (mantém a garantia S1.3 — nunca escreve uma
+quantidade adivinhada em stock/lista de compras) e continua a mostrar uma
+estimativa sinalizada só em `calculate_cost`, que é leitura pura.
+
+Teste de regressão cobre os dois caminhos que estavam partidos (sugestões e
+"Cozinhei isto") com a mesma forma de dados do bug real. 186 testes, 0
+falhas.
