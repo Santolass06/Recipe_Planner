@@ -7,6 +7,9 @@ import { useI18n } from "../i18n";
 import type { Ingredient } from "../../crates/core/bindings/Ingredient";
 import type { Supplier } from "../../crates/core/bindings/Supplier";
 import { errKey } from "../lib/errors";
+import { isMobileDevice } from "../lib/platform";
+
+const CAMERA_AVAILABLE = isMobileDevice();
 
 // Forma solta de item ainda por confirmar (parsing de OCR heurístico) —
 // sem binding correspondente, propositadamente fora do âmbito do i18n.
@@ -462,10 +465,12 @@ export default function ReceiptScannerPage() {
               {t("receiptScanner.uploadStep.chooseFile")}
               <input type="file" ref={fileInputRef} accept="image/*" onChange={handleFileSelect} style={{ display: "none" }} />
             </label>
-            <button className="btn-secondary" style={{ height: 42, padding: "0 20px", borderRadius: 10, fontWeight: 600, fontSize: 13.5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7 }} onClick={handleCameraCapture}>
-              <span className="ms" style={{ fontSize: 19 }} aria-hidden="true">photo_camera</span>
-              {t("receiptScanner.uploadStep.useCamera")}
-            </button>
+            {CAMERA_AVAILABLE && (
+              <button className="btn-secondary" style={{ height: 42, padding: "0 20px", borderRadius: 10, fontWeight: 600, fontSize: 13.5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7 }} onClick={handleCameraCapture}>
+                <span className="ms" style={{ fontSize: 19 }} aria-hidden="true">photo_camera</span>
+                {t("receiptScanner.uploadStep.useCamera")}
+              </button>
+            )}
           </div>
           <p style={{ margin: "16px 0 0", fontSize: 11, color: "var(--ink-3)", lineHeight: 1.6 }}>{t("receiptScanner.uploadStep.hint")}</p>
         </div>

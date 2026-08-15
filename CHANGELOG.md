@@ -99,7 +99,7 @@ bloqueantes, antes de qualquer feature nova.
   corrigi-lo agora mudaria o path que a app já usa em produção nesta
   máquina, haveria de vir com migração dos dados existentes. Fica para
   Fase 2, não é bloqueante.
-- [ ] **Bug: câmara não abre no Scanner de recibos** (sessão de 2026-07-05,
+- [x] **Bug: câmara não abre no Scanner de recibos** (sessão de 2026-07-05,
   máquina de desenvolvimento Ubuntu + Nix misturados — mesma família de
   problema que o fix de EGL/TLS acima). Sintoma: `getUserMedia` falha
   sempre, WebKitGTK reporta no terminal `GStreamer element appsink not
@@ -184,6 +184,16 @@ bloqueantes, antes de qualquer feature nova.
   via de teste nova; esta foi essa via nova, esgotada com resultado
   conclusivo (não é "device", é WebKitGTK), não uma reabertura aberta do
   debugging anterior.
+  **Fechado por decisão de produto (2026-08-15), não por fix:** câmara só
+  faz sentido num ecrã que se aponta a um papel — telemóvel ou tablet. Em
+  desktop (Linux/Windows) o Scanner passa a oferecer só upload de ficheiro;
+  o botão "Usar câmara" e o `getUserMedia` que nunca funcionou em
+  WebKitGTK ficam gated atrás de `isMobileDevice()`
+  (`src/lib/platform.ts`), que só ativa em UA Android/iPhone/iPad ou iPad
+  moderno disfarçado de Mac (`MacIntel` + `maxTouchPoints > 1`). O
+  diagnóstico do sinal `permission-request` não tratado pelo WebKitWebView
+  fica registado acima para referência, mas deixa de ser trabalho
+  pendente — nenhum utilizador de desktop volta a ver este caminho.
 
 ---
 

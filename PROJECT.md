@@ -125,20 +125,28 @@ A ordem é por dependência. Onde não há dependência, está dito.
 Linux é o alvo de referência de que os outros herdam, e enquanto não estiver
 confirmado, empacotar para Windows e Android é construir sobre não-verificado.
 
-- **S0.1** **Cortar release nova de `main` primeiro** — o `.deb` publicado é
-  de 2026-07-22 15:42 e o fix do `max-width` entrou às 16:35, 53 minutos
-  depois; além disso é anterior a toda a auditoria. Depois instalar numa
-  máquina sem Nix e correr o essencial de ponta a ponta. Checklist completa no
+- **S0.1** **Cortar release nova de `main` primeiro** — o `.deb` publicado
+  era de 2026-07-20, anterior às auditorias de rondas 2 e 3 e ao merge do
+  Traycer. Decidido 2026-08-15: eu corto e publico o `.deb`, o utilizador
+  instala numa máquina sem Nix e testa. Checklist completa no
   [issue #3](https://github.com/Santolass06/Recipe_Planner/issues/3).
-- **S0.2** Veredicto sobre a câmara do Scanner. Se funcionar na máquina limpa,
-  fecha-se como «ambiente de dev, sem fix». Se não, ganha diagnóstico num
-  ambiente representativo — que é tudo o que falta há três semanas.
+- **S0.2** ✅ Fechado por decisão (2026-08-15): câmara só faz sentido em
+  telemóvel/tablet (Android, iOS/iPad) — em desktop o Scanner passa a
+  oferecer só upload de ficheiro. `isMobileDevice()` em
+  `src/lib/platform.ts` faz o gate. Detalhe do diagnóstico WebKitGTK
+  abandonado (nunca chegou a fix) em `CHANGELOG.md` §Fase 0.
 - **S0.3** Reunir recibos de Continente, Lidl e Auchan e correr o OCR contra
-  eles (item 3-bis, PRIORIDADE ALTA). **Livre**, corre-se na mesma sessão.
+  eles. **Despriorizado (2026-08-15):** sem máquina capaz de correr um LLM
+  local, o OCR melhora de forma incremental, não de uma vez — deixa de
+  bloquear o release, fica como trabalho contínuo de fundo.
 - **S0.4** Rodar o PAT do GitHub exposto num commit local a 2026-07-28.
+  **Ainda por fazer** — requer ação do utilizador (gerar novo token,
+  revogar o antigo nas definições do GitHub); não bloqueia o release do
+  `.deb`, mas continua exposto enquanto não for feito.
 
-**Feito quando:** Linux confirmado como alvo de referência e o bug da câmara
-fechado ou diagnosticado.
+**Feito quando:** Linux confirmado como alvo de referência (S0.1) e o PAT
+rodado (S0.4). O bug da câmara fechou-se por decisão (S0.2); o OCR melhora
+em contínuo, sem gate (S0.3).
 
 ---
 
