@@ -348,8 +348,13 @@ function RecipeDetail({
   );
 }
 
-export function RecipeFormContent({ form, setForm, ingredients, isView, handleSave, editingId, t }: any) {
+export function RecipeFormContent({ form, setForm, ingredients, onIngredientCreated, isView, handleSave, editingId, t }: any) {
   const unitGroups = getUnitGroups(t);
+  const { showToast } = useToast();
+  const [creatingIdx, setCreatingIdx] = useState<number | null>(null);
+  const [newIngredientName, setNewIngredientName] = useState("");
+  const [creatingBusy, setCreatingBusy] = useState(false);
+
   function addIngredientRow() {
     setForm((f: any) => ({ ...f, ingredients: [...f.ingredients, { ingredient_id: 0, quantity: 0, unit: "gram" }] }));
   }
@@ -363,6 +368,42 @@ export function RecipeFormContent({ form, setForm, ingredients, isView, handleSa
       ...f,
       ingredients: f.ingredients.map((ing: any, i: number) => i === index ? { ...ing, [field]: value } : ing)
     }));
+  }
+
+  function startCreatingIngredient(index: number, hint?: string) {
+    setCreatingIdx(index);
+    setNewIngredientName(hint ?? "");
+  }
+
+  // Someone importing a recipe by URL (especially Family, no supplier
+  // catalogue) may not have every ingredient yet, and used to have no way
+  // to add one without leaving the modal and losing the whole import. This
+  // creates it with the recipe line's own unit and a placeholder price
+  // (editable later in Ingredientes) so the import never has to be
+  // abandoned over a missing ingredient.
+  async function createIngredientForRow(index: number) {
+    const name = newIngredientName.trim();
+    if (!name) return;
+    setCreatingBusy(true);
+    try {
+      const created = await invoke<Ingredient>("ingredient_create", {
+        input: { name, unit: form.ingredients[index].unit, price_per_unit: 0, category_id: null, event_id: null },
+      });
+      onIngredientCreated?.(created);
+      setForm((f: any) => ({
+        ...f,
+        ingredients: f.ingredients.map((ing: any, i: number) =>
+          i === index ? { ...ing, ingredient_id: created.id, import_hint: undefined } : ing
+        ),
+      }));
+      setCreatingIdx(null);
+      setNewIngredientName("");
+      showToast(t("recipes.form.ingredientCreated", { name: created.name }), "ok");
+    } catch (e) {
+      showToast(typeof e === "string" && e ? e : t(errKey(e, "recipes.form.createIngredientError")), "err");
+    } finally {
+      setCreatingBusy(false);
+    }
   }
 
   return (
@@ -483,21 +524,52 @@ export function RecipeFormContent({ form, setForm, ingredients, isView, handleSa
               {form.ingredients.map((ing: any, idx: number) => (
                 <tr key={idx}>
                   <td>
-                    <select
-                      className="select"
-                      value={ing.ingredient_id}
-                      onChange={e => updateIngredientRow(idx, "ingredient_id", parseInt(e.target.value))}
-                      disabled={isView}
-                    >
-                      <option value={0}>{t("recipes.form.selectIngredient")}</option>
-                      {ingredients.map((i: any) => (
-                        <option key={i.id} value={i.id}>{i.name} ({UNIT_LABELS[i.unit] ?? i.unit})</option>
-                      ))}
-                    </select>
-                    {!isView && ing.ingredient_id === 0 && ing.import_hint && (
-                      <p className="text-4 mono" style={{ marginTop: 4, color: "var(--approx)" }}>
-                        {t("recipes.form.importHint", { text: ing.import_hint })}
-                      </p>
+                    {creatingIdx === idx ? (
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input
+                          className="input"
+                          autoFocus
+                          value={newIngredientName}
+                          onChange={e => setNewIngredientName(e.target.value)}
+                          onKeyDown={e => { if (e.key === "Enter") createIngredientForRow(idx); }}
+                          placeholder={t("recipes.form.newIngredientPlaceholder")}
+                          disabled={creatingBusy}
+                        />
+                        <button
+                          type="button" className="btn btn-primary btn-sm"
+                          onClick={() => createIngredientForRow(idx)}
+                          disabled={creatingBusy || !newIngredientName.trim()}
+                        >
+                          {t("common.create")}
+                        </button>
+                        <button type="button" className="btn btn-sm" onClick={() => setCreatingIdx(null)} disabled={creatingBusy}>
+                          {t("common.cancel")}
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <select
+                          className="select"
+                          value={ing.ingredient_id}
+                          onChange={e => {
+                            const v = e.target.value;
+                            if (v === "new") startCreatingIngredient(idx, ing.import_hint);
+                            else updateIngredientRow(idx, "ingredient_id", parseInt(v));
+                          }}
+                          disabled={isView}
+                        >
+                          <option value={0}>{t("recipes.form.selectIngredient")}</option>
+                          <option value="new">{t("recipes.form.createNewIngredient")}</option>
+                          {ingredients.map((i: any) => (
+                            <option key={i.id} value={i.id}>{i.name} ({UNIT_LABELS[i.unit] ?? i.unit})</option>
+                          ))}
+                        </select>
+                        {!isView && ing.ingredient_id === 0 && ing.import_hint && (
+                          <p className="text-4 mono" style={{ marginTop: 4, color: "var(--approx)" }}>
+                            {t("recipes.form.importHint", { text: ing.import_hint })}
+                          </p>
+                        )}
+                      </>
                     )}
                   </td>
                   <td>
@@ -557,6 +629,7 @@ function RecipeModal({
   handleSave,
   loading,
   ingredients,
+  onIngredientCreated,
   editing,
   t,
 }: any) {
@@ -580,7 +653,7 @@ function RecipeModal({
 
   return (
     <Modal open={!!modal} onClose={closeModal} title={title} footer={footer} wide>
-      <RecipeFormContent form={form} setForm={setForm} ingredients={ingredients} isView={isView} handleSave={handleSave} editingId={editing?.id} t={t} />
+      <RecipeFormContent form={form} setForm={setForm} ingredients={ingredients} onIngredientCreated={onIngredientCreated} isView={isView} handleSave={handleSave} editingId={editing?.id} t={t} />
     </Modal>
   );
 }
@@ -991,6 +1064,7 @@ export default function RecipesPage() {
         handleSave={handleSave}
         loading={loading}
         ingredients={ingredients}
+        onIngredientCreated={(ing: Ingredient) => setIngredients(prev => [...prev, ing])}
         editing={editing}
         t={t}
       />

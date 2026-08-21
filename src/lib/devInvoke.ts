@@ -175,6 +175,7 @@ function shoppingListFromRecipes(args: unknown): unknown {
 // app, so the Family/Pro gating (PRD-02) is coherent and testable in the
 // browser preview: toggling the edition in SettingsPage reflects everywhere.
 let devEdition: "family" | "pro" = "family";
+let nextDevIngredientId = 1000;
 const fixtures: Record<string, unknown | ((args: unknown) => unknown)> = {
   dashboard_stats: dashboardStats,
   dashboard_recent_activity: activity,
@@ -228,6 +229,23 @@ const fixtures: Record<string, unknown | ((args: unknown) => unknown)> = {
         missing, cost_per_portion: 2.5, uses_expiring: r.id === 2,
       };
     }).sort((a, b) => Number(b.uses_expiring) - Number(a.uses_expiring) || b.coverage - a.coverage),
+  // Without this fixture, the generic "*_create" -> undefined fallback below
+  // made the browser preview crash reading `.id`/`.name` off the result —
+  // unlike recipe_create/etc., callers of ingredient_create (the inline
+  // "criar novo ingrediente" flow, the receipt scanner) actually use the
+  // created ingredient, not just the fact that the call succeeded.
+  ingredient_create: (args: unknown) => {
+    const input = (args as { input?: { name?: string; unit?: string; price_per_unit?: number; category_id?: number | null } })?.input;
+    const created = ingredient(
+      nextDevIngredientId++,
+      input?.name ?? "Novo ingrediente",
+      input?.unit ?? "gram",
+      input?.price_per_unit ?? 0,
+      input?.category_id ?? 0,
+    );
+    ingredients.push(created);
+    return created;
+  },
   edition_get: () => devEdition,
   edition_set: (args: unknown) => {
     const next = (args as { edition?: string })?.edition;

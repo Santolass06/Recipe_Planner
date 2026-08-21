@@ -1,107 +1,121 @@
-# Relatório de Auditoria Integral — mise (Fase 2 Concluída)
+# Plano de Auditoria Integral — mise (Recipe Planner)
 
-**Data:** 2026-08-21  
-**Branch:** `google-audit`  
-**Metodologia:** Análise estática, leitura comando-a-comando, verificação cruzada com equipa de 4 subagentes especializados e formulação de testes-prova executáveis.
+## Visão Geral & Contexto
+
+O **mise** é uma aplicação desktop local-first desenvolvida em **Rust (Tauri v2 + libSQL/SQLite)** e **React 19 / TypeScript (Vite)**. O projeto evoluiu significativamente através de sucessivos sprints (S1 a S5) e passou anteriormente por auditorias técnicas.
+
+Esta auditoria está estruturada em **duas grandes dimensões**:
+1. **Dimensão Técnica & Código** *(Fases 1, 2 e 3)*: Qualidade de código, integridade de dados, performance de queries (N+1), validações de inputs, concorrência e eliminação de bugs.
+2. **Dimensão de Produto, UX & Jornadas de Utilizador** *(nova secção)*: Análise da aplicação do ponto de vista de quem a usa no dia-a-dia, mapeando bloqueios cognitivos, passos manuais redundantes, pontes em falta entre ecrãs e lacunas de produto para as personas **Family** e **Pro**.
+
+- **Branch de Trabalho**: `google-audit`
+- **Workflow de Git**: Commits semânticos e push regular para `origin/google-audit`.
 
 ---
 
-## 1. Sumário Executivo de Achados (Matriz de Severidade)
+## Estrutura Global da Auditoria
 
 ```mermaid
-pie title Distribuição de Severidade dos Achados
-    "P0 (Crítico)" : 1
-    "P1 (Alto)" : 5
-    "P2 (Médio)" : 5
-    "P3 (Baixo / Higiene)" : 4
+graph TD
+    subgraph Parte1 ["Parte 1: Auditoria Técnica de Código (Fase 2 Concluída)"]
+        T1["Integridade de Dados & Funil de Stock (DOM-12, DOM-13)"]
+        T2["IPC & Validações de Entrada (CMD-01 a CMD-04)"]
+        T3["Performance, Queries N+1 & Índices (PERF-01 a PERF-06)"]
+        T4["Robustez, Ausência de Panics & Normalização de Erros (ROB-01, ROB-02)"]
+    end
+
+    subgraph Parte2 ["Parte 2: Auditoria de Produto & Jornadas de Utilizador (Nova)"]
+        P1["Jornada 1: Onboarding & Despensa Inicial"]
+        P2["Jornada 2: Planeador de Refeições & Calendário -> Compras"]
+        P3["Jornada 3: 'O que Cozinhar Hoje' & Redução de Desperdício"]
+        P4["Jornada 4: Scanner de Recibos & Associação ao Catálogo"]
+        P5["Jornada 5: Dashboard Diário & Ações Rápidas em Alertas"]
+        P6["Jornada 6: Fluxo Pro (Fichas Técnicas, Produção e Vendas)"]
+    end
+
+    subgraph Fase3 ["Fase 3: Consolidação & Remediação"]
+        R1["Consolidação do Relatório Técnico + UX"]
+        R2["Implementação dos Fixes Técnicos (Pacotes 1 a 3)"]
+        R3["Implementação das Melhorias de UX & Pontes de Produto"]
+        R4["Validação com Testes Automatizados & Walkthrough"]
+    end
+
+    Parte1 --> Fase3
+    Parte2 --> Fase3
 ```
 
-| ID | Severidade | Área | Ficheiro:Linha | Descrição Sumária | Impacto |
-|---|---|---|---|---|---|
-| **PERF-02** | **P0** | Performance | `crates/core/src/db.rs:2116` | **N+1 Crítico em `suggest_recipes`**: Varre todas as receitas e executa queries SQL individuais de stock por ingrediente em loop. | Degradação severa de tempo de resposta em bases de dados com muitas receitas. |
-| **DOM-12** | **P1** | Domínio / Stock | `crates/core/src/db.rs:1595`<br>`crates/tauri/src/lib.rs:152` | **Furo no Funil (`upsert_stock`)**: O comando `stock_upsert` altera diretamente `stock.quantity` sem criar movimento no funil `stock_movements`. | Ao correr `stock_reconcile`, o valor ajustado é revertido silenciosamente para a soma histórica dos movimentos. |
-| **CMD-01** | **P1** | IPC / Validação | `crates/core/src/domain.rs:860`<br>`crates/tauri/src/lib.rs:438` | **Falta de Validação em `ImportData`**: Dados importados entram sem validação de structs aninhadas antes da inserção na BD em `import_data`. | Risco de corrupção da base de dados ao importar ficheiros malformados ou com valores negativos. |
-| **PERF-01** | **P1** | Performance | `crates/core/src/db.rs:3015` | **N+1 em `calculate_cost`**: Consultas repetidas a `approximate_unit_weights` por linha de ingrediente dentro do loop de custo. | Cálculos lentos em receitas complexas ou relatórios de custo massivos. |
-| **PERF-04** | **P1** | Base de Dados | `crates/core/src/db.rs:528` | **Ausência de Índice `movement_type`**: `get_waste_report` faz table scan em `stock_movements` com filtro `WHERE movement_type = 'loss'`. | Consultas ao relatório de desperdício ficam lentas com o crescimento do histórico de movimentos. |
-| **PERF-06** | **P1** | Frontend / Bundle | `src/router.tsx:1-18` | **Bundle Estático com Tesseract OCR (~20MB)**: Carregamento síncrono no bundle inicial em vez de dynamic import (`React.lazy`). | Tempo inicial de carregamento da aplicação penalizado mesmo para quem só usa receitas ou stock. |
-| **DOM-13** | **P2** | Domínio / Concorrência | `crates/core/src/db.rs:2283-2370` | **Leitura de Stock Não-Atómica em `recipe_produce`**: Leituras de stock fora da transação de escrita dos movimentos de consumo. | Potencial race condition sob concorrência entre o cálculo de shortfalls e o commit de consumos. |
-| **CMD-02** | **P2** | IPC / Validação | `crates/core/src/domain.rs` (várias) | **Validação de Nomes com Whitespace**: `length(min = 1)` aceita strings apenas com espaços em branco (`"   "`). | Criação de ingredientes ou categorias "invisíveis" no frontend. |
-| **CMD-03** | **P2** | IPC / Validação | `crates/core/src/domain.rs:547, 591, 608` | **Validação de Quantidades Inclusiva**: `range(min = 0.0)` permite compras, perdas e produções com quantidade `0.0`. | Registo de movimentos com quantidade nula ou divisões por zero em relatórios. |
-| **PERF-03** | **P2** | Performance | `crates/core/src/db.rs:5064` | **Queries Sequenciais no Dashboard**: `get_dashboard_stats` executa 7 queries sequenciais em vez de query agregada. | Latência perceptível ao abrir o Dashboard principal. |
-| **PERF-05** | **P2** | Base de Dados | `crates/core/src/db.rs:303` | **Ausência de Índice `created_at` em Recipes**: Ordenação de `recipes_list` (`ORDER BY created_at DESC`) sem índice. | Sort em memória no SQLite para todas as listagens de receitas. |
-| **ROB-01** | **P2** | Backend / Robustez | `crates/tauri/src/lib.rs:63` | **Tratamento de Erros por Substring**: `user_error` avalia `e.to_string().contains("FOREIGN KEY")` em vez de código SQLite. | Fragilidade caso o texto de erro do libSQL/SQLite sofra pequenas alterações. |
-| **CMD-04** | **P3** | IPC / UI | `crates/tauri/src/lib.rs:61` | **Erros de Constraint sem Normalização**: Erros como `UNIQUE constraint` chegam em texto bruto à UI. | Mensagens de erro pouco amigáveis ao utilizador. |
-| **ROB-02** | **P3** | Backend / Robustez | `crates/core/src/db.rs:2509` | **Uso Inseguro de `.expect()`**: `needed.remove(&id).expect(...)` substituível por fluxo seguro sem possibilidade de panic. | Risco de crash em runtime de Rust se o mapa for alterado. |
-| **UX-01** | **P3** | Frontend / UX | `src/pages/IngredientsPage.tsx:184` | **Inconsistência de Confirmação**: Confirmação inline com ícones em vez do modal padrão `ConfirmDialog`. | Quebra ligeira do padrão de design global da aplicação. |
+---
+
+## Parte 2: Auditoria de Produto, UX & Jornadas do Utilizador
+
+### Mapeamento das Duas Personas-Alvo
+
+1. **Persona Family (Doméstica / Cozinha de Casa)**:
+   - **Objetivo**: Poupar tempo e dinheiro, evitar desperdício de alimentos no frigorífico, planear as refeições da semana de forma simples e digitalizar talões de compras.
+   - **Fricções Típicas**: Ter de reescrever ingredientes à mão, não conseguir cozinhar diretamente a partir do calendário, botões que apenas redirecionam sem preencher dados.
+
+2. **Persona Pro (Micro-Negócio / Confeitaria / Catering)**:
+   - **Objetivo**: Conhecer o custo real de cada porção com base nos preços de compra reais, produzir fornadas com rendimento (`yield`), registar vendas e perdas de produtos finais e orçamentar eventos.
+   - **Fricções Típicas**: Falta de atalhos diretos para venda de produtos acabados, ausência de visualização do histórico de movimentos de um lote, falta de precificação sugerida.
 
 ---
 
-## 2. Achados Positivos & Hipóteses Refutadas
-
-1. **Gating Family vs. Pro (`PRD-01` ✅)**:
-   - `requireProLoader` no `src/router.tsx` bloqueia com eficácia rotas Pro sem flashes de renderização.
-   - `Edition::allows` está perfeitamente sincronizado com a sidebar e a página de definições.
-2. **Cobertura UI de Negócio (`PRD-02`, `PRD-03` ✅)**:
-   - `event_budget` está implementado com cartões de variância em `EventDetailPage.tsx`.
-   - Venda (`stock_sale_record`) e perdas (`stock_loss_record`) têm interfaces em `StockPage.tsx` e `SuggestionsPage.tsx`.
-3. **Invariante de Sinais nos Movimentos de Stock (Refutado ✅)**:
-   - `signed_movement_quantity` trata corretamente os sinais positivos/negativos dos 6 tipos de movimento.
-   - `stock_reconcile` produz a matemática exata `COALESCE(SUM(quantity), 0.0)`.
-4. **Conversão Estrita de Unidades (Refutado ✅)**:
-   - Unidades incompatíveis (peso vs volume sem densidade conhecida) são estritamente rejeitadas nas escritas (`shopping_list_mark_purchased`, etc.).
-5. **i18n & Ausência de Deadlocks de Pool (Refutado ✅)**:
-   - Paridade completa entre `pt.ts` e `en.ts`.
-   - Correção do antigo deadlock `CMD-02` confirmada: sem reabertura aninhada de conexões `get_conn` no fluxo normal.
-
----
-
-## 3. Roteiro de Remediação Proposto (Fase 3)
+### Eixos de Análise das Jornadas (Trace de Uso & Bloqueios)
 
 ```mermaid
 flowchart TD
-    subgraph Pkg1 ["Pacote 1: Performance Crítica & Índices (P0 / P1)"]
-        F1["Fix PERF-02: Pré-carregar Stock em suggest_recipes"]
-        F2["Fix PERF-01: Pré-carregar Pesos Aprox em calculate_cost"]
-        F3["Fix PERF-04 & PERF-05: Índices movement_type e created_at"]
-        F4["Fix PERF-06: Code Splitting / Lazy load Tesseract OCR"]
-    end
-
-    subgraph Pkg2 ["Pacote 2: Integridade de Dados & Validações (P1 / P2)"]
-        F5["Fix DOM-12: Canalizar stock_upsert pelo funil de movimentos"]
-        F6["Fix CMD-01: Validação recursiva em ImportData"]
-        F7["Fix CMD-02 & CMD-03: Endurecer validadores de strings e quantidades"]
-    end
-
-    subgraph Pkg3 ["Pacote 3: Robustez & Polimento (P2 / P3)"]
-        F8["Fix ROB-01 & CMD-04: Normalizar códigos de erro em user_error"]
-        F9["Fix ROB-02: Eliminar .expect() em db.rs:2509"]
-        F10["Fix UX-01: ConfirmDialog em IngredientsPage.tsx"]
-    end
-
-    Pkg1 --> Pkg2
-    Pkg2 --> Pkg3
+    J1["1. Dashboard"] -->|Alerta de Stock Baixo| J2["Compras"]
+    J3["2. Planeador Semanal"] -->|Refeição Agendada| J4["Receitas & Cozinhar"]
+    J5["3. Sugestões de Hoje"] -->|Ingredientes em Falta| J2
+    J6["4. Scanner de Recibo"] -->|Item OCR Desconhecido| J7["Catálogo de Ingredientes"]
+    J8["5. Receita Pro"] -->|Cozinhei Fornada| J9["Stock de Produto Acabado & Venda"]
 ```
+
+#### Jornada 1: Dashboard Diário & Alertas Rápidos
+- **Bloqueio Identificado**: No card de alertas de stock baixo em `DashboardPage.tsx:146` (*ex: "Farinha: 0.2 kg · Min: 1.0 kg"*), o botão *"Adicionar à Lista"* é um atalho cego — apenas navega para `/compras` sem adicionar o ingrediente nem calcular a quantidade necessária (0.8 kg).
+- **Proposta de Melhoria**: Criar um modal/ação rápida que insere diretamente o ingrediente na lista de compras ativa com a quantidade em falta pré-calculada (`min_quantity - quantity`).
+
+#### Jornada 2: Planeamento de Refeições & Calendário
+- **Bloqueio Identificado**:
+  1. Em `CalendarPage.tsx:85`, ao clicar numa refeição planeada para hoje, a ação `handleMealClick` faz `navigate("/receitas")` genérico. O utilizador perde o contexto da refeição e tem de pesquisar a receita novamente na lista.
+  2. No `MealPlannerPage.tsx`, não existe um botão *"Cozinhar esta refeição agora"*. Para abater o stock do jantar de terça-feira, o utilizador tem de sair do planeador, ir a Receitas e cozinhar manualmente.
+- **Proposta de Melhoria**: Permitir abrir a ficha da receita ou executar *"Cozinhei isto"* diretamente a partir do Calendário e do Planeador Semanal.
+
+#### Jornada 3: "O que Cozinhar Hoje" (Recipe Suggester) & Desperdício
+- **Bloqueio Identificado**:
+  1. Em `SuggestionsPage.tsx:49`, o botão *"Cozinhar"* assume sempre `multiplier: 1` de forma rígida, sem deixar escolher o número de porções para a família.
+  2. Para receitas com cobertura parcial (ex.: 70% cobertura, faltam 2 ovos e natas), não há forma de enviar os ingredientes em falta para a lista de compras num clique.
+- **Proposta de Melhoria**: Abrir o modal com seletor de multiplicador/porções e adicionar o botão *"Adicionar ingredientes em falta à Lista de Compras"*.
+
+#### Jornada 4: Scanner de Recibos & Associação Inteligente de Artigos
+- **Fricção Identificada**: Em `ReceiptScannerPage.tsx`, os nomes dos talões de supermercado (*"ARROZ CAROLINO CIGALA 1KG"*, *"LEITE UHT M/GORDO MIMOSA"*) nunca coincidem com os nomes curtos do catálogo (*"Arroz"*, *"Leite"*). Como não há seletor de correspondência (autocomplete dropdown), o utilizador é obrigado a apagar e reescrever o nome à mão para não duplicar ingredientes.
+- **Proposta de Melhoria**: Adicionar um seletor no revisor de artigos do scanner que sugira ingredientes existentes do catálogo quando o nome for ligeiramente diferente.
+
+#### Jornada 5: Histórico de Movimentos & Ficha de Ingrediente
+- **Lacuna Identificada**: O backend possui a função `stock_movements_for_ingredient`, mas na página de Stock (`StockPage.tsx`) o utilizador só vê o número estático da quantidade atual. Não consegue responder a: *"Quando é que comprei este azeite e quanto paguei?"* ou *"Quem fez o ajuste de stock?"*.
+- **Proposta de Melhoria**: Adicionar um drawer ou modal *"Histórico de Movimentos"* ao clicar numa linha de stock.
+
+#### Jornada 6: Fluxo Pro de Produção e Venda
+- **Lacuna Identificada**: Quando um utilizador Pro produz 50 bolachas a partir de uma receita (`yields_product: true`), o saldo do produto final fica guardado em movimentos, mas na página de Receitas não é evidente quantas unidades prontas existem em stock nem há um botão direto *"Vender"* ao lado da receita.
+- **Proposta de Melhoria**: Exibir badge de *"X unidades prontas em stock"* na listagem de receitas para utilizadores Pro com botão de venda rápida.
 
 ---
 
-## 4. Plano de Verificação
+## Estrutura de Execução da Fase 3 (Consolidação & Remediação)
 
-### Testes Automatizados
-```bash
-# Execução da suíte completa de testes Rust no workspace
-nix-shell --run "cargo test --workspace"
+A Fase 3 integrará as correções técnicas e as melhorias de produto selecionadas:
 
-# Contagem de testes de comportamento
-nix-shell --run "cargo test --workspace 2>&1 | grep '^test ' | grep -v '^test result' | grep -vc export_bindings"
-
-# Verificação estática de tipos TypeScript
-npx tsc --noEmit
-
-# Build de produção do frontend
-npm run build
-```
-
-### Verificação Manual
-- Testar sugestão de receitas com grande volume de dados (`suggest_recipes`).
-- Testar ajuste de stock e verificar que `stock_reconcile` não reverte o valor.
-- Testar importação de dados com payloads inválidos e confirmar rejeição limpa.
+1. **Lote 1 (Técnico / Performance & Integridade)**:
+   - Fix `PERF-02` (N+1 em `suggest_recipes`)
+   - Fix `DOM-12` (Funil de movimentos em `stock_upsert`)
+   - Fix `PERF-01`, `PERF-04`, `PERF-05`, `PERF-06` (Índices, pesos aproximados e lazy loading do Tesseract)
+   - Fix `CMD-01` a `CMD-03` (Validações de inputs)
+2. **Lote 2 (Experiência do Utilizador & Pontes de Produto)**:
+   - Atalho real de *"Adicionar à Lista"* no Dashboard a partir de alertas de stock baixo.
+   - Ação direta *"Cozinhar / Ver Receita"* ao clicar em refeições no Calendário.
+   - Multiplicador de porções e envio de ingredientes em falta para a lista de compras em `SuggestionsPage.tsx`.
+   - Seletor de associação de ingredientes no `ReceiptScannerPage.tsx`.
+3. **Lote 3 (Validação & Fecho)**:
+   - Testes automatizados de regressão (`cargo test --workspace`).
+   - Validação de build TypeScript e Vite.
+   - Walkthrough documentado.
