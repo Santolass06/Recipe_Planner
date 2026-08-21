@@ -207,6 +207,8 @@ export const pt = {
       outOfStock: "Esgotado",
       low: "Baixo",
       addToList: "+ Lista",
+      addedToList: "{name} adicionado à lista de compras!",
+      addToListError: "Não foi possível adicionar à lista de compras.",
     },
     week: {
       title: "Próximos 7 dias",
@@ -805,6 +807,9 @@ export const pt = {
     coverage: "{pct}% dos ingredientes em stock",
     usesExpiring: "usa algo a expirar",
     missing: "Falta",
+    addMissingToShopping: "Comprar em falta",
+    missingAddedToShopping: "Lista de compras criada com os ingredientes em falta!",
+    addMissingError: "Não foi possível criar a lista de compras.",
     empty: "Ainda sem sugestões",
     emptyDesc: "Cria receitas e regista stock — as sugestões saem de cruzar as duas coisas.",
     loadError: "Não foi possível carregar as sugestões.",

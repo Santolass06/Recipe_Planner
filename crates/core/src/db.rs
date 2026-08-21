@@ -531,6 +531,9 @@ async fn run_migrations(db: &Database) -> LibsqlResult<()> {
     conn.execute("CREATE INDEX IF NOT EXISTS idx_stock_movements_recipe ON stock_movements(recipe_id)", ()).await?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at)", ()).await?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_stock_movements_production ON stock_movements(production_id)", ()).await?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_stock_movements_type ON stock_movements(movement_type)", ()).await?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_stock_movements_type_created ON stock_movements(movement_type, created_at)", ()).await?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_recipes_created ON recipes(created_at)", ()).await?;
 
     // Migration 021: expiry dates on purchase lots (Sprint S4). The dashboard has
     // counted "expiring soon" since day one against a hardcoded zero — there was
@@ -1578,30 +1581,10 @@ pub async fn get_stock(db: &Database, ingredient_id: i64) -> LibsqlResult<StockI
     row_to_stock_item(&row)
 }
 
-/// Upsert stock
+/// Upsert stock — funilizado através de update_stock_quantity para garantir
+/// que o ajuste gera um movimento e preserva a reconciliação (DOM-12).
 pub async fn upsert_stock(db: &Database, input: StockInput) -> LibsqlResult<StockItem> {
-    let conn = get_conn(db).await?;
-    let mut rows = conn.query(
-        "SELECT name, unit FROM ingredients WHERE id = ?1", params![input.ingredient_id]
-    ).await?;
-    let row = rows.next().await?.ok_or_else(|| libsql::Error::QueryReturnedNoRows)?;
-    let ingredient_name: String = row.get(0)?;
-    let unit_str: String = row.get(1)?;
-    drop(rows);
-
-    conn.execute(
-        "INSERT INTO stock (ingredient_id, ingredient_name, ingredient_unit, quantity, min_quantity, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
-         ON CONFLICT(ingredient_id) DO UPDATE SET
-         quantity = ?4, min_quantity = ?5, updated_at = datetime('now')",
-        params![input.ingredient_id, ingredient_name, unit_str, input.quantity, input.min_quantity],
-    ).await?;
-
-    // Release the connection before get_stock opens its own — libsql's
-    // connection pool can deadlock if a second connect() is called while
-    // the first is still held (manifests as an infinite hang in the UI).
-    drop(conn);
-    get_stock(db, input.ingredient_id).await
+    update_stock_quantity(db, input.ingredient_id, input.quantity, Some(input.min_quantity)).await
 }
 
 /// Set the stock of an ingredient to a counted number.
@@ -2113,6 +2096,16 @@ pub async fn suggest_recipes(db: &Database, limit: u32) -> LibsqlResult<Vec<Reci
         out
     };
 
+    // Pre-load all stock in one query to eliminate N+1 queries in the loop (PERF-02)
+    let stock_map: HashMap<i64, f64> = {
+        let mut rows = conn.query("SELECT ingredient_id, quantity FROM stock", ()).await?;
+        let mut map = HashMap::new();
+        while let Some(row) = rows.next().await? {
+            map.insert(row.get(0)?, row.get(1)?);
+        }
+        map
+    };
+
     let mut suggestions = Vec::new();
     for (recipe_id, recipe_name, category, portions) in recipes {
         let needed = needed_ingredients_for(&conn, &[(recipe_id, 1.0)]).await?;
@@ -2130,16 +2123,7 @@ pub async fn suggest_recipes(db: &Database, limit: u32) -> LibsqlResult<Vec<Reci
             if expiring.contains(&line.ingredient_id) {
                 uses_expiring = true;
             }
-            let available: f64 = {
-                let mut rows = conn.query(
-                    "SELECT quantity FROM stock WHERE ingredient_id = ?1",
-                    params![line.ingredient_id],
-                ).await?;
-                match rows.next().await? {
-                    Some(row) => row.get(0)?,
-                    None => 0.0,
-                }
-            };
+            let available = stock_map.get(&line.ingredient_id).copied().unwrap_or(0.0);
             if available >= line.quantity {
                 covered += 1;
             } else {
@@ -2506,7 +2490,7 @@ async fn needed_ingredients_for(
         }
     }
 
-    Ok(order.into_iter().map(|id| needed.remove(&id).expect("id came from the map")).collect())
+    Ok(order.into_iter().filter_map(|id| needed.remove(&id)).collect())
 }
 
 /// Turn needed quantities into shopping lines: take off what is already in
@@ -2520,20 +2504,22 @@ async fn to_shopping_items(
     conn: &Connection,
     needed: Vec<NeededIngredient>,
 ) -> LibsqlResult<Vec<ShoppingItem>> {
+    if needed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let stock_map: HashMap<i64, f64> = {
+        let mut rows = conn.query("SELECT ingredient_id, quantity FROM stock", ()).await?;
+        let mut map = HashMap::new();
+        while let Some(row) = rows.next().await? {
+            map.insert(row.get(0)?, row.get(1)?);
+        }
+        map
+    };
+
     let mut items = Vec::new();
     for line in needed {
-        let in_stock: f64 = {
-            let mut rows = conn
-                .query(
-                    "SELECT quantity FROM stock WHERE ingredient_id = ?1",
-                    params![line.ingredient_id],
-                )
-                .await?;
-            match rows.next().await? {
-                Some(row) => row.get(0)?,
-                None => 0.0,
-            }
-        };
+        let in_stock = stock_map.get(&line.ingredient_id).copied().unwrap_or(0.0);
 
         let to_buy = (line.quantity - in_stock).max(0.0);
         if to_buy == 0.0 {
@@ -9705,5 +9691,56 @@ mod audit_2026_08 {
             recipe_id: recipe.recipe.id, multiplier: 1.0, yields_product: false, reason: None,
         }).await.expect("cooking a recipe with a clove-unit ingredient must not fail");
         assert!(result.shortfalls.iter().any(|s| s.ingredient_id == alho.id), "no stock was ever added, so it should be short");
+    }
+
+    /// DOM-12: `upsert_stock` previously updated `stock.quantity` directly
+    /// without recording an `Adjustment` movement in `stock_movements`.
+    /// When `stock_reconcile` was called, the adjusted quantity was silently
+    /// reverted to the historical sum of movements.
+    #[tokio::test]
+    async fn upsert_stock_preserves_quantity_across_reconcile() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+
+        // Upsert 750g of stock
+        let stock = upsert_stock(&db, StockInput {
+            ingredient_id: f.id,
+            quantity: 750.0,
+            min_quantity: 100.0,
+        }).await.unwrap();
+        assert_eq!(stock.quantity, 750.0);
+
+        // Run reconcile — must preserve 750.0
+        let reconcile = stock_reconcile(&db).await.unwrap();
+        assert_eq!(reconcile.rows_corrected, 0, "upsert_stock should have left movements and cache consistent");
+
+        let after = get_stock(&db, f.id).await.unwrap();
+        assert_eq!(after.quantity, 750.0, "stock_reconcile must not revert stock set via upsert_stock");
+    }
+
+    /// PERF-02: `suggest_recipes` correctly computes coverage using pre-loaded stock map
+    #[tokio::test]
+    async fn suggest_recipes_computes_accurate_coverage_with_preloaded_stock() {
+        let db = test_db().await;
+        let f = flour(&db, Unit::Gram, 0.002).await;
+        upsert_stock(&db, StockInput {
+            ingredient_id: f.id,
+            quantity: 500.0,
+            min_quantity: 50.0,
+        }).await.unwrap();
+
+        let recipe = create_recipe(&db, RecipeInput {
+            name: "Pão Simples".into(), category: "Padaria".into(), portions: 2,
+            instructions: "Misturar".into(), prep_time_minutes: None, cook_time_minutes: None,
+            tags: vec![], image_base64: None, event_id: None,
+            ingredients: vec![
+                RecipeIngredientInput { ingredient_id: f.id, quantity: 200.0, unit: Unit::Gram },
+            ],
+        }).await.unwrap();
+
+        let suggestions = suggest_recipes(&db, 10).await.unwrap();
+        let s = suggestions.iter().find(|s| s.recipe_id == recipe.recipe.id).unwrap();
+        assert_eq!(s.coverage, 1.0, "500g in stock covers 200g needed");
+        assert!(s.missing.is_empty());
     }
 }

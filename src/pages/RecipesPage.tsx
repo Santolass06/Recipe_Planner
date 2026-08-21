@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { invoke } from "../lib/devInvoke";
 import ImageUpload from "../components/ImageUpload";
 import Modal from "../components/ui/Modal";
@@ -663,6 +663,7 @@ function RecipeModal({
 export default function RecipesPage() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [stock, setStock] = useState<StockItem[]>([]);
@@ -737,14 +738,22 @@ export default function RecipesPage() {
 
   // Dashboard's "Nova receita" quick action navigates here with this flag
   // instead of a dedicated route, since recipe creation is a modal, not a
-  // page — a `/receitas/nova` route never existed to send it to.
   useEffect(() => {
     if ((location.state as { openCreate?: boolean } | null)?.openCreate) {
       openCreate();
       navigate(location.pathname, { replace: true, state: null });
+      return;
+    }
+    const idParam = searchParams.get("id");
+    const stateId = (location.state as { selectId?: number } | null)?.selectId;
+    const targetId = idParam ? parseInt(idParam, 10) : stateId;
+    if (targetId && recipes.some(r => r.id === targetId)) {
+      setSelectedId(targetId);
+      const targetRecipe = recipes.find(r => r.id === targetId);
+      if (targetRecipe) setServings(targetRecipe.portions);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams, location.state, recipes]);
 
   function openEdit(recipe: Recipe) {
     setForm({

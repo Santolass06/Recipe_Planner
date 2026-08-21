@@ -82,10 +82,8 @@ export default function CalendarPage() {
     setSelectedDate(date);
   }
 
-  function handleMealClick(_entry: MealPlanEntryWithRecipe) {
-    // ponytail: no recipe detail route exists yet, only the list — send there
-    // instead of a dead URL. Add /receitas/:id when a detail page exists.
-    navigate("/receitas");
+  function handleMealClick(entry: MealPlanEntryWithRecipe) {
+    navigate(`/receitas?id=${entry.recipe_id}`, { state: { selectId: entry.recipe_id } });
   }
 
   const getMonthDays = useMemo(() => {

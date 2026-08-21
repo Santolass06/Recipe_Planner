@@ -552,9 +552,15 @@ export default function ReceiptScannerPage() {
                 <input
                   value={line.name}
                   onChange={e => updateLine(idx, "name", e.target.value)}
+                  list="catalog-ingredients"
                   placeholder={t("receiptScanner.reviewStep.namePlaceholder")}
                   style={{ border: "1px solid var(--line)", background: "var(--inset)", borderRadius: 7, height: 34, padding: "0 10px", fontFamily: "var(--sans)", fontSize: 13, color: "var(--ink)", width: "100%" }}
                 />
+                <datalist id="catalog-ingredients">
+                  {ingredients.map(i => (
+                    <option key={i.id} value={i.name} />
+                  ))}
+                </datalist>
                 {line.vat_code && (
                   <div className="mono" style={{ fontSize: 9.5, marginTop: 3, color: line.vat_rate != null ? (line.vat_rate <= 13 ? "var(--green)" : "var(--ink-3)") : "var(--amber)" }}>
                     {line.vat_rate != null

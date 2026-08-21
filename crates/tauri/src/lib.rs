@@ -436,6 +436,7 @@ impl AppDb {
     }
 
     pub async fn import_data(&self, data: ImportData) -> Result<ImportResult, String> {
+        data.validate().map_err(user_error)?;
         mise_core::db::import_data(&self.db, data).await.map_err(user_error)
     }
 

@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { createBrowserRouter, redirect } from "react-router-dom";
 import Layout from "./components/Layout";
 import DashboardPage from "./pages/DashboardPage";
@@ -14,11 +15,12 @@ import EventsPage from "./pages/EventsPage";
 import EventDetailPage from "./pages/EventDetailPage";
 import SuggestionsPage from "./pages/SuggestionsPage";
 import ReportsPage from "./pages/ReportsPage";
-import ReceiptScannerPage from "./pages/ReceiptScannerPage";
 import HelpPage from "./pages/HelpPage";
 import { invoke } from "./lib/devInvoke";
 import type { Edition } from "../crates/core/bindings/Edition";
 import { isProEdition } from "./lib/edition";
+
+const ReceiptScannerPage = lazy(() => import("./pages/ReceiptScannerPage"));
 
 /**
  * Loader guard (PRD-02): Pro-only routes redirect to Home when the edition is
@@ -53,7 +55,14 @@ export const router = createBrowserRouter([
       { path: "sugestoes", element: <SuggestionsPage /> },
       { path: "relatorios", element: <ReportsPage /> },
       { path: "fornecedores", element: <SuppliersPage />, loader: requireProLoader },
-      { path: "scanner", element: <ReceiptScannerPage /> },
+      {
+        path: "scanner",
+        element: (
+          <Suspense fallback={<div className="empty" style={{ minHeight: 200 }}>...</div>}>
+            <ReceiptScannerPage />
+          </Suspense>
+        ),
+      },
       { path: "definicoes", element: <SettingsPage /> },
       { path: "ajuda", element: <HelpPage /> },
     ],
