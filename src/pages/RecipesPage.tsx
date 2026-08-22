@@ -4,6 +4,7 @@ import { invoke } from "../lib/devInvoke";
 import ImageUpload from "../components/ImageUpload";
 import Modal from "../components/ui/Modal";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
+import IngredientCombobox from "../components/ui/IngredientCombobox";
 import { useToast } from "../components/ui/Toast";
 import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
@@ -548,22 +549,16 @@ export function RecipeFormContent({ form, setForm, ingredients, onIngredientCrea
                       </div>
                     ) : (
                       <>
-                        <select
-                          className="select"
-                          value={ing.ingredient_id}
-                          onChange={e => {
-                            const v = e.target.value;
-                            if (v === "new") startCreatingIngredient(idx, ing.import_hint);
-                            else updateIngredientRow(idx, "ingredient_id", parseInt(v));
-                          }}
+                        <IngredientCombobox
+                          value={ing.ingredient_id === 0 ? null : ing.ingredient_id}
+                          onChange={id => updateIngredientRow(idx, "ingredient_id", id)}
+                          options={ingredients.map((i: any) => ({ id: i.id, label: i.name, secondary: UNIT_LABELS[i.unit] ?? i.unit }))}
+                          placeholder={t("recipes.form.selectIngredient")}
+                          emptyText={t("common.noResults")}
+                          createNewLabel={t("recipes.form.createNewIngredient")}
+                          onCreateNew={() => startCreatingIngredient(idx, ing.import_hint)}
                           disabled={isView}
-                        >
-                          <option value={0}>{t("recipes.form.selectIngredient")}</option>
-                          <option value="new">{t("recipes.form.createNewIngredient")}</option>
-                          {ingredients.map((i: any) => (
-                            <option key={i.id} value={i.id}>{i.name} ({UNIT_LABELS[i.unit] ?? i.unit})</option>
-                          ))}
-                        </select>
+                        />
                         {!isView && ing.ingredient_id === 0 && ing.import_hint && (
                           <p className="text-4 mono" style={{ marginTop: 4, color: "var(--approx)" }}>
                             {t("recipes.form.importHint", { text: ing.import_hint })}

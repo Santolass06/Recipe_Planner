@@ -195,6 +195,10 @@ const fixtures: Record<string, unknown | ((args: unknown) => unknown)> = {
     return { id: nextDevId++, name: input?.name ?? "Lista de Compras", items: [], total_estimated_cost: 0, created_at: now };
   },
   meal_plans_list: [],
+  // The generic "report_" prefix below returns {} — right for the
+  // object-shaped reports (waste, cost), wrong for this one, which is an
+  // array the page calls .slice()/.map() on directly.
+  report_price_trends: [],
   price_quotes_all: priceQuotes,
   settings_get_all: settingsMap,
   shopping_list_create_from_recipes: shoppingListFromRecipes,

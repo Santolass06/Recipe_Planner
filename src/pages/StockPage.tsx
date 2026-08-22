@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { invoke } from "../lib/devInvoke";
 import { useToast } from "../components/ui/Toast";
 import Modal from "../components/ui/Modal";
+import IngredientCombobox from "../components/ui/IngredientCombobox";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
@@ -134,12 +135,15 @@ function StockModal({
     >
       <div className="field">
         <label className="field-label" htmlFor="stock-ingredient">{t("stock.modal.ingredientLabel")}</label>
-        <select id="stock-ingredient" className="select" value={form.ingredient_id} onChange={e => setForm((f: any) => ({ ...f, ingredient_id: parseInt(e.target.value) }))} disabled={editing}>
-          <option value={0}>{t("stock.modal.selectIngredient")}</option>
-          {ingredients.map((i: any) => (
-            <option key={i.id} value={i.id}>{i.name} ({UNIT_LABELS[i.unit] ?? i.unit})</option>
-          ))}
-        </select>
+        <IngredientCombobox
+          id="stock-ingredient"
+          value={form.ingredient_id === 0 ? null : form.ingredient_id}
+          onChange={id => setForm((f: any) => ({ ...f, ingredient_id: id }))}
+          options={ingredients.map((i: any) => ({ id: i.id, label: i.name, secondary: UNIT_LABELS[i.unit] ?? i.unit }))}
+          placeholder={t("stock.modal.selectIngredient")}
+          emptyText={t("common.noResults")}
+          disabled={editing}
+        />
       </div>
       <div className="field-row" style={{ display: "flex", gap: "var(--space-3)" }}>
         <div className="field" style={{ flex: 1 }}>

@@ -3,6 +3,7 @@ import { invoke } from "../lib/devInvoke";
 import { useToast } from "../components/ui/Toast";
 import PageHeader from "../components/ui/PageHeader";
 import EmptyState from "../components/ui/EmptyState";
+import IngredientCombobox from "../components/ui/IngredientCombobox";
 import { useI18n } from "../i18n";
 import { useEdition, isProEdition } from "../lib/edition";
 import type { CostReport } from "../../crates/core/bindings/CostReport";
@@ -563,17 +564,16 @@ function PricesTab({
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
       {/* Ingredient Selector */}
       <div className="card" style={{ padding: "var(--space-4)" }}>
-        <label className="field-label">{t("reports.pricesTab.ingredientLabel")}</label>
-        <select
-          className="select"
-          value={priceTrendIngredientId ?? ""}
-          onChange={(e) => setPriceTrendIngredientId(Number(e.target.value) || null)}
+        <label className="field-label" htmlFor="report-ingredient">{t("reports.pricesTab.ingredientLabel")}</label>
+        <IngredientCombobox
+          id="report-ingredient"
+          value={priceTrendIngredientId}
+          onChange={(id) => setPriceTrendIngredientId(id || null)}
+          options={ingredients.map((ing) => ({ id: ing.id, label: ing.name }))}
+          placeholder={t("reports.pricesTab.selectIngredient")}
+          emptyText={t("common.noResults")}
           disabled={ingredients.length === 0 || loading}
-        >
-          {ingredients.map((ing) => (
-            <option key={ing.id} value={ing.id}>{ing.name}</option>
-          ))}
-        </select>
+        />
       </div>
 
       {/* Tendência de preços */}

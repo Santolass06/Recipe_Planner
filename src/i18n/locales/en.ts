@@ -24,6 +24,7 @@ export const en = {
     quantity: "Quantity",
     unit: "Unit",
     total: "Total",
+    noResults: "No results",
     placeholderDesc: "This feature will be implemented in the next sprint.",
   },
   nav: {
@@ -1058,6 +1059,7 @@ export const en = {
     },
     pricesTab: {
       ingredientLabel: "Ingredient",
+      selectIngredient: "Select ingredient",
       priceTrend: "Price Trend",
       lastRecords: "{name} · last {count} records",
       defaultIngredient: "Ingredient",
