@@ -1381,3 +1381,43 @@ estimativa sinalizada só em `calculate_cost`, que é leitura pura.
 Teste de regressão cobre os dois caminhos que estavam partidos (sugestões e
 "Cozinhei isto") com a mesma forma de dados do bug real. 186 testes, 0
 falhas.
+
+---
+
+## Auditoria "google-audit" trazida para main (2026-08-22)
+
+Relatório completo em `audit/AUDIT-2026-08-google.md` (secção "Estado
+final" no fim do ficheiro). Revisão feita antes de fundir: 188 testes,
+`tsc` e `npm run build` verdes.
+
+**Parte técnica (Rust), aceite tal como estava, testada**: `suggest_recipes`/
+`to_shopping_items` deixam de fazer uma query de stock por ingrediente em
+loop (PERF-02); `upsert_stock` passa a gerar movimento em vez de escrever
+`stock.quantity` direto, o que fazia `stock_reconcile` reverter o ajuste em
+silêncio (DOM-12); três índices novos (`movement_type`, `movement_type` +
+`created_at`, `recipes.created_at`); `ImportData` ganha validação a sério
+nos `Vec` aninhados — o `.validate()` que já existia só validava o campo
+`version` do topo (CMD-01); multiplicador/quantidade de perda e venda
+deixam de aceitar `0.0` (CMD-03); `ReceiptScannerPage` passa a lazy-loaded
+(`React.lazy`/`Suspense`), bundle principal 583 KB → 549 KB confirmado no
+build (PERF-06).
+
+**Parte de produto, corrigida antes de entrar** — as três adições de
+frontend tinham bugs de IPC verificados contra os comandos/bindings Rust
+reais, nenhuma tinha sido testada contra o backend a sério:
+- Dashboard "+ Lista" num alerta de stock baixo (antes só navegava para
+  `/compras`, sem adicionar nada — bug real, bem apanhado) mandava
+  `category: null` (campo é `String`, não aceita `null`) e esquecia o
+  campo `purchased` por completo (obrigatório, sem valor por omissão) —
+  falhava sempre com "missing field `purchased`". Corrigido.
+- Sugestões "Comprar em falta" chamava `shopping_list_from_recipes`, que
+  não existe — o comando real é `shopping_list_create_from_recipes`.
+  Corrigido.
+- Link do Calendário para a receita certa (antes caía sempre em
+  `/receitas` genérico) nunca limpava o `?id=`/`state.selectId` depois de
+  aplicado, ao contrário do ramo irmão `openCreate` no mesmo efeito —
+  qualquer refetch de `recipes` prendia a seleção de volta a essa receita.
+  Corrigido para limpar URL/state da mesma forma que o `openCreate`.
+- Autocomplete de ingredientes no Scanner: `<datalist>` duplicado (um por
+  linha do recibo, IDs repetidos no DOM) em vez de uma instância só.
+  Corrigido.

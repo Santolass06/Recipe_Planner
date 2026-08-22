@@ -207,6 +207,8 @@ export const en = {
       outOfStock: "Out of stock",
       low: "Low",
       addToList: "+ List",
+      addedToList: "{name} added to shopping list!",
+      addToListError: "Could not add item to shopping list.",
     },
     week: {
       title: "Next 7 days",
@@ -805,6 +807,9 @@ export const en = {
     coverage: "{pct}% of ingredients in stock",
     usesExpiring: "uses something expiring",
     missing: "Missing",
+    addMissingToShopping: "Buy missing items",
+    missingAddedToShopping: "Shopping list created with missing ingredients!",
+    addMissingError: "Could not create shopping list.",
     empty: "No suggestions yet",
     emptyDesc: "Add recipes and record stock — suggestions come from crossing the two.",
     loadError: "Could not load suggestions.",

@@ -544,7 +544,7 @@ pub struct ProductionInput {
     pub recipe_id: i64,
     /// Half a batch is 0.5, two and a half is 2.5. The recipe stays canonical
     /// ("this one yields 40 cookies") and the flexibility lives here.
-    #[validate(range(min = 0.0))]
+    #[validate(range(min = 0.0001))]
     pub multiplier: f64,
     /// `false` cooks (ingredients out, nothing in), `true` produces (ingredients
     /// out, product in).
@@ -588,7 +588,7 @@ pub struct LossInput {
     pub ingredient_id: Option<i64>,
     #[ts(type = "number | null")]
     pub recipe_id: Option<i64>,
-    #[validate(range(min = 0.0))]
+    #[validate(range(min = 0.0001))]
     pub quantity: f64,
     pub unit: Unit,
     #[validate(length(max = 500))]
@@ -605,7 +605,7 @@ pub struct SaleInput {
     pub ingredient_id: Option<i64>,
     #[ts(type = "number | null")]
     pub recipe_id: Option<i64>,
-    #[validate(range(min = 0.0))]
+    #[validate(range(min = 0.0001))]
     pub quantity: f64,
     pub unit: Unit,
     /// The price actually charged, per unit. Written into the movement and never
@@ -855,40 +855,49 @@ pub struct PriceQuote {
 }
 
 /// Import/Export formats
-#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS, Validate)]
 #[ts(export, export_to = "bindings/")]
 pub struct ImportData {
     pub version: u32,
+    #[validate(nested)]
     pub ingredients: Vec<ImportIngredient>,
+    #[validate(nested)]
     pub recipes: Vec<ImportRecipe>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS, Validate)]
 #[ts(export, export_to = "bindings/")]
 pub struct ImportIngredient {
+    #[validate(length(min = 1, max = 200))]
     pub name: String,
     pub unit: Unit,
+    #[validate(range(min = 0.0))]
     pub price_per_unit: f64,
     pub category: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS, Validate)]
 #[ts(export, export_to = "bindings/")]
 pub struct ImportRecipe {
+    #[validate(length(min = 1, max = 200))]
     pub name: String,
     pub category: String,
+    #[validate(range(min = 1))]
     pub portions: u32,
     pub instructions: String,
     pub prep_time_minutes: Option<u32>,
     pub cook_time_minutes: Option<u32>,
     pub tags: Vec<String>,
+    #[validate(nested)]
     pub ingredients: Vec<ImportRecipeIngredient>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type, TS, Validate)]
 #[ts(export, export_to = "bindings/")]
 pub struct ImportRecipeIngredient {
+    #[validate(length(min = 1, max = 200))]
     pub ingredient_name: String,
+    #[validate(range(min = 0.0001))]
     pub quantity: f64,
     pub unit: Unit,
 }

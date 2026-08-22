@@ -63,6 +63,24 @@ export default function SuggestionsPage() {
     }
   }
 
+  async function addMissingToShoppingList(s: RecipeSuggestion) {
+    setBusyId(s.recipe_id);
+    try {
+      await invoke("shopping_list_create_from_recipes", {
+        input: {
+          name: `Compras: ${s.recipe_name}`,
+          recipe_ids: [s.recipe_id],
+          portions_multiplier: 1.0,
+        },
+      });
+      showToast(t("suggestions.missingAddedToShopping"), "ok");
+    } catch (err) {
+      showToast(typeof err === "string" && err ? err : t(errKey(err, "suggestions.addMissingError")), "err");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function writeOff(item: ExpiringItem) {
     setBusyId(item.ingredient_id);
     try {
@@ -175,8 +193,20 @@ export default function SuggestionsPage() {
                   </div>
 
                   {s.missing.length > 0 && (
-                    <div className="text-4 mono" style={{ marginTop: 8 }}>
-                      {t("suggestions.missing")}: {s.missing.map(m => m.ingredient_name).join(", ")}
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10, paddingTop: 8, borderTop: "1px dashed var(--line)", flexWrap: "wrap", gap: 8 }}>
+                      <div className="text-4 mono" style={{ flex: 1, minWidth: 180 }}>
+                        {t("suggestions.missing")}: {s.missing.map(m => m.ingredient_name).join(", ")}
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        style={{ fontSize: 11.5, height: 26, padding: "0 8px", display: "inline-flex", alignItems: "center", gap: 4 }}
+                        onClick={() => addMissingToShoppingList(s)}
+                        disabled={busyId === s.recipe_id}
+                      >
+                        <span className="ms" style={{ fontSize: 14 }} aria-hidden="true">add_shopping_cart</span>
+                        {t("suggestions.addMissingToShopping")}
+                      </button>
                     </div>
                   )}
                 </div>

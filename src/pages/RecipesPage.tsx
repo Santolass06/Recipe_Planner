@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { invoke } from "../lib/devInvoke";
 import ImageUpload from "../components/ImageUpload";
 import Modal from "../components/ui/Modal";
@@ -663,6 +663,7 @@ function RecipeModal({
 export default function RecipesPage() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [stock, setStock] = useState<StockItem[]>([]);
@@ -742,9 +743,23 @@ export default function RecipesPage() {
     if ((location.state as { openCreate?: boolean } | null)?.openCreate) {
       openCreate();
       navigate(location.pathname, { replace: true, state: null });
+      return;
+    }
+    const idParam = searchParams.get("id");
+    const stateId = (location.state as { selectId?: number } | null)?.selectId;
+    const targetId = idParam ? parseInt(idParam, 10) : stateId;
+    if (targetId && recipes.some(r => r.id === targetId)) {
+      setSelectedId(targetId);
+      const targetRecipe = recipes.find(r => r.id === targetId);
+      if (targetRecipe) setServings(targetRecipe.portions);
+      // Clear the URL param/state once applied — otherwise every future
+      // `recipes` refetch (e.g. saving a different recipe) re-runs this
+      // effect, finds the stale id still in the URL, and snaps the
+      // selection back to it, fighting whatever the user picked since.
+      navigate(location.pathname, { replace: true, state: null });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams, location.state, recipes]);
 
   function openEdit(recipe: Recipe) {
     setForm({

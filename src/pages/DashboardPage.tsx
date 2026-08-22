@@ -10,6 +10,7 @@ import type { DashboardStats } from "../../crates/core/bindings/DashboardStats";
 import type { ActivityItem } from "../../crates/core/bindings/ActivityItem";
 import type { MealPlanEntryWithRecipe } from "../../crates/core/bindings/MealPlanEntryWithRecipe";
 import type { StockItemWithIngredient } from "../../crates/core/bindings/StockItemWithIngredient";
+import type { ShoppingList } from "../../crates/core/bindings/ShoppingList";
 import { UNIT_LABELS_SHORT as UNIT_LABELS } from "../lib/units";
 import { errKey } from "../lib/errors";
 
@@ -111,7 +112,17 @@ function KpiRow({ stats, navigateToStock, navigateToShopping, t }: {
   );
 }
 
-function AlertsPanel({ lowStock, navigateToStock, navigateToShopping, t }: { lowStock: StockItemWithIngredient[]; navigateToStock: () => void; navigateToShopping: () => void; t: T }) {
+function AlertsPanel({
+  lowStock,
+  navigateToStock,
+  onAddToList,
+  t,
+}: {
+  lowStock: StockItemWithIngredient[];
+  navigateToStock: () => void;
+  onAddToList: (item: StockItemWithIngredient, e: React.MouseEvent) => void;
+  t: T;
+}) {
   return (
     <div className="card" style={{ padding: 0, overflow: "hidden", cursor: "pointer" }} onClick={navigateToStock}>
       <div style={{ padding: "15px 19px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -143,7 +154,7 @@ function AlertsPanel({ lowStock, navigateToStock, navigateToShopping, t }: { low
                 </div>
                 <StatusPill status={isOut ? "out" : "low"} label={isOut ? t("dashboard.alerts.outOfStock") : t("dashboard.alerts.low")} />
                 <button
-                  onClick={(e) => { e.stopPropagation(); navigateToShopping(); }}
+                  onClick={(e) => onAddToList(item, e)}
                   style={{ border: "1px solid var(--line)", background: "var(--inset)", borderRadius: 7, height: 28, padding: "0 10px", fontSize: "11.5px", fontWeight: 600, color: "var(--ink-2)", cursor: "pointer", fontFamily: "var(--sans)" }}
                 >
                   {t("dashboard.alerts.addToList")}
@@ -335,6 +346,40 @@ export default function DashboardPage() {
   const navigateToShopping = useCallback(() => navigate("/compras"), [navigate]);
   const navigateToRecipes = useCallback(() => navigate("/receitas", { state: { openCreate: true } }), [navigate]);
 
+  const handleAddAlertToList = useCallback(async (item: StockItemWithIngredient, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      let lists = await invoke<ShoppingList[]>("shopping_lists_list");
+      let listId: number;
+      if (!lists || lists.length === 0 || !lists[0].id) {
+        const created = await invoke<ShoppingList>("shopping_list_create", { name: "Lista de Compras" });
+        if (!created.id) throw new Error("List ID missing");
+        listId = created.id;
+      } else {
+        listId = lists[0].id;
+      }
+      const toBuy = Math.max(0.1, item.min_quantity - item.quantity);
+      await invoke("shopping_list_add_item", {
+        listId,
+        input: {
+          ingredient_id: item.ingredient_id,
+          ingredient_name: item.ingredient_name,
+          ingredient_unit: item.ingredient_unit,
+          needed_quantity: item.min_quantity,
+          stock_quantity: item.quantity,
+          to_buy_quantity: toBuy,
+          category: "",
+          estimated_cost: 0,
+          purchased: false,
+          notes: null,
+        },
+      });
+      showToast(t("dashboard.alerts.addedToList", { name: item.ingredient_name }), "ok");
+    } catch (err) {
+      showToast(t(errKey(err, "dashboard.alerts.addToListError")), "err");
+    }
+  }, [showToast, t]);
+
   if (loading) {
     return (
       <div className="content" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "300px" }}>
@@ -365,7 +410,7 @@ export default function DashboardPage() {
       <KpiRow stats={stats} navigateToStock={navigateToStock} navigateToShopping={navigateToShopping} t={t} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1.05fr 1.35fr", gap: 16, marginBottom: 16 }}>
-        <AlertsPanel lowStock={lowStock} navigateToStock={navigateToStock} navigateToShopping={navigateToShopping} t={t} />
+        <AlertsPanel lowStock={lowStock} navigateToStock={navigateToStock} onAddToList={handleAddAlertToList} t={t} />
         <WeekPanel upcomingMeals={upcomingMeals} mealsThisWeek={stats?.meals_this_week ?? 0} navigateToMealPlanner={navigateToMealPlanner} navigateToCalendar={navigateToCalendar} t={t} />
       </div>
 

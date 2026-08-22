@@ -119,3 +119,41 @@ A Fase 3 integrará as correções técnicas e as melhorias de produto seleciona
    - Testes automatizados de regressão (`cargo test --workspace`).
    - Validação de build TypeScript e Vite.
    - Walkthrough documentado.
+
+---
+
+## Estado final (fundido em `main`, 2026-08-22)
+
+**Lote 1 (técnico)**: todos os itens entraram tal como desenhados — `PERF-02`
+(stock pré-carregado em `suggest_recipes`/`to_shopping_items`), `DOM-12`
+(`upsert_stock` funilizado por `update_stock_quantity`), índices novos
+(`PERF-04`/`PERF-05`), `PERF-06` (`ReceiptScannerPage` com `React.lazy`,
+confirmado no build: bundle principal 583 KB → 549 KB), `CMD-01`
+(`ImportData` com `#[validate(nested)]` — o `.validate()` que já existia só
+validava o campo `version`, nada dentro dos `Vec`) e `CMD-03` (`min = 0.0` →
+`0.0001` em multiplicador/quantidade de perda/venda). Dois testes de
+regressão novos (`upsert_stock_preserves_quantity_across_reconcile`,
+`suggest_recipes_computes_accurate_coverage_with_preloaded_stock`). 188
+testes, 0 falhas.
+
+**Lote 2 (produto)**: as três pontes tinham bugs de IPC que as faziam
+falhar sempre em produção — nenhuma tinha sido testada contra os comandos
+Tauri reais antes de dar como pronta. Corrigidos antes de fundir:
+- Dashboard "+ Lista": faltava o campo `purchased` (obrigatório, sem
+  default) e `category` ia como `null` num campo `String`. Corrigido para
+  `purchased: false` / `category: ""`.
+- Sugestões "Comprar em falta": chamava `shopping_list_from_recipes`, um
+  comando que não existe — o real é `shopping_list_create_from_recipes`.
+- Link do Calendário para a receita: o efeito que lê `?id=`/`state.selectId`
+  nunca se limpava depois de aplicado, ao contrário do ramo `openCreate` no
+  mesmo efeito — qualquer refetch de `recipes` voltava a "prender" a
+  seleção. Corrigido para limpar URL/state, igual ao `openCreate`.
+- Autocomplete de ingredientes no Scanner: o `<datalist>` estava dentro do
+  `.map()` das linhas, um por linha (IDs duplicados no DOM). Movido para
+  fora do loop, uma instância só.
+
+**Não implementado desta ronda** (ficam como propostas, não como bugs):
+Jornada 2's "cozinhar diretamente do Planeador Semanal" (só o link do
+Calendário entrou), o seletor de multiplicador de porções em Sugestões
+(Jornada 3), o histórico de movimentos por linha de stock (Jornada 5), e o
+badge/venda rápida de produto acabado na listagem de receitas (Jornada 6).

@@ -536,6 +536,14 @@ export default function ReceiptScannerPage() {
             <span></span>
           </div>
 
+          {/* Shared by every row's name input via list="catalog-ingredients" —
+              one instance, not one per row (duplicate ids are invalid HTML). */}
+          <datalist id="catalog-ingredients">
+            {ingredients.map(i => (
+              <option key={i.id} value={i.name} />
+            ))}
+          </datalist>
+
           {parsedLines.map((line, idx) => {
             const m = matchMeta(line.confidence);
             return (
@@ -552,6 +560,7 @@ export default function ReceiptScannerPage() {
                 <input
                   value={line.name}
                   onChange={e => updateLine(idx, "name", e.target.value)}
+                  list="catalog-ingredients"
                   placeholder={t("receiptScanner.reviewStep.namePlaceholder")}
                   style={{ border: "1px solid var(--line)", background: "var(--inset)", borderRadius: 7, height: 34, padding: "0 10px", fontFamily: "var(--sans)", fontSize: 13, color: "var(--ink)", width: "100%" }}
                 />
