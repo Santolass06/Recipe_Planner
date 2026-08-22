@@ -168,6 +168,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             mise_tauri::commands::seed_demo_data,
             #[cfg(debug_assertions)]
+            mise_tauri::commands::seed_chart_stress_data,
+            #[cfg(debug_assertions)]
             mise_tauri::commands::delete_all_data,
         ])
         .run(tauri::generate_context!())

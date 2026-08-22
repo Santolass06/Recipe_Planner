@@ -3636,6 +3636,70 @@ pub async fn seed_demo_data(db: &Database) -> LibsqlResult<()> {
     Ok(())
 }
 
+/// Dev-only: adds a year of price quotes and loss movements for every
+/// ingredient already in the catalogue, spread across 365 days — for
+/// stress-testing chart rendering (long-range density, label overlap,
+/// axis scaling) in Relatórios (Preços, Desperdício), without wiping the
+/// rest of the data the way `seed_demo_data` does. Requires ingredients to
+/// already exist (run "Gerar dados de demonstração" first if the catalogue
+/// is empty).
+///
+/// Raw inserts with a backdated `created_at`, same trade-off
+/// `seed_demo_data` already accepts for its `stock_purchases` rows: this is
+/// chart test data, not a reconciled current-stock snapshot, so it doesn't
+/// go through `stock_movement_add_tx`/touch `stock.quantity`.
+pub async fn seed_chart_stress_data(db: &Database) -> LibsqlResult<()> {
+    let conn = get_conn(db).await?;
+    let now = Utc::now();
+    let days_ago = |d: i64| (now - chrono::Duration::days(d)).to_rfc3339();
+
+    let ingredients: Vec<(i64, String, f64)> = {
+        let mut rows = conn.query(
+            "SELECT id, unit, price_per_unit FROM ingredients WHERE event_id IS NULL ORDER BY id LIMIT 12",
+            (),
+        ).await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            out.push((row.get(0)?, row.get(1)?, row.get(2)?));
+        }
+        out
+    };
+    if ingredients.is_empty() {
+        return Err(libsql::Error::Misuse(
+            "sem ingredientes no catálogo — corre \"Gerar dados de demonstração\" primeiro".to_string(),
+        ));
+    }
+
+    for (idx, (ing_id, unit, base_price)) in ingredients.iter().enumerate() {
+        let phase = idx as f64;
+
+        // 52 weekly price quotes across a year — the Preços chart's main
+        // stress case (long range, real week-to-week wobble).
+        for week in 0..52_i64 {
+            let wave = (week as f64 * 0.4 + phase).sin() * 0.12;
+            let price = (base_price * (1.0 + wave) * 100.0).round() / 100.0;
+            let supplier = if idx % 2 == 0 { "Fornecedor A" } else { "Fornecedor B" };
+            conn.execute(
+                "INSERT INTO price_quotes (ingredient_id, supplier, price_per_unit, is_promo, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![ing_id, supplier, price, (week % 13 == 0) as i64, days_ago(week * 7)],
+            ).await?;
+        }
+
+        // ~30 loss movements across the same year — the Desperdício chart's
+        // stress case.
+        for i in 0..30_i64 {
+            let qty = 0.05 + (i as f64 * 0.7 + phase).sin().abs() * 0.3;
+            conn.execute(
+                r#"INSERT INTO stock_movements
+                   (ingredient_id, recipe_id, movement_type, quantity, unit, unit_cost, sale_price, reason, production_id, created_by, created_at)
+                   VALUES (?1, NULL, 'loss', ?2, ?3, NULL, NULL, 'Dados de teste (gráficos)', NULL, NULL, ?4)"#,
+                params![ing_id, -qty, unit.clone(), days_ago(i * 12)],
+            ).await?;
+        }
+    }
+    Ok(())
+}
+
 /// List categories
 pub async fn categories_list(db: &Database, kind: Option<&str>) -> LibsqlResult<Vec<Category>> {
     let conn = get_conn(db).await?;
@@ -7191,6 +7255,39 @@ mod fase3_stock_tests {
 
         delete_all_data(&db).await.unwrap();
         assert!(events_list(&db).await.unwrap().is_empty());
+    }
+
+    /// seed_chart_stress_data must refuse an empty catalogue (nothing to
+    /// attach history to) and, given one ingredient, produce a year of
+    /// price quotes and loss movements for it without touching stock.quantity.
+    #[tokio::test]
+    async fn seed_chart_stress_data_needs_ingredients_then_backfills_a_year() {
+        let db = test_db().await;
+        assert!(seed_chart_stress_data(&db).await.is_err(), "should refuse an empty catalogue");
+
+        let ing = create_ingredient(&db, IngredientInput {
+            name: "Farinha".into(), unit: Unit::Kilogram, price_per_unit: 0.7,
+            category_id: None, event_id: None,
+        }).await.unwrap();
+
+        seed_chart_stress_data(&db).await.unwrap();
+
+        let conn = get_conn(&db).await.unwrap();
+        let mut rows = conn.query(
+            "SELECT COUNT(*) FROM price_quotes WHERE ingredient_id = ?1", params![ing.id],
+        ).await.unwrap();
+        let quote_count: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+        assert_eq!(quote_count, 52);
+
+        let mut rows = conn.query(
+            "SELECT COUNT(*) FROM stock_movements WHERE ingredient_id = ?1 AND movement_type = 'loss'", params![ing.id],
+        ).await.unwrap();
+        let loss_count: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+        assert_eq!(loss_count, 30);
+
+        // Raw historical inserts, same trade-off as seed_demo_data's
+        // stock_purchases: no stock row exists to reconcile against yet.
+        assert!(get_stock(&db, ing.id).await.is_err());
     }
 
     #[test]

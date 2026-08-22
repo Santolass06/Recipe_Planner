@@ -318,6 +318,11 @@ impl AppDb {
         mise_core::db::seed_demo_data(&self.db).await.map_err(user_error)
     }
 
+    #[cfg(debug_assertions)]
+    pub async fn seed_chart_stress_data(&self) -> Result<(), String> {
+        mise_core::db::seed_chart_stress_data(&self.db).await.map_err(user_error)
+    }
+
     // Categories
     pub async fn categories_list(&self, kind: Option<&str>) -> Result<Vec<Category>, String> {
         mise_core::db::categories_list(&self.db, kind).await.map_err(user_error)
@@ -1089,6 +1094,14 @@ pub mod commands {
         db: tauri::State<'_, crate::AppDb>,
     ) -> Result<(), String> {
         db.seed_demo_data().await.map_err(user_error)
+    }
+
+    #[cfg(debug_assertions)]
+    #[tauri::command]
+    pub async fn seed_chart_stress_data(
+        db: tauri::State<'_, crate::AppDb>,
+    ) -> Result<(), String> {
+        db.seed_chart_stress_data().await.map_err(user_error)
     }
 
     // Categories

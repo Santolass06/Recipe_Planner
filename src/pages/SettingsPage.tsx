@@ -389,6 +389,19 @@ export default function SettingsPage() {
     }
   };
 
+  const handleSeedChartStressData = async () => {
+    setSaving(true);
+    try {
+      await invoke("seed_chart_stress_data");
+      setTimeout(() => window.location.reload(), 1200);
+      showToast(t("settings.chartStressDataSuccess"), "ok");
+    } catch (e) {
+      showToast(typeof e === "string" && e ? e : t(errKey(e, "settings.chartStressDataError")), "err");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleReportImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -784,6 +797,16 @@ export default function SettingsPage() {
                   </p>
                   <button className="btn btn-primary" onClick={handleSeedDemoData} disabled={saving}>
                     {t("settings.generateDemoDataBtn")}
+                  </button>
+                </div>
+
+                <div style={{ borderTop: "1px solid var(--border)", paddingTop: "var(--space-6)" }}>
+                  <h3 className="text-2" style={{ marginBottom: "var(--space-3)" }}>{t("settings.chartStressDataTitle")}</h3>
+                  <p className="text-3" style={{ marginBottom: "var(--space-4)", lineHeight: 1.6 }}>
+                    {t("settings.chartStressDataDesc")}
+                  </p>
+                  <button className="btn btn-secondary" onClick={handleSeedChartStressData} disabled={saving}>
+                    {t("settings.generateChartStressDataBtn")}
                   </button>
                 </div>
 
