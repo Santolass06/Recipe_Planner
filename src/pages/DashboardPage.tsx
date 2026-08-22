@@ -352,7 +352,7 @@ export default function DashboardPage() {
       let lists = await invoke<ShoppingList[]>("shopping_lists_list");
       let listId: number;
       if (!lists || lists.length === 0 || !lists[0].id) {
-        const created = await invoke<ShoppingList>("shopping_list_create", { name: "Lista de Compras" });
+        const created = await invoke<ShoppingList>("shopping_list_create", { name: "Lista de Compras", items: [] });
         if (!created.id) throw new Error("List ID missing");
         listId = created.id;
       } else {

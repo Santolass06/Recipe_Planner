@@ -175,7 +175,7 @@ function shoppingListFromRecipes(args: unknown): unknown {
 // app, so the Family/Pro gating (PRD-02) is coherent and testable in the
 // browser preview: toggling the edition in SettingsPage reflects everywhere.
 let devEdition: "family" | "pro" = "family";
-let nextDevIngredientId = 1000;
+let nextDevId = 1000;
 const fixtures: Record<string, unknown | ((args: unknown) => unknown)> = {
   dashboard_stats: dashboardStats,
   dashboard_recent_activity: activity,
@@ -186,6 +186,14 @@ const fixtures: Record<string, unknown | ((args: unknown) => unknown)> = {
   recipes_list: recipes,
   suppliers_list: suppliers,
   shopping_lists_list: [],
+  // Without this fixture, the generic "*_create" -> undefined fallback made
+  // the browser preview crash reading `.id` off the result — the Dashboard's
+  // "+ Lista" quick-add reads the created list's id, unlike most *_create
+  // callers which discard the return value.
+  shopping_list_create: (args: unknown) => {
+    const input = args as { name?: string } | undefined;
+    return { id: nextDevId++, name: input?.name ?? "Lista de Compras", items: [], total_estimated_cost: 0, created_at: now };
+  },
   meal_plans_list: [],
   price_quotes_all: priceQuotes,
   settings_get_all: settingsMap,
@@ -237,7 +245,7 @@ const fixtures: Record<string, unknown | ((args: unknown) => unknown)> = {
   ingredient_create: (args: unknown) => {
     const input = (args as { input?: { name?: string; unit?: string; price_per_unit?: number; category_id?: number | null } })?.input;
     const created = ingredient(
-      nextDevIngredientId++,
+      nextDevId++,
       input?.name ?? "Novo ingrediente",
       input?.unit ?? "gram",
       input?.price_per_unit ?? 0,
